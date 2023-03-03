@@ -1,0 +1,22 @@
+[tool.poetry]
+name = "raster2dggs"
+version = "0.1.0"
+description = ""
+authors = ["James Ardo <ardoj@landcareresearch.co.nz>"]
+maintainers = ["Richard Law <lawr@landcareresearch.co.nz>"]
+readme = "README.md"
+
+[tool.poetry.dependencies]
+python = "^3.10"
+gdal = "^3.6.2"
+geopandas = "^0.12.2"
+h3pandas = "^0.2.3"
+rioxarray = "^0.13.4"
+dask-geopandas = "^0.3.0"
+pyarrow = "^11.0.0"
+dask = "^2023.3.0"
+
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
