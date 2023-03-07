@@ -36,6 +36,46 @@ tests = ["attrs[tests-no-zope]", "zope.interface"]
 tests-no-zope = ["cloudpickle", "cloudpickle", "hypothesis", "hypothesis", "mypy (>=0.971,<0.990)", "mypy (>=0.971,<0.990)", "pympler", "pympler", "pytest (>=4.3.0)", "pytest (>=4.3.0)", "pytest-mypy-plugins", "pytest-mypy-plugins", "pytest-xdist[psutil]", "pytest-xdist[psutil]"]
 
 [[package]]
+name = "boto3"
+version = "1.26.85"
+description = "The AWS SDK for Python"
+category = "main"
+optional = false
+python-versions = ">= 3.7"
+files = [
+    {file = "boto3-1.26.85-py3-none-any.whl", hash = "sha256:9afe405c71bfd13fa958637caec9dc91f7009b221a7d87d4b067fa6f262aab67"},
+    {file = "boto3-1.26.85.tar.gz", hash = "sha256:ae106bdc5ac6e693100a2dba5ea1c9cfa6e556f6f39944fa8b3af6b104eeccf3"},
+]
+
+[package.dependencies]
+botocore = ">=1.29.85,<1.30.0"
+jmespath = ">=0.7.1,<2.0.0"
+s3transfer = ">=0.6.0,<0.7.0"
+
+[package.extras]
+crt = ["botocore[crt] (>=1.21.0,<2.0a0)"]
+
+[[package]]
+name = "botocore"
+version = "1.29.85"
+description = "Low-level, data-driven core of boto 3."
+category = "main"
+optional = false
+python-versions = ">= 3.7"
+files = [
+    {file = "botocore-1.29.85-py3-none-any.whl", hash = "sha256:1f2d1f7e3b41f8c9cc5576be16d86552a46724fd5d15f38a50c002a957ac43ff"},
+    {file = "botocore-1.29.85.tar.gz", hash = "sha256:cb7e7e88a09ba807956643849b3a9b4e343a2c117838c0be1ca660052f69bcd2"},
+]
+
+[package.dependencies]
+jmespath = ">=0.7.1,<2.0.0"
+python-dateutil = ">=2.1,<3.0.0"
+urllib3 = ">=1.25.4,<1.27"
+
+[package.extras]
+crt = ["awscrt (==0.16.9)"]
+
+[[package]]
 name = "certifi"
 version = "2022.12.7"
 description = "Python package for providing Mozilla's CA Bundle."
@@ -443,6 +483,18 @@ MarkupSafe = ">=2.0"
 
 [package.extras]
 i18n = ["Babel (>=2.7)"]
+
+[[package]]
+name = "jmespath"
+version = "1.0.1"
+description = "JSON Matching Expressions"
+category = "main"
+optional = false
+python-versions = ">=3.7"
+files = [
+    {file = "jmespath-1.0.1-py3-none-any.whl", hash = "sha256:02e2e4cc71b5bcab88332eebf907519190dd9e6e82107fa7f83b1003a6252980"},
+    {file = "jmespath-1.0.1.tar.gz", hash = "sha256:90261b206d6defd58fdd5e85f478bf633a2901798906be2ad389150c5c60edbe"},
+]
 
 [[package]]
 name = "locket"
@@ -1032,6 +1084,24 @@ interp = ["scipy"]
 test = ["dask", "netcdf4", "pytest (>=3.6)", "pytest-cov", "pytest-timeout"]
 
 [[package]]
+name = "s3transfer"
+version = "0.6.0"
+description = "An Amazon S3 Transfer Manager"
+category = "main"
+optional = false
+python-versions = ">= 3.7"
+files = [
+    {file = "s3transfer-0.6.0-py3-none-any.whl", hash = "sha256:06176b74f3a15f61f1b4f25a1fc29a4429040b7647133a463da8fa5bd28d5ecd"},
+    {file = "s3transfer-0.6.0.tar.gz", hash = "sha256:2ed07d3866f523cc561bf4a00fc5535827981b117dd7876f036b0c1aca42c947"},
+]
+
+[package.dependencies]
+botocore = ">=1.12.36,<2.0a.0"
+
+[package.extras]
+crt = ["botocore[crt] (>=1.20.29,<2.0a.0)"]
+
+[[package]]
 name = "setuptools"
 version = "67.4.0"
 description = "Easily download, build, install, upgrade, and uninstall Python packages"
@@ -1275,4 +1345,4 @@ heapdict = "*"
 [metadata]
 lock-version = "2.0"
 python-versions = "^3.10"
-content-hash = "1351a1c35a1167e54f0cf8251879765847960dfe80c126711c913b8b970e500d"
+content-hash = "5bbb6726443f2569f17a5e8b8e36dd666477dba39be6f9dd24f06d64dd275177"
