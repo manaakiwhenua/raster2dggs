@@ -24,10 +24,10 @@ import gc
 
 gc.disable()
 
-f = 'C:/Users/ArdoJ/Documents/NRC LUM/H3hex/codes/test'
+f = 'C:/Users/ArdoJ/Documents/NRC LUM/H3hex/codes/raster_codes/test'
 Out= "test_sorted"   
 
-ddf=dd.read_parquet(f)
+ddf=dd.read_parquet(f).reset_index()
 
 ddf= ddf.set_index('h3_05')                             #MAKE SURE YOU SET THE RESOLUTION CORRECTLY
 

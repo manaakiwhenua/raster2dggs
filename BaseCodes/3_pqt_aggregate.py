@@ -21,8 +21,8 @@ import numpy as np
 
 
 #DEFINE FILE INPUT AND PARQUET OUTPUT
-f = 'C:/Users/ArdoJ/Documents/NRC LUM/H3hex/codes/test_sorted'
-Out= "test_aggregated_pqt"
+f = 'C:/Users/ArdoJ/Documents/NRC LUM/H3hex/codes/raster_codes/test_sorted'
+Out= '_aggregated_pqt'
 
 H3res= 13 
 
