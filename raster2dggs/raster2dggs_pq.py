@@ -14,8 +14,6 @@ from urllib.parse import urlparse
 import click
 import dask
 import dask.dataframe as dd
-import h3
-from h3 import h3
 import h3pandas # Necessary import despite lack of explicit use
 import pandas as pd
 import pyarrow as pa
