@@ -1,18 +1,15 @@
-"""
-Ingest raster images and index it to the H3 DGGS.
-Output is an Apache Parquet data store, with partitions equivalent to windows of the input raster.
-"""
 import concurrent.futures
-import gc
+import errno
 import logging
 import multiprocessing as mp
 from numbers import Number
 import numpy as np
+import os
 from pathlib import Path
-# import shutil
 import tempfile
 import threading
 from typing import Tuple, Union
+from urllib.parse import urlparse
 
 import click
 import dask
@@ -27,6 +24,7 @@ import rasterio as rio
 from rasterio import crs
 from rasterio.enums import Resampling
 from rasterio.vrt import WarpedVRT
+from rasterio.warp import calculate_default_transform
 import rioxarray
 import xarray as xr
 
@@ -48,6 +46,7 @@ def _h3func(sdf : xr.DataArray, resolution : int, parent_resolution : int, nodat
     '''
     sdf : pd.DataFrame = sdf.to_dataframe().drop(columns=['spatial_ref']).reset_index()
     subset : pd.DataFrame = sdf.dropna()
+    subset = subset[subset.value != nodata]
     subset = pd.pivot_table(subset, values=DEFAULT_NAME, index=['x','y'], columns=['band']).reset_index()
     # Primary H3 index
     h3index = subset.h3.geo_to_h3(resolution, lat_col='y', lng_col='x').drop(columns= ['x','y'])
@@ -62,48 +61,61 @@ def _h3func(sdf : xr.DataArray, resolution : int, parent_resolution : int, nodat
     h3index = h3index.rename(columns=band_names)
     return pa.Table.from_pandas(h3index)
 
-def _initial_index(raster_input: Union[Path, str], resolution: int, compression: str, aggfunc: str, decimals: int, max_workers: int, warp_args: dict)  -> tempfile.TemporaryDirectory:
+def _initial_index(raster_input: Union[Path, str], output: Path, resolution: int, upscale_factor: int, compression: str, aggfunc: str, decimals: int, overwrite: bool, max_workers: int, warp_args: dict)  -> tempfile.TemporaryDirectory:
 
     parent_resolution = _get_parent_res(resolution)
     LOGGER.info("Indexing at H3 resolution %d, parent resolution %d", resolution, parent_resolution)
 
     with tempfile.TemporaryDirectory() as tmpdir:
-        LOGGER.info(f'Create temporary directory {tmpdir}')
+        LOGGER.debug(f'Create temporary directory {tmpdir}')
 
-        with rio.open(raster_input) as src:
-            LOGGER.debug('Source CRS: %s', src.crs)
-            # VRT used to avoid additional disk use given the potential for reprojection to 4326 prior to H# indexing
-            band_names = src.descriptions
-            with WarpedVRT(src, src_crs=src.crs, **warp_args) as vrt:
-                LOGGER.info('VRT CRS: %s', vrt.crs)
-                da : xr.Dataset = rioxarray.open_rasterio(
-                    vrt,
-                    lock=dask.utils.SerializableLock(),
-                    masked=True,
-                    default_name=DEFAULT_NAME,
-                    band_as_variable=False # Using True will break VRT warping https://github.com/corteva/rioxarray/issues/644
-                ).chunk(
-                    **{'y':'auto', 'x':'auto'}
-                )
+        with rio.Env(CHECK_WITH_INVERT_PROJ=True): # https://rasterio.readthedocs.io/en/latest/api/rasterio.warp.html#rasterio.warp.calculate_default_transform
+            with rio.open(raster_input) as src:
+                LOGGER.debug('Source CRS: %s', src.crs)
+                # VRT used to avoid additional disk use given the potential for reprojection to 4326 prior to H# indexing
+                band_names = src.descriptions
 
-                windows = [window for _, window in vrt.block_windows()][:10]
-                LOGGER.debug('%d windows (the same number of partitions will be created)', len(windows))
-            
-                write_lock = threading.Lock()
+                if upscale_factor > 1:
+                    dst_crs = warp_args['crs']
+                    transform, width, height = calculate_default_transform(
+                        src.crs, dst_crs,
+                        src.width, src.height, *src.bounds,
+                        dst_width=src.width*upscale_factor, dst_height=src.height*upscale_factor
+                    )
+                    upsample_args = dict({'transform': transform, 'width': width, 'height': height})
+                    LOGGER.debug(upsample_args)
+                else:
+                    upsample_args = dict({})
+                
+                with WarpedVRT(src, src_crs=src.crs, **warp_args, **upsample_args) as vrt:
+                    LOGGER.info('VRT CRS: %s', vrt.crs)
+                    da : xr.Dataset = rioxarray.open_rasterio(
+                        vrt,
+                        lock=dask.utils.SerializableLock(),
+                        masked=True,
+                        default_name=DEFAULT_NAME,
+                    ).chunk(
+                        **{'y':'auto', 'x':'auto'}
+                    )
 
-                def process(window):
-                    sdf = da.rio.isel_window(window)
+                    windows = [window for _, window in vrt.block_windows()]
+                    LOGGER.debug('%d windows (the same number of partitions will be created)', len(windows))
+                
+                    write_lock = threading.Lock()
+
+                    def process(window):
+                        sdf = da.rio.isel_window(window)
+                            
+                        result = _h3func(sdf, resolution, parent_resolution, vrt.nodata, band_labels=band_names)
                         
-                    result = _h3func(sdf, resolution, parent_resolution, vrt.nodata, band_labels=band_names)
-                    
-                    with write_lock:
-                        pq.write_to_dataset(result, root_path=tmpdir, compression=compression)
+                        with write_lock:
+                            pq.write_to_dataset(result, root_path=tmpdir, compression=compression)
 
-                with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
-                    executor.map(process, windows)
+                    with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
+                        executor.map(process, windows)
 
-        LOGGER.info('Stage 1 (primary indexing) complete')
-        return _address_boundary_issues(tmpdir, resolution, compression, aggfunc, decimals)
+            LOGGER.info('Stage 1 (primary indexing) complete')
+            return _address_boundary_issues(tmpdir, output, resolution, compression, aggfunc, decimals, overwrite)
 
 def _h3_parent_agg(df, resolution: int, aggfunc: str, decimals: int):
     if decimals > 0:
@@ -111,16 +123,11 @@ def _h3_parent_agg(df, resolution: int, aggfunc: str, decimals: int):
     else:
         return df.groupby(f'h3_{resolution:02}').agg(aggfunc).round(decimals).astype(int)
 
-def _address_boundary_issues(pq_input: tempfile.TemporaryDirectory, resolution: int, compression: str, aggfunc: str, decimals: int) -> Path:
+def _address_boundary_issues(pq_input: tempfile.TemporaryDirectory, output: Path, resolution: int, compression: str, aggfunc: str, decimals: int, overwrite: bool) -> Path:
 
     parent_resolution = _get_parent_res(resolution)
 
-    # TODO use CLI for output location
-    # TODO CLI option for overwrite, else error if already exists
-    output_path_aggregated = Path(f'./tests/data/output/{resolution}/step-3')
-    output_path_aggregated.mkdir(parents=True, exist_ok=True)
-
-    LOGGER.info('Reading Stage 1 output and setting index for parent-based partitioning')
+    LOGGER.info(f'Reading Stage 1 output ({pq_input}) and setting index for parent-based partitioning')
     ddf = dd.read_parquet(
         pq_input
     ).set_index( # Set index as parent cell
@@ -131,42 +138,58 @@ def _address_boundary_issues(pq_input: tempfile.TemporaryDirectory, resolution: 
     uniqueh3 = sorted(list(ddf.index.unique().compute()))
 
     LOGGER.info('Repartitioning into %d partitions, based on parent cells', len(uniqueh3) + 1)
-    LOGGER.info('Aggregating cell values where duplicates exist')
+    LOGGER.info('Aggregating cell values where conflicts exist')
 
     ddf = ddf.repartition( # See "notes" on why divisions repeats last item https://docs.dask.org/en/stable/generated/dask.dataframe.DataFrame.repartition.html
         divisions=(uniqueh3 + [uniqueh3[-1]])
     ).map_partitions(
         _h3_parent_agg, resolution, aggfunc, decimals
     ).to_parquet(
-        output_path_aggregated, engine='pyarrow', compression=compression
+        output,
+        overwrite=overwrite,
+        engine='pyarrow',
+        write_index=True,
+        append=False,
+        compression=compression,
     )
 
     LOGGER.info('Stage 2 (parent cell repartioning) and Stage 3 (aggregation) complete')
 
-    return output_path_aggregated
+    return output
 
-def _h3index(raster_input: Union[Path, str], resolution: int, compression: str, aggfunc: str, decimals: int, max_workers: int, warp_args: dict) -> Path:
-    return _initial_index(raster_input, int(resolution), compression, aggfunc, decimals, max_workers, warp_args)
+def _h3index(raster_input: Union[Path, str], output: Union[Path, str], resolution: int, upscale_factor: int, compression: str, aggfunc: str, decimals: int, overwrite: bool, max_workers: int, warp_args: dict) -> Path:
+    return _initial_index(raster_input, output, int(resolution), upscale_factor, compression, aggfunc, decimals, overwrite, max_workers, warp_args)
 
 @click.command(context_settings={'show_default': True})
-@click.argument("raster_input", type=str)
+@click.argument("raster_input", type=click.Path())#, help='Input raster data. Prepend with protocol like s3:// or hdfs:// for remote data.')
+@click.argument("output_directory", type=click.Path())#, help='Destination directory for data. Prepend with protocol like s3:// or hdfs:// for remote data.')
 @click.option('-r', '--resolution', required=True, type=click.Choice(list(map(str, range(MIN_H3, MAX_H3+1)))), help='H3 resolution to index')
+@click.option('-u', '--upscale', default=1, type=int, help='Upscaling factor, used to upsample input data on the fly; useful when the raster resolution is lower than the target DGGS resolution. Default (1) applies no upscaling. The resampling method controls interpolation.')
 @click.option('-c', '--compression', default='snappy', type=click.Choice(['snappy', 'gzip', 'zstd']), help='Name of the compression to use when writing to Parquet.')
 @click.option('-t', '--threads', default=(mp.cpu_count() - 1), help='Number of threads to use when running in parallel')
 @click.option('-a', '--aggfunc', default='mean', type=click.Choice(['count', 'mean', 'sum', 'prod', 'std', 'var', 'min', 'max', 'median']), help='Numpy aggregate function to apply when aggregating cell values after DGGS indexing, in case of multiple pixels mapping to the same DGGS cell.')
 @click.option('-d', '--decimals', default=1, type=int, help='Number of decimal places to round values when aggregating. Use 0 for integer output.')
+@click.option('-o', '--overwrite', is_flag=True)
 @click.option('--warp_mem_limit', default=12000, type=int, help='Input raster may be warped to EPSG:4326 if it is not already in this CRS. This setting specifies the warp operation\'s memory limit in MB.')
 @click.option('--resampling', default='average', type=click.Choice(Resampling._member_names_), help='Input raster may be warped to EPSG:4326 if it is not already in this CRS. This setting specifies the warp resampling algorithm.')
-def raster2dggs(raster_input: Path, resolution: str, compression: str, threads: int, aggfunc: str, decimals: int, warp_mem_limit: int, resampling: str):
-    
-    _path = Path(raster_input)
-    if not _path.exists() or _path.is_dir():
-        LOGGER.warning(f'Input raster {raster_input} does not exist, or is a directory; assuming it is a remote URI')
+def raster2dggs(raster_input: Union[str, Path], output_directory: Union[str, Path], resolution: str, upscale: int, compression: str, threads: int, aggfunc: str, decimals: int, overwrite: bool, warp_mem_limit: int, resampling: str):
+    '''
+    Ingest a raster image and index it to the H3 DGGS.
+
+    RASTER_INPUT is the path to input raster data; prepend with protocol like s3:// or hdfs:// for remote data.
+    OUTPUT_DIRECTORY should be a directory, not a file, as it will be the write location for an Apache Parquet data store, with partitions equivalent to parent cells of target cells at a fixed offset. However, this can also be remote (use the appropriate prefix, e.g. s3://).
+    '''
+    if not Path(raster_input).exists():
+        if not urlparse(raster_input).scheme:
+            LOGGER.warning(f'Input raster {raster_input} does not exist, and is not recognised as a remote URI')
+            raise FileNotFoundError(errno.ENOENT, os.strerror(errno.ENOENT), raster_input)
+        # Quacks like a path to remote data
+        raster_input = str(raster_input)
     else:
-        raster_input = _path
+        raster_input = Path(raster_input)
     warp_args : dict = {
         'resampling': Resampling._member_map_[resampling],
         'crs': crs.CRS.from_epsg(4326), # Input raster must be converted to WGS84 (4326) for H3 indexing
         'warp_mem_limit': warp_mem_limit
     }
-    _h3index(raster_input, int(resolution), compression, aggfunc, decimals, threads, warp_args)
+    _h3index(raster_input, output_directory, int(resolution), upscale, compression, aggfunc, decimals, overwrite, threads, warp_args)
