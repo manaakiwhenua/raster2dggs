@@ -59,8 +59,8 @@ Generally, follow the instructions for basic usage of [`poetry`](https://python-
 
 In brief, to get started:
 
-    - Create the virtual environment with `poetry init`. This will install necessary dependencies. However there is an external dependency on GDAL 3.6+ (including development headers, i.e. `libgdal-dev`).
-    - Subsequently, the virtual environment can be re-activated with `poetry shell`.
+- Create the virtual environment with `poetry init`. This will install necessary dependencies. However there is an external dependency on GDAL 3.6+ (including development headers, i.e. `libgdal-dev`).
+- Subsequently, the virtual environment can be re-activated with `poetry shell`.
 
 ### Testing
 
