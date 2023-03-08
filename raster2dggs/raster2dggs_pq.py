@@ -34,6 +34,17 @@ LOGGER = logging.getLogger(__name__)
 MIN_H3, MAX_H3 = 0, 15
 DEFAULT_NAME : str = 'value'
 
+DEFAULTS = {
+    'upscale': 1,
+    'compression': 'snappy',
+    'threads': (mp.cpu_count() - 1),
+    'aggfunc': 'mean',
+    'decimals': 1,
+    'warp_mem_limit': 12000,
+    'resampling': 'average'
+}
+
+
 def _get_parent_res(resolution : int) -> int:
     return max(MIN_H3, resolution - 8)
 
@@ -61,7 +72,7 @@ def _h3func(sdf : xr.DataArray, resolution : int, parent_resolution : int, nodat
     h3index = h3index.rename(columns=band_names)
     return pa.Table.from_pandas(h3index)
 
-def _initial_index(raster_input: Union[Path, str], output: Path, resolution: int, upscale_factor: int, compression: str, aggfunc: str, decimals: int, overwrite: bool, max_workers: int, warp_args: dict)  -> tempfile.TemporaryDirectory:
+def _initial_index(raster_input: Union[Path, str], output: Path, resolution: int, warp_args: dict, **kwargs)  -> tempfile.TemporaryDirectory:
 
     parent_resolution = _get_parent_res(resolution)
     LOGGER.info("Indexing at H3 resolution %d, parent resolution %d", resolution, parent_resolution)
@@ -72,15 +83,17 @@ def _initial_index(raster_input: Union[Path, str], output: Path, resolution: int
         with rio.Env(CHECK_WITH_INVERT_PROJ=True): # https://rasterio.readthedocs.io/en/latest/api/rasterio.warp.html#rasterio.warp.calculate_default_transform
             with rio.open(raster_input) as src:
                 LOGGER.debug('Source CRS: %s', src.crs)
-                # VRT used to avoid additional disk use given the potential for reprojection to 4326 prior to H# indexing
+                # VRT used to avoid additional disk use given the potential for reprojection to 4326 prior to H3 indexing
                 band_names = src.descriptions
 
+                upscale_factor = kwargs['upscale']
                 if upscale_factor > 1:
                     dst_crs = warp_args['crs']
                     transform, width, height = calculate_default_transform(
                         src.crs, dst_crs,
                         src.width, src.height, *src.bounds,
-                        dst_width=src.width*upscale_factor, dst_height=src.height*upscale_factor
+                        dst_width=src.width * upscale_factor,
+                        dst_height=src.height * upscale_factor
                     )
                     upsample_args = dict({'transform': transform, 'width': width, 'height': height})
                     LOGGER.debug(upsample_args)
@@ -109,13 +122,13 @@ def _initial_index(raster_input: Union[Path, str], output: Path, resolution: int
                         result = _h3func(sdf, resolution, parent_resolution, vrt.nodata, band_labels=band_names)
                         
                         with write_lock:
-                            pq.write_to_dataset(result, root_path=tmpdir, compression=compression)
+                            pq.write_to_dataset(result, root_path=tmpdir, compression=kwargs['compression'])
 
-                    with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
+                    with concurrent.futures.ThreadPoolExecutor(max_workers=kwargs['threads']) as executor:
                         executor.map(process, windows)
 
             LOGGER.info('Stage 1 (primary indexing) complete')
-            return _address_boundary_issues(tmpdir, output, resolution, compression, aggfunc, decimals, overwrite)
+            return _address_boundary_issues(tmpdir, output, resolution, **kwargs)
 
 def _h3_parent_agg(df, resolution: int, aggfunc: str, decimals: int):
     if decimals > 0:
@@ -123,7 +136,7 @@ def _h3_parent_agg(df, resolution: int, aggfunc: str, decimals: int):
     else:
         return df.groupby(f'h3_{resolution:02}').agg(aggfunc).round(decimals).astype(int)
 
-def _address_boundary_issues(pq_input: tempfile.TemporaryDirectory, output: Path, resolution: int, compression: str, aggfunc: str, decimals: int, overwrite: bool) -> Path:
+def _address_boundary_issues(pq_input: tempfile.TemporaryDirectory, output: Path, resolution: int, **kwargs) -> Path:
 
     parent_resolution = _get_parent_res(resolution)
 
@@ -140,38 +153,38 @@ def _address_boundary_issues(pq_input: tempfile.TemporaryDirectory, output: Path
     LOGGER.info('Repartitioning into %d partitions, based on parent cells', len(uniqueh3) + 1)
     LOGGER.info('Aggregating cell values where conflicts exist')
 
-    ddf = ddf.repartition( # See "notes" on why divisions repeats last item https://docs.dask.org/en/stable/generated/dask.dataframe.DataFrame.repartition.html
+    ddf = ddf.repartition( # See "notes" on why divisions expects repetition of the last item https://docs.dask.org/en/stable/generated/dask.dataframe.DataFrame.repartition.html
         divisions=(uniqueh3 + [uniqueh3[-1]])
     ).map_partitions(
-        _h3_parent_agg, resolution, aggfunc, decimals
+        _h3_parent_agg, resolution, kwargs['aggfunc'], kwargs['decimals']
     ).to_parquet(
         output,
-        overwrite=overwrite,
+        overwrite=kwargs['overwrite'],
         engine='pyarrow',
         write_index=True,
         append=False,
-        compression=compression,
+        compression=kwargs['compression'],
     )
 
     LOGGER.info('Stage 2 (parent cell repartioning) and Stage 3 (aggregation) complete')
 
     return output
 
-def _h3index(raster_input: Union[Path, str], output: Union[Path, str], resolution: int, upscale_factor: int, compression: str, aggfunc: str, decimals: int, overwrite: bool, max_workers: int, warp_args: dict) -> Path:
-    return _initial_index(raster_input, output, int(resolution), upscale_factor, compression, aggfunc, decimals, overwrite, max_workers, warp_args)
+def _h3index(raster_input: Union[Path, str], output: Union[Path, str], resolution, warp_args: dict, **kwargs) -> Path:
+    return _initial_index(raster_input, output, int(resolution), warp_args, **kwargs)
 
 @click.command(context_settings={'show_default': True})
-@click.argument("raster_input", type=click.Path())#, help='Input raster data. Prepend with protocol like s3:// or hdfs:// for remote data.')
-@click.argument("output_directory", type=click.Path())#, help='Destination directory for data. Prepend with protocol like s3:// or hdfs:// for remote data.')
+@click.argument("raster_input", type=click.Path())
+@click.argument("output_directory", type=click.Path())
 @click.option('-r', '--resolution', required=True, type=click.Choice(list(map(str, range(MIN_H3, MAX_H3+1)))), help='H3 resolution to index')
-@click.option('-u', '--upscale', default=1, type=int, help='Upscaling factor, used to upsample input data on the fly; useful when the raster resolution is lower than the target DGGS resolution. Default (1) applies no upscaling. The resampling method controls interpolation.')
-@click.option('-c', '--compression', default='snappy', type=click.Choice(['snappy', 'gzip', 'zstd']), help='Name of the compression to use when writing to Parquet.')
-@click.option('-t', '--threads', default=(mp.cpu_count() - 1), help='Number of threads to use when running in parallel')
-@click.option('-a', '--aggfunc', default='mean', type=click.Choice(['count', 'mean', 'sum', 'prod', 'std', 'var', 'min', 'max', 'median']), help='Numpy aggregate function to apply when aggregating cell values after DGGS indexing, in case of multiple pixels mapping to the same DGGS cell.')
-@click.option('-d', '--decimals', default=1, type=int, help='Number of decimal places to round values when aggregating. Use 0 for integer output.')
+@click.option('-u', '--upscale', default=DEFAULTS['upscale'], type=int, help='Upscaling factor, used to upsample input data on the fly; useful when the raster resolution is lower than the target DGGS resolution. Default (1) applies no upscaling. The resampling method controls interpolation.')
+@click.option('-c', '--compression', default=DEFAULTS['compression'], type=click.Choice(['snappy', 'gzip', 'zstd']), help='Name of the compression to use when writing to Parquet.')
+@click.option('-t', '--threads', default=DEFAULTS['threads'], help='Number of threads to use when running in parallel')
+@click.option('-a', '--aggfunc', default=DEFAULTS['aggfunc'], type=click.Choice(['count', 'mean', 'sum', 'prod', 'std', 'var', 'min', 'max', 'median']), help='Numpy aggregate function to apply when aggregating cell values after DGGS indexing, in case of multiple pixels mapping to the same DGGS cell.')
+@click.option('-d', '--decimals', default=DEFAULTS['decimals'], type=int, help='Number of decimal places to round values when aggregating. Use 0 for integer output.')
 @click.option('-o', '--overwrite', is_flag=True)
-@click.option('--warp_mem_limit', default=12000, type=int, help='Input raster may be warped to EPSG:4326 if it is not already in this CRS. This setting specifies the warp operation\'s memory limit in MB.')
-@click.option('--resampling', default='average', type=click.Choice(Resampling._member_names_), help='Input raster may be warped to EPSG:4326 if it is not already in this CRS. This setting specifies the warp resampling algorithm.')
+@click.option('--warp_mem_limit', default=DEFAULTS['warp_mem_limit'], type=int, help='Input raster may be warped to EPSG:4326 if it is not already in this CRS. This setting specifies the warp operation\'s memory limit in MB.')
+@click.option('--resampling', default=DEFAULTS['resampling'], type=click.Choice(Resampling._member_names_), help='Input raster may be warped to EPSG:4326 if it is not already in this CRS. This setting specifies the warp resampling algorithm.')
 def raster2dggs(raster_input: Union[str, Path], output_directory: Union[str, Path], resolution: str, upscale: int, compression: str, threads: int, aggfunc: str, decimals: int, overwrite: bool, warp_mem_limit: int, resampling: str):
     '''
     Ingest a raster image and index it to the H3 DGGS.
@@ -192,4 +205,14 @@ def raster2dggs(raster_input: Union[str, Path], output_directory: Union[str, Pat
         'crs': crs.CRS.from_epsg(4326), # Input raster must be converted to WGS84 (4326) for H3 indexing
         'warp_mem_limit': warp_mem_limit
     }
-    _h3index(raster_input, output_directory, int(resolution), upscale, compression, aggfunc, decimals, overwrite, threads, warp_args)
+    kwargs = {
+        'upscale': upscale,
+        'compression': compression,
+        'threads': threads,
+        'aggfunc': aggfunc,
+        'decimals': decimals,
+        'warp_mem_limit': warp_mem_limit,
+        'resampling': resampling,
+        'overwrite': overwrite
+    }
+    _h3index(raster_input, output_directory, int(resolution), warp_args, **kwargs)
