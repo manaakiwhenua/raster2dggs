@@ -1,10 +1,10 @@
-import concurrent.futures
+from concurrent.futures import ThreadPoolExecutor, as_completed
 import errno
 import logging
-import multiprocessing as mp
+import os
+import multiprocessing
 from numbers import Number
 import numpy as np
-import os
 from pathlib import Path
 import tempfile
 import threading
@@ -12,6 +12,7 @@ from typing import Tuple, Union
 from urllib.parse import urlparse
 
 import click
+import click_log
 import dask
 import dask.dataframe as dd
 import h3pandas # Necessary import despite lack of explicit use
@@ -24,10 +25,12 @@ from rasterio.enums import Resampling
 from rasterio.vrt import WarpedVRT
 from rasterio.warp import calculate_default_transform
 import rioxarray
+from tqdm import tqdm
+from tqdm.dask import TqdmCallback
 import xarray as xr
 
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', datefmt='%m/%d/%Y %I:%M:%S %p')
 LOGGER = logging.getLogger(__name__)
+click_log.basic_config(LOGGER)
 
 MIN_H3, MAX_H3 = 0, 15
 DEFAULT_NAME : str = 'value'
@@ -35,15 +38,19 @@ DEFAULT_NAME : str = 'value'
 DEFAULTS = {
     'upscale': 1,
     'compression': 'snappy',
-    'threads': (mp.cpu_count() - 1),
+    'threads': (multiprocessing.cpu_count() - 1),
     'aggfunc': 'mean',
     'decimals': 1,
     'warp_mem_limit': 12000,
     'resampling': 'average'
 }
 
-
 def _get_parent_res(resolution : int) -> int:
+    '''
+    Given a target resolution, returns our recommended parent resolution.
+    
+    Used for intermediate re-partioning.
+    '''
     return max(MIN_H3, resolution - 8)
 
 def _h3func(sdf : xr.DataArray, resolution : int, parent_resolution : int, nodata : Number = np.nan, band_labels : Tuple[str] = None) -> pa.Table:
@@ -70,10 +77,20 @@ def _h3func(sdf : xr.DataArray, resolution : int, parent_resolution : int, nodat
     h3index = h3index.rename(columns=band_names)
     return pa.Table.from_pandas(h3index)
 
-def _initial_index(raster_input: Union[Path, str], output: Path, resolution: int, warp_args: dict, **kwargs)  -> tempfile.TemporaryDirectory:
-
+def _initial_index(raster_input: Union[Path, str], output: Path, resolution: int, warp_args: dict, **kwargs) -> Path:
+    '''
+    Responsible for opening the raster_input, and performing H3 indexing per window of a WarpedVRT.
+    
+    A WarpedVRT is used to enforce reprojection to https://epsg.io/4326, which is required for H3 indexing.
+    
+    It also allows on-the-fly resampling of the input, which is useful if the target H3 resolution exceeds the resolution
+        of the input.
+    
+    This function passes a path to a temporary directory (which contains the output of this "stage 1" processing) to
+        a secondary function that addresses issues at the boundaries of raster windows.
+    '''
     parent_resolution = _get_parent_res(resolution)
-    LOGGER.info("Indexing at H3 resolution %d, parent resolution %d", resolution, parent_resolution)
+    LOGGER.info("Indexing %s at H3 resolution %d, parent resolution %d", raster_input, resolution, parent_resolution)
 
     with tempfile.TemporaryDirectory() as tmpdir:
         LOGGER.debug(f'Create temporary directory {tmpdir}')
@@ -99,7 +116,7 @@ def _initial_index(raster_input: Union[Path, str], output: Path, resolution: int
                     upsample_args = dict({})
                 
                 with WarpedVRT(src, src_crs=src.crs, **warp_args, **upsample_args) as vrt:
-                    LOGGER.info('VRT CRS: %s', vrt.crs)
+                    LOGGER.debug('VRT CRS: %s', vrt.crs)
                     da : xr.Dataset = rioxarray.open_rasterio(
                         vrt,
                         lock=dask.utils.SerializableLock(),
@@ -121,69 +138,92 @@ def _initial_index(raster_input: Union[Path, str], output: Path, resolution: int
                         
                         with write_lock:
                             pq.write_to_dataset(result, root_path=tmpdir, compression=kwargs['compression'])
+                        
+                        return None
+                    
+                    with tqdm(total=len(windows), desc="Raster windows") as pbar:
+                        with ThreadPoolExecutor(max_workers=kwargs['threads']) as executor:
+                            futures = [executor.submit(process, window) for window in windows]
+                            for future in as_completed(futures):
+                                result = future.result()
+                                pbar.update(1)
 
-                    with concurrent.futures.ThreadPoolExecutor(max_workers=kwargs['threads']) as executor:
-                        executor.map(process, windows)
-
-            LOGGER.info('Stage 1 (primary indexing) complete')
+            LOGGER.debug('Stage 1 (primary indexing) complete')
             return _address_boundary_issues(tmpdir, output, resolution, **kwargs)
 
-def _h3_parent_agg(df, resolution: int, aggfunc: str, decimals: int):
+def _h3_parent_agg(df, parent_resolution: int, aggfunc: str, decimals: int):
+    '''
+    Function for partition-mapping, intended to use H3 parent cell IDs at some offset from the target H3 resolution,
+        as the basis for Parquet partitions.
+    '''
     if decimals > 0:
-        return df.groupby(f'h3_{resolution:02}').agg(aggfunc).round(decimals)
+        return df.groupby(f'h3_{parent_resolution:02}').agg(aggfunc).round(decimals)
     else:
-        return df.groupby(f'h3_{resolution:02}').agg(aggfunc).round(decimals).astype(int)
+        return df.groupby(f'h3_{parent_resolution:02}').agg(aggfunc).round(decimals).astype(int)
 
 def _address_boundary_issues(pq_input: tempfile.TemporaryDirectory, output: Path, resolution: int, **kwargs) -> Path:
+    '''
+    After "stage 1" processing, there is an H3 cell and band value/s for each pixel in the input image. Partitions are based
+    on raster windows.
 
+    This function will re-partition based on H3 parent cell IDs at a fixed offset from the target resolution.
+    
+    Once re-partitioned on this basis, values are aggregated at the target resolution, to account for multiple pixels mapping
+        to the same H3 cell.
+
+    This re-partitioning is necessary to address the issue of the same H3 cell IDs being present in different partitions
+        of the original (i.e. window-based) partitioning. Using the nested structure of the DGGS is an useful property
+        to address this problem.
+    '''
     parent_resolution = _get_parent_res(resolution)
 
-    LOGGER.info(f'Reading Stage 1 output ({pq_input}) and setting index for parent-based partitioning')
-    ddf = dd.read_parquet(
-        pq_input
-    ).set_index( # Set index as parent cell
-        f'h3_{parent_resolution:02}' if parent_resolution > 0 else 'h3_parent' # https://github.com/DahnJ/H3-Pandas/issues/15
-    )
+    LOGGER.debug(f'Reading Stage 1 output ({pq_input}) and setting index for parent-based partitioning')
+    with TqdmCallback(desc="Reading window partitions"):
+        ddf = dd.read_parquet(
+            pq_input
+        ).set_index( # Set index as parent cell
+            f'h3_{parent_resolution:02}' if parent_resolution > 0 else 'h3_parent' # https://github.com/DahnJ/H3-Pandas/issues/15
+        )
 
-    # Count parents, to get target number of partitions
-    uniqueh3 = sorted(list(ddf.index.unique().compute()))
+    with TqdmCallback(desc="Counting parents"):
+        # Count parents, to get target number of partitions
+        uniqueh3 = sorted(list(ddf.index.unique().compute()))
 
-    LOGGER.info('Repartitioning into %d partitions, based on parent cells', len(uniqueh3) + 1)
-    LOGGER.info('Aggregating cell values where conflicts exist')
+    LOGGER.debug('Repartitioning into %d partitions, based on parent cells', len(uniqueh3) + 1)
+    LOGGER.debug('Aggregating cell values where conflicts exist')
 
-    ddf = ddf.repartition( # See "notes" on why divisions expects repetition of the last item https://docs.dask.org/en/stable/generated/dask.dataframe.DataFrame.repartition.html
-        divisions=(uniqueh3 + [uniqueh3[-1]])
-    ).map_partitions(
-        _h3_parent_agg, resolution, kwargs['aggfunc'], kwargs['decimals']
-    ).to_parquet(
-        output,
-        overwrite=kwargs['overwrite'],
-        engine='pyarrow',
-        write_index=True,
-        append=False,
-        compression=kwargs['compression'],
-    )
+    with TqdmCallback(desc="Repartioning/aggregating"):
+        ddf = ddf.repartition( # See "notes" on why divisions expects repetition of the last item https://docs.dask.org/en/stable/generated/dask.dataframe.DataFrame.repartition.html
+            divisions=(uniqueh3 + [uniqueh3[-1]])
+        ).map_partitions(
+            _h3_parent_agg, parent_resolution, kwargs['aggfunc'], kwargs['decimals']
+        ).to_parquet(
+            output,
+            overwrite=kwargs['overwrite'],
+            engine='pyarrow',
+            write_index=True,
+            append=False,
+            compression=kwargs['compression'],
+        )
 
-    LOGGER.info('Stage 2 (parent cell repartioning) and Stage 3 (aggregation) complete')
+    LOGGER.debug('Stage 2 (parent cell repartioning) and Stage 3 (aggregation) complete')
 
     return output
 
-def _h3index(raster_input: Union[Path, str], output: Union[Path, str], resolution, warp_args: dict, **kwargs) -> Path:
-    return _initial_index(raster_input, output, int(resolution), warp_args, **kwargs)
-
 @click.command(context_settings={'show_default': True})
-@click.argument("raster_input", type=click.Path())
-@click.argument("output_directory", type=click.Path())
+@click_log.simple_verbosity_option(LOGGER)
+@click.argument("raster_input", type=click.Path(), nargs=1)
+@click.argument("output_directory", type=click.Path(), nargs=1)
 @click.option('-r', '--resolution', required=True, type=click.Choice(list(map(str, range(MIN_H3, MAX_H3+1)))), help='H3 resolution to index')
 @click.option('-u', '--upscale', default=DEFAULTS['upscale'], type=int, help='Upscaling factor, used to upsample input data on the fly; useful when the raster resolution is lower than the target DGGS resolution. Default (1) applies no upscaling. The resampling method controls interpolation.')
 @click.option('-c', '--compression', default=DEFAULTS['compression'], type=click.Choice(['snappy', 'gzip', 'zstd']), help='Name of the compression to use when writing to Parquet.')
-@click.option('-t', '--threads', default=DEFAULTS['threads'], help='Number of threads to use when running in parallel')
+@click.option('-t', '--threads', default=DEFAULTS['threads'], help='Number of threads to use when running in parallel. The default is determined based dynamically as the total number of available cores, minus one.')
 @click.option('-a', '--aggfunc', default=DEFAULTS['aggfunc'], type=click.Choice(['count', 'mean', 'sum', 'prod', 'std', 'var', 'min', 'max', 'median']), help='Numpy aggregate function to apply when aggregating cell values after DGGS indexing, in case of multiple pixels mapping to the same DGGS cell.')
 @click.option('-d', '--decimals', default=DEFAULTS['decimals'], type=int, help='Number of decimal places to round values when aggregating. Use 0 for integer output.')
 @click.option('-o', '--overwrite', is_flag=True)
 @click.option('--warp_mem_limit', default=DEFAULTS['warp_mem_limit'], type=int, help='Input raster may be warped to EPSG:4326 if it is not already in this CRS. This setting specifies the warp operation\'s memory limit in MB.')
-@click.option('--resampling', default=DEFAULTS['resampling'], type=click.Choice(Resampling._member_names_), help='Input raster may be warped to EPSG:4326 if it is not already in this CRS. This setting specifies the warp resampling algorithm.')
-def raster2dggs(raster_input: Union[str, Path], output_directory: Union[str, Path], resolution: str, upscale: int, compression: str, threads: int, aggfunc: str, decimals: int, overwrite: bool, warp_mem_limit: int, resampling: str):
+@click.option('--resampling', default=DEFAULTS['resampling'], type=click.Choice(Resampling._member_names_), help='Input raster may be warped to EPSG:4326 if it is not already in this CRS. Or, if the upscale parameter is greater than 1, there is a need to resample. This setting specifies this resampling algorithm.')
+def h3(raster_input: Union[str, Path], output_directory: Union[str, Path], resolution: str, upscale: int, compression: str, threads: int, aggfunc: str, decimals: int, overwrite: bool, warp_mem_limit: int, resampling: str):
     '''
     Ingest a raster image and index it to the H3 DGGS.
 
@@ -213,4 +253,4 @@ def raster2dggs(raster_input: Union[str, Path], output_directory: Union[str, Pat
         'resampling': resampling,
         'overwrite': overwrite
     }
-    _h3index(raster_input, output_directory, int(resolution), warp_args, **kwargs)
+    _initial_index(raster_input, output_directory, int(resolution), warp_args, **kwargs)
