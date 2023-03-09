@@ -61,6 +61,35 @@ Options:
   --help                          Show this message and exit.
 ```
 
+## Visualising output
+
+Output is in the Apache Parquet format, a directory with one file per partition. Partitions are based on parent cell IDs, with the parent resolution determined as an offset from the target DGGS resolution.
+
+For a quick view of your output, you can read Apache Parquet with pandas, and then use h3-pandas and geopandas to convert this into a GeoPackage for visualisation in a desktop GIS, such as QGIS. The Apache Parquet output is indexed by the DGGS column, so it should be ready for association with other data prepared in the same DGGS.
+
+```python
+>>> import pandas as pd
+>>> import h3pandas
+>>> o = pd.read_parquet('./tests/data/output/9/Sen2_Test')
+>>> o
+band             B02  B03  B04  B05  B06  B07  B08  B8A  B11  B12
+h3_09                                                            
+89bb0981003ffff    9   27   16   62  175  197  228  247  102   36
+89bb0981007ffff   10   30   17   66  185  212  238  261  113   40
+89bb098100bffff   10   26   15   60  169  190  228  241  103   37
+89bb098100fffff   11   29   17   66  181  203  243  257  109   39
+89bb0981013ffff    8   26   16   58  172  199  220  244   98   34
+...              ...  ...  ...  ...  ...  ...  ...  ...  ...  ...
+89bb0d6eea7ffff   10   18   15   41  106  120  140  146  102   47
+89bb0d6eeabffff   12   19   15   39   95  107  125  131   84   39
+89bb0d6eeafffff   12   21   17   43  101  115  134  141  111   51
+89bb0d6eeb7ffff   10   20   14   45  120  137  160  165  111   48
+89bb0d6eebbffff   15   28   20   56  146  166  198  202  108   47
+
+[5656 rows x 10 columns]
+>>> o.h3.h3_to_geo_boundary().to_file('~/Downloads/Sen2_Test_h3-9.gpkg', driver='GPKG')
+```
+
 ## Development 
 
 Generally, follow the instructions for basic usage of [`poetry`](https://python-poetry.org/docs/basic-usage/).
