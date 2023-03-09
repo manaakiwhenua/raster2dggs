@@ -74,7 +74,7 @@ If you run `poetry install`, the CLI tool will be aliased so you can simply use 
 
 [![Code style: black](https://img.shields.io/badge/code%20style-black-000000.svg)](https://github.com/psf/black)
 
-Please run `black .` before comitting.
+Please run `black .` before committing.
 
 ### Testing
 
