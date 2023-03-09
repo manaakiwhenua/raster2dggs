@@ -70,6 +70,12 @@ In brief, to get started:
 
 If you run `poetry install`, the CLI tool will be aliased so you can simply use `raster2dggs` rather than `poetry run raster2dggs`, which is the alternative if you do not `poetry install`.
 
+### Code formatting
+
+[![Code style: black](https://img.shields.io/badge/code%20style-black-000000.svg)](https://github.com/psf/black)
+
+Please run `black .` before comitting.
+
 ### Testing
 
 Two sample files have been uploaded to an S3 bucket with `s3:GetObject` public permission.
