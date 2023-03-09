@@ -4,6 +4,8 @@ Python-based CLI tool to index raster files to DGGS in parallel, writing out to 
 
 Currently only supports H3 DGGS, and probably has other limitations since it has been developed for a specific internal use case, though it is intended as a general-purpose abstraction. Contributions, suggestions, bug reports and strongly worded letters are all welcome.
 
+![Example use case for raster2dggs, showing how an input raster can be indexed at different H3 resolutions, while retaining information in separate, named bands](docs/imgs/raster2dggs-example.png "Example")
+
 ```
 raster2dggs h3 --help
 
