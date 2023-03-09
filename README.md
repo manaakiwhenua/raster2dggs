@@ -141,3 +141,5 @@ poetry run raster2dggs h3 --resolution 13 --compression zstd --resampling neares
 APA/Harvard
 
 > Ardo, J., & Law, R. (2023). raster2dggs (0.1.0) [Computer software]. https://github.com/manaakiwhenua/raster2dggs 
+
+[![manaakiwhenua-standards](https://github.com/manaakiwhenua/raster2dggs/workflows/manaakiwhenua-standards/badge.svg)](https://github.com/manaakiwhenua/manaakiwhenua-standards)
