@@ -90,24 +90,31 @@ h3_09
 >>> o.h3.h3_to_geo_boundary().to_file('~/Downloads/Sen2_Test_h3-9.gpkg', driver='GPKG')
 ```
 
-## Development 
+## Installation
 
-Generally, follow the instructions for basic usage of [`poetry`](https://python-poetry.org/docs/basic-usage/).
+<!-- TODO: package raster2dggs and make available on PyPI -->
+<!-- TODO: package raster2dggs and make available on Conda -->
+
+### For development
 
 In brief, to get started:
 
-- Create the virtual environment with `poetry init`. This will install necessary dependencies. However there is an external dependency on GDAL 3.6+ (including development headers, i.e. `libgdal-dev`).
+- Install [Poetry](https://python-poetry.org/docs/basic-usage/)
+- Install [GDAL](https://gdal.org/)
+    - If you're on Windows, `pip install gdal` may be necessary before running the subsequent commands.
+    - On Linux, install GDAL 3.6+ according to your platform-specific instructions, including development headers, i.e. `libgdal-dev`.
+- Create the virtual environment with `poetry init`. This will install necessary dependencies.
 - Subsequently, the virtual environment can be re-activated with `poetry shell`.
 
 If you run `poetry install`, the CLI tool will be aliased so you can simply use `raster2dggs` rather than `poetry run raster2dggs`, which is the alternative if you do not `poetry install`.
 
-### Code formatting
+#### Code formatting
 
 [![Code style: black](https://img.shields.io/badge/code%20style-black-000000.svg)](https://github.com/psf/black)
 
 Please run `black .` before committing.
 
-### Testing
+#### Testing
 
 Two sample files have been uploaded to an S3 bucket with `s3:GetObject` public permission.
 
@@ -116,17 +123,17 @@ Two sample files have been uploaded to an S3 bucket with `s3:GetObject` public p
 
 You may use these for testing. However you can also test with local files too, which will be faster.
 
-### Example commands
+## Example commands
 
 ```bash
-poetry run raster2dggs h3 --resolution 11 -d 0 s3://raster2dggs-test-data/Sen2_Test.tif ./tests/data/output/11/Sen2_Test
+raster2dggs h3 --resolution 11 -d 0 s3://raster2dggs-test-data/Sen2_Test.tif ./tests/data/output/11/Sen2_Test
 ```
 
 ```
-poetry run raster2dggs h3 --resolution 13 --compression zstd --resampling nearest -a median -d 1 -u 2 s3://raster2dggs-test-data/TestDEM.tif ./tests/data/output/13/TestDEM
+raster2dggs h3 --resolution 13 --compression zstd --resampling nearest -a median -d 1 -u 2 s3://raster2dggs-test-data/TestDEM.tif ./tests/data/output/13/TestDEM
 ```
 
-# Citation
+## Citation
 
 ```bibtex
 @software{raster2dggs,
