@@ -1,10 +1,18 @@
 # raster2dggs
 
+[![pypi](https://img.shields.io/pypi/v/raster2dggs?label=raster2ddgs)](https://pypi.org/project/raster2dggs/)
+
 Python-based CLI tool to index raster files to DGGS in parallel, writing out to Parquet.
 
 Currently only supports H3 DGGS, and probably has other limitations since it has been developed for a specific internal use case, though it is intended as a general-purpose abstraction. Contributions, suggestions, bug reports and strongly worded letters are all welcome.
 
 ![Example use case for raster2dggs, showing how an input raster can be indexed at different H3 resolutions, while retaining information in separate, named bands](docs/imgs/raster2dggs-example.png "Example use case for raster2dggs, showing how an input raster can be indexed at different H3 resolutions, while retaining information in separate, named bands")
+
+## Installation
+
+`pip install raster2dggs`
+
+## Usage
 
 ```
 raster2dggs h3 --help
@@ -150,3 +158,6 @@ APA/Harvard
 > Ardo, J., & Law, R. (2023). raster2dggs (0.1.0) [Computer software]. https://github.com/manaakiwhenua/raster2dggs 
 
 [![manaakiwhenua-standards](https://github.com/manaakiwhenua/raster2dggs/workflows/manaakiwhenua-standards/badge.svg)](https://github.com/manaakiwhenua/manaakiwhenua-standards)
+
+
+pypi-AgEIcHlwaS5vcmcCJGRkNjUyYjhjLWViY2EtNGViMS05MGQxLWY4YjJiMTkwNjYwYQACKlszLCJmMGM3YzkzZi1jMjM0LTQ3NzEtOGQyOS01N2RlOTk0NGY3NDciXQAABiBduaSnwMp65VElZJmE-J7ZSEmLkpdTjtqqAoEW07ORpA
