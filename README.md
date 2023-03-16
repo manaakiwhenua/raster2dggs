@@ -158,6 +158,3 @@ APA/Harvard
 > Ardo, J., & Law, R. (2023). raster2dggs (0.1.0) [Computer software]. https://github.com/manaakiwhenua/raster2dggs 
 
 [![manaakiwhenua-standards](https://github.com/manaakiwhenua/raster2dggs/workflows/manaakiwhenua-standards/badge.svg)](https://github.com/manaakiwhenua/manaakiwhenua-standards)
-
-
-pypi-AgEIcHlwaS5vcmcCJGRkNjUyYjhjLWViY2EtNGViMS05MGQxLWY4YjJiMTkwNjYwYQACKlszLCJmMGM3YzkzZi1jMjM0LTQ3NzEtOGQyOS01N2RlOTk0NGY3NDciXQAABiBduaSnwMp65VElZJmE-J7ZSEmLkpdTjtqqAoEW07ORpA
