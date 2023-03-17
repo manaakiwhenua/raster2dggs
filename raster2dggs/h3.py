@@ -83,6 +83,8 @@ def _h3func(
     # Renaming columns to actual band labels
     bands = sdf["band"].unique()
     band_names = dict(zip(bands, map(lambda i: band_labels[i - 1], bands)))
+    if band_names == {1:None}:
+        band_names = {1:'Value'}
     h3index = h3index.rename(columns=band_names)
     return pa.Table.from_pandas(h3index)
 
@@ -255,7 +257,7 @@ def _address_boundary_issues(
                 divisions=(uniqueh3 + [uniqueh3[-1]])
             )
             .map_partitions(
-                _h3_parent_agg, parent_resolution, kwargs["aggfunc"], kwargs["decimals"]
+                _h3_parent_agg, resolution, kwargs["aggfunc"], kwargs["decimals"]
             )
             .to_parquet(
                 output,
