@@ -83,11 +83,11 @@ def _h3func(
     # Renaming columns to actual band labels
     bands = sdf["band"].unique()
     band_names = dict(zip(bands, map(lambda i: band_labels[i - 1], bands)))
-    for k,v in band_names.items(): 
+    for k, v in band_names.items():
         if band_names[k] is None:
-            band_names[k]=str(bands)
-        else: 
-            band_names=band_names
+            band_names[k] = str(bands[k - 1])
+        else:
+            band_names = band_names
     h3index = h3index.rename(columns=band_names)
     return pa.Table.from_pandas(h3index)
 
@@ -203,18 +203,15 @@ def _initial_index(
 
 def _h3_parent_groupby(df, resolution: int, aggfunc: str, decimals: int):
     """
-    Function for aggregating the h3 resolution values per parent partition. Each partition will be run through with a 
+    Function for aggregating the h3 resolution values per parent partition. Each partition will be run through with a
     pandas .groupby function. This step is to ensure there are no duplicate h3 values, which will happen when indexing a
-    high resolution raster at a coarser h3 resolution. 
+    high resolution raster at a coarser h3 resolution.
     """
     if decimals > 0:
         return df.groupby(f"h3_{resolution:02}").agg(aggfunc).round(decimals)
     else:
         return (
-            df.groupby(f"h3_{resolution:02}")
-            .agg(aggfunc)
-            .round(decimals)
-            .astype(int)
+            df.groupby(f"h3_{resolution:02}").agg(aggfunc).round(decimals).astype(int)
         )
 
 
