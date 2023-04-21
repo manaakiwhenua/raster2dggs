@@ -211,7 +211,7 @@ def _h3_parent_groupby(df, resolution: int, aggfunc: str, decimals: int):
         return df.groupby(f"h3_{resolution:02}").agg(aggfunc).round(decimals)
     else:
         return (
-            df.groupby(f"h3_{resolution:02}").agg(aggfunc).round(decimals).astype(int)
+            df.groupby(f"h3_{resolution:02}").agg(aggfunc).round(decimals).astype('Int64')
         )
 
 
