@@ -33,7 +33,7 @@ Options:
                                   DEBUG  [default: INFO]
   -r, --resolution [0|1|2|3|4|5|6|7|8|9|10|11|12|13|14|15]
                                   H3 resolution to index  [required]
-  -pr, --parent_rest [0|1|2|3|4|5|6|7|8|9|10|11|12|13|14|15]
+  -pr,--parent_res [0|1|2|3|4|5|6|7|8|9|10|11|12|13|14|15]
                                   H3 Parent resolution to index and aggregate
                                   to. Defaults to resolution - 6
   -u, --upscale INTEGER           Upscaling factor, used to upsample input
