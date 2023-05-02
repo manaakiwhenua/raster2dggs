@@ -46,13 +46,19 @@ DEFAULTS = {
 }
 
 
-def _get_parent_res(resolution: int) -> int:
+def _get_parent_res(parent_res: int,
+                    resolution: int) -> int:
     """
+    Uses a parent resolution,
+    OR,
     Given a target resolution, returns our recommended parent resolution.
 
     Used for intermediate re-partioning.
     """
-    return max(MIN_H3, resolution - 8)
+    if parent_res:
+        return max(MIN_H3, int(parent_res))
+    else:
+        return max(MIN_H3, (resolution - 6))
 
 
 def _h3func(
@@ -96,6 +102,7 @@ def _initial_index(
     raster_input: Union[Path, str],
     output: Path,
     resolution: int,
+    parent_res: int,
     warp_args: dict,
     **kwargs,
 ) -> Path:
@@ -110,7 +117,7 @@ def _initial_index(
     This function passes a path to a temporary directory (which contains the output of this "stage 1" processing) to
         a secondary function that addresses issues at the boundaries of raster windows.
     """
-    parent_resolution = _get_parent_res(resolution)
+    parent_resolution = _get_parent_res(parent_res, resolution)
     LOGGER.info(
         "Indexing %s at H3 resolution %d, parent resolution %d",
         raster_input,
@@ -198,7 +205,7 @@ def _initial_index(
                                 pbar.update(1)
 
             LOGGER.debug("Stage 1 (primary indexing) complete")
-            return _address_boundary_issues(tmpdir, output, resolution, **kwargs)
+            return _address_boundary_issues(tmpdir, output, resolution, parent_res, **kwargs)
 
 
 def _h3_parent_groupby(df, resolution: int, aggfunc: str, decimals: int):
@@ -216,7 +223,7 @@ def _h3_parent_groupby(df, resolution: int, aggfunc: str, decimals: int):
 
 
 def _address_boundary_issues(
-    pq_input: tempfile.TemporaryDirectory, output: Path, resolution: int, **kwargs
+    pq_input: tempfile.TemporaryDirectory, output: Path, resolution: int, parent_res: int, **kwargs
 ) -> Path:
     """
     After "stage 1" processing, there is an H3 cell and band value/s for each pixel in the input image. Partitions are based
@@ -231,7 +238,7 @@ def _address_boundary_issues(
         of the original (i.e. window-based) partitioning. Using the nested structure of the DGGS is an useful property
         to address this problem.
     """
-    parent_resolution = _get_parent_res(resolution)
+    parent_resolution = _get_parent_res(parent_res, resolution)
 
     LOGGER.debug(
         f"Reading Stage 1 output ({pq_input}) and setting index for parent-based partitioning"
@@ -289,6 +296,13 @@ def _address_boundary_issues(
     help="H3 resolution to index",
 )
 @click.option(
+    "-pr",
+    "--parent_res",
+    required=False,
+    type=click.Choice(list(map(str, range(MIN_H3, MAX_H3 + 1)))),
+    help="H3 Parent resolution to index and aggregate to. Defaults to resolution - 6",
+)
+@click.option(
     "-u",
     "--upscale",
     default=DEFAULTS["upscale"],
@@ -341,6 +355,7 @@ def h3(
     raster_input: Union[str, Path],
     output_directory: Union[str, Path],
     resolution: str,
+    parent_res: str,
     upscale: int,
     compression: str,
     threads: int,
@@ -385,4 +400,4 @@ def h3(
         "resampling": resampling,
         "overwrite": overwrite,
     }
-    _initial_index(raster_input, output_directory, int(resolution), warp_args, **kwargs)
+    _initial_index(raster_input, output_directory, int(resolution), parent_res, warp_args, **kwargs)
