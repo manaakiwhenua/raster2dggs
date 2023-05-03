@@ -1,5 +1,6 @@
 import click
 
+from raster2dggs import __version__
 from raster2dggs.h3 import h3
 
 #   If the program does terminal interaction, make it output a short
@@ -12,6 +13,7 @@ from raster2dggs.h3 import h3
 
 
 @click.group()
+@click.version_option(version=__version__)
 def cli():
     pass
 

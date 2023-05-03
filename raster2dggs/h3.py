@@ -29,6 +29,8 @@ from tqdm import tqdm
 from tqdm.dask import TqdmCallback
 import xarray as xr
 
+from raster2dggs import __version__
+
 LOGGER = logging.getLogger(__name__)
 click_log.basic_config(LOGGER)
 
@@ -60,7 +62,11 @@ def _get_parent_res(parent_res: int, resolution: int) -> int:
 
     Used for intermediate re-partioning.
     """
-    return parent_res if parent_res is not None else max(MIN_H3, (resolution - DEFAULT_PARENT_OFFSET))
+    return (
+        parent_res
+        if parent_res is not None
+        else max(MIN_H3, (resolution - DEFAULT_PARENT_OFFSET))
+    )
 
 
 def _h3func(
@@ -359,6 +365,7 @@ def _address_boundary_issues(
     type=click.Choice(Resampling._member_names_),
     help="Input raster may be warped to EPSG:4326 if it is not already in this CRS. Or, if the upscale parameter is greater than 1, there is a need to resample. This setting specifies this resampling algorithm.",
 )
+@click.version_option(version=__version__)
 def h3(
     raster_input: Union[str, Path],
     output_directory: Union[str, Path],
@@ -415,5 +422,10 @@ def h3(
         "overwrite": overwrite,
     }
     _initial_index(
-        raster_input, output_directory, int(resolution), int(parent_res), warp_args, **kwargs
+        raster_input,
+        output_directory,
+        int(resolution),
+        int(parent_res),
+        warp_args,
+        **kwargs,
     )
