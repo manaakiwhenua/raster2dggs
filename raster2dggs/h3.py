@@ -45,20 +45,28 @@ DEFAULTS = {
     "resampling": "average",
 }
 
+DEFAULT_PARENT_OFFSET = 6
 
-def _get_parent_res(resolution: int) -> int:
+
+class ParentResolutionException(Exception):
+    pass
+
+
+def _get_parent_res(parent_res: int, resolution: int) -> int:
     """
+    Uses a parent resolution,
+    OR,
     Given a target resolution, returns our recommended parent resolution.
 
     Used for intermediate re-partioning.
     """
-    return max(MIN_H3, resolution - 8)
+    return parent_res if parent_res is not None else max(MIN_H3, (resolution - DEFAULT_PARENT_OFFSET))
 
 
 def _h3func(
     sdf: xr.DataArray,
     resolution: int,
-    parent_resolution: int,
+    parent_res: int,
     nodata: Number = np.nan,
     band_labels: Tuple[str] = None,
 ) -> pa.Table:
@@ -79,7 +87,7 @@ def _h3func(
         columns=["x", "y"]
     )
     # Secondary (parent) H3 index, used later for partitioning
-    h3index = h3index.h3.h3_to_parent(parent_resolution).reset_index()
+    h3index = h3index.h3.h3_to_parent(parent_res).reset_index()
     # Renaming columns to actual band labels
     bands = sdf["band"].unique()
     band_names = dict(zip(bands, map(lambda i: band_labels[i - 1], bands)))
@@ -96,6 +104,7 @@ def _initial_index(
     raster_input: Union[Path, str],
     output: Path,
     resolution: int,
+    parent_res: int,
     warp_args: dict,
     **kwargs,
 ) -> Path:
@@ -110,12 +119,12 @@ def _initial_index(
     This function passes a path to a temporary directory (which contains the output of this "stage 1" processing) to
         a secondary function that addresses issues at the boundaries of raster windows.
     """
-    parent_resolution = _get_parent_res(resolution)
+    parent_res = _get_parent_res(parent_res, resolution)
     LOGGER.info(
         "Indexing %s at H3 resolution %d, parent resolution %d",
         raster_input,
         resolution,
-        parent_resolution,
+        parent_res,
     )
 
     with tempfile.TemporaryDirectory() as tmpdir:
@@ -172,7 +181,7 @@ def _initial_index(
                         result = _h3func(
                             sdf,
                             resolution,
-                            parent_resolution,
+                            parent_res,
                             vrt.nodata,
                             band_labels=band_names,
                         )
@@ -198,7 +207,9 @@ def _initial_index(
                                 pbar.update(1)
 
             LOGGER.debug("Stage 1 (primary indexing) complete")
-            return _address_boundary_issues(tmpdir, output, resolution, **kwargs)
+            return _address_boundary_issues(
+                tmpdir, output, resolution, parent_res, **kwargs
+            )
 
 
 def _h3_parent_groupby(df, resolution: int, aggfunc: str, decimals: int):
@@ -211,12 +222,19 @@ def _h3_parent_groupby(df, resolution: int, aggfunc: str, decimals: int):
         return df.groupby(f"h3_{resolution:02}").agg(aggfunc).round(decimals)
     else:
         return (
-            df.groupby(f"h3_{resolution:02}").agg(aggfunc).round(decimals).astype('Int64')
+            df.groupby(f"h3_{resolution:02}")
+            .agg(aggfunc)
+            .round(decimals)
+            .astype("Int64")
         )
 
 
 def _address_boundary_issues(
-    pq_input: tempfile.TemporaryDirectory, output: Path, resolution: int, **kwargs
+    pq_input: tempfile.TemporaryDirectory,
+    output: Path,
+    resolution: int,
+    parent_res: int,
+    **kwargs,
 ) -> Path:
     """
     After "stage 1" processing, there is an H3 cell and band value/s for each pixel in the input image. Partitions are based
@@ -231,17 +249,14 @@ def _address_boundary_issues(
         of the original (i.e. window-based) partitioning. Using the nested structure of the DGGS is an useful property
         to address this problem.
     """
-    parent_resolution = _get_parent_res(resolution)
+    parent_res = _get_parent_res(parent_res, resolution)
 
     LOGGER.debug(
         f"Reading Stage 1 output ({pq_input}) and setting index for parent-based partitioning"
     )
     with TqdmCallback(desc="Reading window partitions"):
-        ddf = dd.read_parquet(pq_input).set_index(  # Set index as parent cell
-            f"h3_{parent_resolution:02}"
-            if parent_resolution > 0
-            else "h3_parent"  # https://github.com/DahnJ/H3-Pandas/issues/15
-        )
+        # Set index as parent cell
+        ddf = dd.read_parquet(pq_input).set_index(f"h3_{parent_res:02}")
 
     with TqdmCallback(desc="Counting parents"):
         # Count parents, to get target number of partitions
@@ -287,6 +302,13 @@ def _address_boundary_issues(
     required=True,
     type=click.Choice(list(map(str, range(MIN_H3, MAX_H3 + 1)))),
     help="H3 resolution to index",
+)
+@click.option(
+    "-pr",
+    "--parent_res",
+    required=False,
+    type=click.Choice(list(map(str, range(MIN_H3, MAX_H3 + 1)))),
+    help="H3 Parent resolution to index and aggregate to. Defaults to resolution - 6",
 )
 @click.option(
     "-u",
@@ -341,6 +363,7 @@ def h3(
     raster_input: Union[str, Path],
     output_directory: Union[str, Path],
     resolution: str,
+    parent_res: str,
     upscale: int,
     compression: str,
     threads: int,
@@ -356,6 +379,12 @@ def h3(
     RASTER_INPUT is the path to input raster data; prepend with protocol like s3:// or hdfs:// for remote data.
     OUTPUT_DIRECTORY should be a directory, not a file, as it will be the write location for an Apache Parquet data store, with partitions equivalent to parent cells of target cells at a fixed offset. However, this can also be remote (use the appropriate prefix, e.g. s3://).
     """
+    if not int(parent_res) < int(resolution):
+        raise ParentResolutionException(
+            "Parent resolution ({pr}) must be less than target resolution ({r})".format(
+                pr=parent_res, r=resolution
+            )
+        )
     if not Path(raster_input).exists():
         if not urlparse(raster_input).scheme:
             LOGGER.warning(
@@ -385,4 +414,6 @@ def h3(
         "resampling": resampling,
         "overwrite": overwrite,
     }
-    _initial_index(raster_input, output_directory, int(resolution), warp_args, **kwargs)
+    _initial_index(
+        raster_input, output_directory, int(resolution), int(parent_res), warp_args, **kwargs
+    )

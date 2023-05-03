@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "raster2dggs"
-version = "0.1.2"
+version = "0.2.0"
 description = ""
 authors = ["James Ardo <ardoj@landcareresearch.co.nz>"]
 maintainers = ["Richard Law <lawr@landcareresearch.co.nz>"]
@@ -19,7 +19,7 @@ classifiers = [
 python = "^3.10"
 gdal = "^3.6.2"
 geopandas = "^0.12.2"
-h3pandas = "^0.2.3"
+h3pandas = "^0.2.4"
 rioxarray = "^0.13.4"
 dask-geopandas = "^0.3.0"
 pyarrow = "^11.0.0"

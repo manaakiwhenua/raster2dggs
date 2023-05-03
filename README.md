@@ -33,6 +33,9 @@ Options:
                                   DEBUG  [default: INFO]
   -r, --resolution [0|1|2|3|4|5|6|7|8|9|10|11|12|13|14|15]
                                   H3 resolution to index  [required]
+  -pr,--parent_res [0|1|2|3|4|5|6|7|8|9|10|11|12|13|14|15]
+                                  H3 Parent resolution to index and aggregate
+                                  to. Defaults to resolution - 6
   -u, --upscale INTEGER           Upscaling factor, used to upsample input
                                   data on the fly; useful when the raster
                                   resolution is lower than the target DGGS
@@ -148,13 +151,13 @@ raster2dggs h3 --resolution 13 --compression zstd --resampling nearest -a median
   title={{raster2dggs}},
   author={Ardo, James and Law, Richard},
   url={https://github.com/manaakiwhenua/raster2dggs},
-  version={0.1.2},
+  version={0.2.0},
   date={2023-02-09}
 }
 ```
 
 APA/Harvard
 
-> Ardo, J., & Law, R. (2023). raster2dggs (0.1.2) [Computer software]. https://github.com/manaakiwhenua/raster2dggs 
+> Ardo, J., & Law, R. (2023). raster2dggs (0.2.0) [Computer software]. https://github.com/manaakiwhenua/raster2dggs 
 
 [![manaakiwhenua-standards](https://github.com/manaakiwhenua/raster2dggs/workflows/manaakiwhenua-standards/badge.svg)](https://github.com/manaakiwhenua/manaakiwhenua-standards)
