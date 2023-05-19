@@ -45,6 +45,7 @@ DEFAULTS = {
     "decimals": 1,
     "warp_mem_limit": 12000,
     "resampling": "average",
+    "tempdir": tempfile.tempdir
 }
 
 DEFAULT_PARENT_OFFSET = 6
@@ -54,7 +55,7 @@ class ParentResolutionException(Exception):
     pass
 
 
-def _get_parent_res(parent_res: int, resolution: int) -> int:
+def _get_parent_res(parent_res: Union[None, int], resolution: int) -> int:
     """
     Uses a parent resolution,
     OR,
@@ -63,7 +64,7 @@ def _get_parent_res(parent_res: int, resolution: int) -> int:
     Used for intermediate re-partioning.
     """
     return (
-        parent_res
+        int(parent_res)
         if parent_res is not None
         else max(MIN_H3, (resolution - DEFAULT_PARENT_OFFSET))
     )
@@ -110,7 +111,7 @@ def _initial_index(
     raster_input: Union[Path, str],
     output: Path,
     resolution: int,
-    parent_res: int,
+    parent_res: Union[None, int],
     warp_args: dict,
     **kwargs,
 ) -> Path:
@@ -365,6 +366,12 @@ def _address_boundary_issues(
     type=click.Choice(Resampling._member_names_),
     help="Input raster may be warped to EPSG:4326 if it is not already in this CRS. Or, if the upscale parameter is greater than 1, there is a need to resample. This setting specifies this resampling algorithm.",
 )
+@click.option(
+    "--tempdir",
+    default=DEFAULTS["tempdir"],
+    type=click.Path(),
+    help="Temporary data is created during the execution of this program. This parameter allows you to control where this data will be written."
+)
 @click.version_option(version=__version__)
 def h3(
     raster_input: Union[str, Path],
@@ -379,6 +386,7 @@ def h3(
     overwrite: bool,
     warp_mem_limit: int,
     resampling: str,
+    tempdir: Union[str, Path],
 ):
     """
     Ingest a raster image and index it to the H3 DGGS.
@@ -386,7 +394,9 @@ def h3(
     RASTER_INPUT is the path to input raster data; prepend with protocol like s3:// or hdfs:// for remote data.
     OUTPUT_DIRECTORY should be a directory, not a file, as it will be the write location for an Apache Parquet data store, with partitions equivalent to parent cells of target cells at a fixed offset. However, this can also be remote (use the appropriate prefix, e.g. s3://).
     """
-    if not int(parent_res) < int(resolution):
+    tempfile.tempdir = tempdir
+    print(tempfile.tempdir)
+    if parent_res is not None and not int(parent_res) < int(resolution):
         raise ParentResolutionException(
             "Parent resolution ({pr}) must be less than target resolution ({r})".format(
                 pr=parent_res, r=resolution
@@ -425,7 +435,7 @@ def h3(
         raster_input,
         output_directory,
         int(resolution),
-        int(parent_res),
+        parent_res,
         warp_args,
         **kwargs,
     )
