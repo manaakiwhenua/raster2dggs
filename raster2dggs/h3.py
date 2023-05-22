@@ -8,7 +8,7 @@ import numpy as np
 from pathlib import Path
 import tempfile
 import threading
-from typing import Tuple, Union
+from typing import Callable, Tuple, Union
 from urllib.parse import urlparse
 
 import click
@@ -219,7 +219,7 @@ def _initial_index(
             )
 
 
-def _h3_parent_groupby(df, resolution: int, aggfunc: str, decimals: int):
+def _h3_parent_groupby(df, resolution: int, aggfunc: Union[str, Callable], decimals: int):
     """
     Function for aggregating the h3 resolution values per parent partition. Each partition will be run through with a
     pandas .groupby function. This step is to ensure there are no duplicate h3 values, which will happen when indexing a
@@ -342,7 +342,7 @@ def _address_boundary_issues(
     "--aggfunc",
     default=DEFAULTS["aggfunc"],
     type=click.Choice(
-        ["count", "mean", "sum", "prod", "std", "var", "min", "max", "median"]
+        ["count", "mean", "sum", "prod", "std", "var", "min", "max", "median", "mode"]
     ),
     help="Numpy aggregate function to apply when aggregating cell values after DGGS indexing, in case of multiple pixels mapping to the same DGGS cell.",
 )
@@ -394,8 +394,7 @@ def h3(
     RASTER_INPUT is the path to input raster data; prepend with protocol like s3:// or hdfs:// for remote data.
     OUTPUT_DIRECTORY should be a directory, not a file, as it will be the write location for an Apache Parquet data store, with partitions equivalent to parent cells of target cells at a fixed offset. However, this can also be remote (use the appropriate prefix, e.g. s3://).
     """
-    tempfile.tempdir = tempdir
-    print(tempfile.tempdir)
+    tempfile.tempdir = tempdir if tempdir is not None else tempfile.tempdir
     if parent_res is not None and not int(parent_res) < int(resolution):
         raise ParentResolutionException(
             "Parent resolution ({pr}) must be less than target resolution ({r})".format(
@@ -421,6 +420,9 @@ def h3(
         ),  # Input raster must be converted to WGS84 (4326) for H3 indexing
         "warp_mem_limit": warp_mem_limit,
     }
+    if aggfunc == 'mode':
+        logging.warning('Mode aggregation: arbitrary behaviour: if there is more than one mode when aggregating, only the first value will be recorded.')
+        aggfunc = lambda x: pd.Series.mode(x)[0]
     kwargs = {
         "upscale": upscale,
         "compression": compression,
