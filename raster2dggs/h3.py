@@ -288,6 +288,7 @@ def _address_boundary_issues(
                 engine="pyarrow",
                 write_index=True,
                 append=False,
+                name_function=lambda i: f'{uniqueh3[i]}.parquet',
                 compression=kwargs["compression"],
             )
         )
