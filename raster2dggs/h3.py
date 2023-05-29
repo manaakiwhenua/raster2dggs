@@ -16,6 +16,7 @@ import click_log
 import dask
 import dask.dataframe as dd
 import h3pandas  # Necessary import despite lack of explicit use
+import geopandas as gpd
 import pandas as pd
 import pyarrow as pa
 import pyarrow.parquet as pq
@@ -68,7 +69,28 @@ def _get_parent_res(parent_res: Union[None, int], resolution: int) -> int:
         if parent_res is not None
         else max(MIN_H3, (resolution - DEFAULT_PARENT_OFFSET))
     )
+def _nidropduplicates(df, resolution):
+    df=df.reset_index()
+    df=df.sort_values(by=[f"h3_{resolution:02}", "distance"])
+    df=df.drop_duplicates(subset=[f"h3_{resolution:02}"], keep="first")
+    df=df.set_index(f"h3_{resolution:02}")
+    return df
 
+def _nearestindex(df, resolution):
+    """
+    Take raster x y, and find euclidian distance with h3 centerpoint.
+    """
+    df=df.h3.h3_to_geo()
+    df=df.to_crs(6933)
+    df['points']=gpd.points_from_xy(df["x"],df["y"], crs=4326)
+    df=df.drop(
+        columns=["x", "y"])
+    df=df.set_geometry("points").to_crs(6933)
+    df["distance"]=df['geometry'].distance(df['points'])
+    df=df.drop(
+        columns=["points", "geometry"])
+    df=_nidropduplicates(df, resolution)
+    return df
 
 def _h3func(
     sdf: xr.DataArray,
@@ -76,6 +98,7 @@ def _h3func(
     parent_res: int,
     nodata: Number = np.nan,
     band_labels: Tuple[str] = None,
+    **ni_args,    
 ) -> pa.Table:
     """
     Index a raster window to H3.
@@ -89,10 +112,23 @@ def _h3func(
     subset = pd.pivot_table(
         subset, values=DEFAULT_NAME, index=["x", "y"], columns=["band"]
     ).reset_index()
+    
     # Primary H3 index
-    h3index = subset.h3.geo_to_h3(resolution, lat_col="y", lng_col="x").drop(
+    
+    h3index = subset.h3.geo_to_h3(resolution, lat_col="y", lng_col="x")
+    nearestindex = ni_args["nearestindex"]
+    if nearestindex:
+        h3index=h3index
+    else:
+        h3index=h3index.drop(
         columns=["x", "y"]
-    )
+        )
+        
+    #Insert nearest index method here
+    if nearestindex:
+        h3index=_nearestindex(h3index, resolution)
+    else:
+        h3index=h3index
     # Secondary (parent) H3 index, used later for partitioning
     h3index = h3index.h3.h3_to_parent(parent_res).reset_index()
     # Renaming columns to actual band labels
@@ -184,13 +220,19 @@ def _initial_index(
 
                     def process(window):
                         sdf = da.rio.isel_window(window)
-
+                        
+                        nearestindex = kwargs["nearestindex"]
+                        ni_args = {
+                            "nearestindex": nearestindex
+                            }
+                        
                         result = _h3func(
                             sdf,
                             resolution,
                             parent_res,
                             vrt.nodata,
                             band_labels=band_names,
+                            **ni_args,
                         )
 
                         with write_lock:
@@ -219,21 +261,27 @@ def _initial_index(
             )
 
 
-def _h3_parent_groupby(df, resolution: int, aggfunc: str, decimals: int):
+def _h3_parent_groupby(df, resolution: int, aggfunc: str, decimals: int, nearestindex:bool):
     """
     Function for aggregating the h3 resolution values per parent partition. Each partition will be run through with a
     pandas .groupby function. This step is to ensure there are no duplicate h3 values, which will happen when indexing a
     high resolution raster at a coarser h3 resolution.
     """
-    if decimals > 0:
-        return df.groupby(f"h3_{resolution:02}").agg(aggfunc).round(decimals)
+    if nearestindex:
+        return df.sort_values([f"h3_{resolution:02}", "distance"]).drop_duplicates(subset=[f"h3_{resolution:02}"], keep="first").drop(
+        columns=["distance"]
+        )
     else:
-        return (
+        if decimals > 0:
+            return df.groupby(f"h3_{resolution:02}").agg(aggfunc).round(decimals)
+        else:
+            return (
             df.groupby(f"h3_{resolution:02}")
             .agg(aggfunc)
             .round(decimals)
             .astype("Int64")
         )
+    
 
 
 def _address_boundary_issues(
@@ -275,12 +323,12 @@ def _address_boundary_issues(
     LOGGER.debug("Aggregating cell values where conflicts exist")
 
     with TqdmCallback(desc="Repartioning/aggregating"):
-        ddf = (
+            ddf = ( 
             ddf.repartition(  # See "notes" on why divisions expects repetition of the last item https://docs.dask.org/en/stable/generated/dask.dataframe.DataFrame.repartition.html
                 divisions=(uniqueh3 + [uniqueh3[-1]])
             )
             .map_partitions(
-                _h3_parent_groupby, resolution, kwargs["aggfunc"], kwargs["decimals"]
+                _h3_parent_groupby, resolution, kwargs["aggfunc"], kwargs["decimals"], kwargs["nearestindex"]
             )
             .to_parquet(
                 output,
@@ -291,7 +339,7 @@ def _address_boundary_issues(
                 compression=kwargs["compression"],
             )
         )
-
+        
     LOGGER.debug(
         "Stage 2 (parent cell repartioning) and Stage 3 (aggregation) complete"
     )
@@ -321,7 +369,7 @@ def _address_boundary_issues(
     "-u",
     "--upscale",
     default=DEFAULTS["upscale"],
-    type=int,
+    type=float,
     help="Upscaling factor, used to upsample input data on the fly; useful when the raster resolution is lower than the target DGGS resolution. Default (1) applies no upscaling. The resampling method controls interpolation.",
 )
 @click.option(
@@ -353,6 +401,12 @@ def _address_boundary_issues(
     type=int,
     help="Number of decimal places to round values when aggregating. Use 0 for integer output.",
 )
+@click.option(
+    "-ni",
+    "--nearestindex",
+    is_flag=True,
+    help="Nearest index method resampling. Indexes nearest pixel value and ignores the rest. !!! Experimental implementation, really slow !!!",
+)
 @click.option("-o", "--overwrite", is_flag=True)
 @click.option(
     "--warp_mem_limit",
@@ -383,6 +437,7 @@ def h3(
     threads: int,
     aggfunc: str,
     decimals: int,
+    nearestindex: bool,
     overwrite: bool,
     warp_mem_limit: int,
     resampling: str,
@@ -429,6 +484,7 @@ def h3(
         "decimals": decimals,
         "warp_mem_limit": warp_mem_limit,
         "resampling": resampling,
+        "nearestindex": nearestindex,
         "overwrite": overwrite,
     }
     _initial_index(
