@@ -134,7 +134,7 @@ def _initial_index(
         parent_res,
     )
 
-    with tempfile.TemporaryDirectory() as tmpdir:
+    with tempfile.TemporaryDirectory(suffix=".parquet") as tmpdir:
         LOGGER.debug(f"Create temporary directory {tmpdir}")
 
         # https://rasterio.readthedocs.io/en/latest/api/rasterio.warp.html#rasterio.warp.calculate_default_transform
