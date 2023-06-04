@@ -71,9 +71,12 @@ def _get_parent_res(parent_res: Union[None, int], resolution: int) -> int:
     )
 def _nidropduplicates(df, resolution):
     df=df.reset_index()
-    df=df.sort_values(by=[f"h3_{resolution:02}", "distance"])
-    df=df.drop_duplicates(subset=[f"h3_{resolution:02}"], keep="first")
+    df=df.sort_values(by=[
+        f"h3_{resolution:02}",
+          "distance"]
+          )
     df=df.set_index(f"h3_{resolution:02}")
+    #df = df[~df.index.duplicated(keep='first')]
     return df
 
 def _nearestindex(df, resolution):
@@ -96,6 +99,7 @@ def _h3func(
     sdf: xr.DataArray,
     resolution: int,
     parent_res: int,
+    crs: int,
     nodata: Number = np.nan,
     band_labels: Tuple[str] = None,
     **ni_args,    
@@ -112,9 +116,14 @@ def _h3func(
     subset = pd.pivot_table(
         subset, values=DEFAULT_NAME, index=["x", "y"], columns=["band"]
     ).reset_index()
-    
+
     # Primary H3 index
-    
+
+    subset["geometry"]= gpd.points_from_xy(subset["x"],subset["y"], crs=crs)
+    subset=subset.set_geometry("geometry").to_crs(4326)
+    subset["x"] = subset["geometry"].x
+    subset["y"] = subset["geometry"].y
+    subset=subset.drop(columns=["geometry"])
     h3index = subset.h3.geo_to_h3(resolution, lat_col="y", lng_col="x")
     nearestindex = ni_args["nearestindex"]
     if nearestindex:
@@ -177,12 +186,14 @@ def _initial_index(
         with rio.Env(CHECK_WITH_INVERT_PROJ=True):
             with rio.open(raster_input) as src:
                 LOGGER.debug("Source CRS: %s", src.crs)
+                print("Source CRS: %s", src.crs)
                 # VRT used to avoid additional disk use given the potential for reprojection to 4326 prior to H3 indexing
                 band_names = src.descriptions
 
                 upscale_factor = kwargs["upscale"]
                 if upscale_factor > 1:
-                    dst_crs = warp_args["crs"]
+                    #dst_crs = warp_args["crs"]
+                    dst_crs = src.crs
                     transform, width, height = calculate_default_transform(
                         src.crs,
                         dst_crs,
@@ -230,6 +241,7 @@ def _initial_index(
                             sdf,
                             resolution,
                             parent_res,
+                            vrt.crs,
                             vrt.nodata,
                             band_labels=band_names,
                             **ni_args,
@@ -471,9 +483,9 @@ def h3(
         raster_input = Path(raster_input)
     warp_args: dict = {
         "resampling": Resampling._member_map_[resampling],
-        "crs": crs.CRS.from_epsg(
-            4326
-        ),  # Input raster must be converted to WGS84 (4326) for H3 indexing
+        #"crs": crs.CRS.from_epsg(
+        #    4326
+        #),  # Input raster must be converted to WGS84 (4326) for H3 indexing
         "warp_mem_limit": warp_mem_limit,
     }
     kwargs = {
