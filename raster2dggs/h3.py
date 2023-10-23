@@ -1,15 +1,10 @@
 from concurrent.futures import ThreadPoolExecutor, as_completed
-import errno
-import logging
-import os
-import multiprocessing
 from numbers import Number
 import numpy as np
 from pathlib import Path
 import tempfile
 import threading
 from typing import Callable, Tuple, Union
-from urllib.parse import urlparse
 
 import click
 import click_log
@@ -20,7 +15,6 @@ import pandas as pd
 import pyarrow as pa
 import pyarrow.parquet as pq
 import rasterio as rio
-from rasterio import crs
 from rasterio.enums import Resampling
 from rasterio.vrt import WarpedVRT
 from rasterio.warp import calculate_default_transform
@@ -29,45 +23,9 @@ from tqdm import tqdm
 from tqdm.dask import TqdmCallback
 import xarray as xr
 
+import raster2dggs.constants as const
+import raster2dggs.common as common
 from raster2dggs import __version__
-
-LOGGER = logging.getLogger(__name__)
-click_log.basic_config(LOGGER)
-
-MIN_H3, MAX_H3 = 0, 15
-DEFAULT_NAME: str = "value"
-
-DEFAULTS = {
-    "upscale": 1,
-    "compression": "snappy",
-    "threads": (multiprocessing.cpu_count() - 1),
-    "aggfunc": "mean",
-    "decimals": 1,
-    "warp_mem_limit": 12000,
-    "resampling": "average",
-    "tempdir": tempfile.tempdir
-}
-
-DEFAULT_PARENT_OFFSET = 6
-
-
-class ParentResolutionException(Exception):
-    pass
-
-
-def _get_parent_res(parent_res: Union[None, int], resolution: int) -> int:
-    """
-    Uses a parent resolution,
-    OR,
-    Given a target resolution, returns our recommended parent resolution.
-
-    Used for intermediate re-partioning.
-    """
-    return (
-        int(parent_res)
-        if parent_res is not None
-        else max(MIN_H3, (resolution - DEFAULT_PARENT_OFFSET))
-    )
 
 
 def _h3func(
@@ -87,7 +45,7 @@ def _h3func(
     subset: pd.DataFrame = sdf.dropna()
     subset = subset[subset.value != nodata]
     subset = pd.pivot_table(
-        subset, values=DEFAULT_NAME, index=["x", "y"], columns=["band"]
+        subset, values=const.DEFAULT_NAME, index=["x", "y"], columns=["band"]
     ).reset_index()
     # Primary H3 index
     h3index = subset.h3.geo_to_h3(resolution, lat_col="y", lng_col="x").drop(
@@ -126,8 +84,8 @@ def _initial_index(
     This function passes a path to a temporary directory (which contains the output of this "stage 1" processing) to
         a secondary function that addresses issues at the boundaries of raster windows.
     """
-    parent_res = _get_parent_res(parent_res, resolution)
-    LOGGER.info(
+    parent_res = common.get_parent_res("h3", parent_res, resolution)
+    common.LOGGER.info(
         "Indexing %s at H3 resolution %d, parent resolution %d",
         raster_input,
         resolution,
@@ -135,12 +93,12 @@ def _initial_index(
     )
 
     with tempfile.TemporaryDirectory() as tmpdir:
-        LOGGER.debug(f"Create temporary directory {tmpdir}")
+        common.LOGGER.debug(f"Create temporary directory {tmpdir}")
 
         # https://rasterio.readthedocs.io/en/latest/api/rasterio.warp.html#rasterio.warp.calculate_default_transform
         with rio.Env(CHECK_WITH_INVERT_PROJ=True):
             with rio.open(raster_input) as src:
-                LOGGER.debug("Source CRS: %s", src.crs)
+                common.LOGGER.debug("Source CRS: %s", src.crs)
                 # VRT used to avoid additional disk use given the potential for reprojection to 4326 prior to H3 indexing
                 band_names = src.descriptions
 
@@ -159,23 +117,23 @@ def _initial_index(
                     upsample_args = dict(
                         {"transform": transform, "width": width, "height": height}
                     )
-                    LOGGER.debug(upsample_args)
+                    common.LOGGER.debug(upsample_args)
                 else:
                     upsample_args = dict({})
 
                 with WarpedVRT(
                     src, src_crs=src.crs, **warp_args, **upsample_args
                 ) as vrt:
-                    LOGGER.debug("VRT CRS: %s", vrt.crs)
+                    common.LOGGER.debug("VRT CRS: %s", vrt.crs)
                     da: xr.Dataset = rioxarray.open_rasterio(
                         vrt,
                         lock=dask.utils.SerializableLock(),
                         masked=True,
-                        default_name=DEFAULT_NAME,
+                        default_name=const.DEFAULT_NAME,
                     ).chunk(**{"y": "auto", "x": "auto"})
 
                     windows = [window for _, window in vrt.block_windows()]
-                    LOGGER.debug(
+                    common.LOGGER.debug(
                         "%d windows (the same number of partitions will be created)",
                         len(windows),
                     )
@@ -213,13 +171,15 @@ def _initial_index(
                                 result = future.result()
                                 pbar.update(1)
 
-            LOGGER.debug("Stage 1 (primary indexing) complete")
+            common.LOGGER.debug("Stage 1 (primary indexing) complete")
             return _address_boundary_issues(
                 tmpdir, output, resolution, parent_res, **kwargs
             )
 
 
-def _h3_parent_groupby(df, resolution: int, aggfunc: Union[str, Callable], decimals: int):
+def _h3_parent_groupby(
+    df, resolution: int, aggfunc: Union[str, Callable], decimals: int
+):
     """
     Function for aggregating the h3 resolution values per parent partition. Each partition will be run through with a
     pandas .groupby function. This step is to ensure there are no duplicate h3 values, which will happen when indexing a
@@ -258,7 +218,7 @@ def _address_boundary_issues(
     """
     parent_res = _get_parent_res(parent_res, resolution)
 
-    LOGGER.debug(
+    common.LOGGER.debug(
         f"Reading Stage 1 output ({pq_input}) and setting index for parent-based partitioning"
     )
     with TqdmCallback(desc="Reading window partitions"):
@@ -269,10 +229,10 @@ def _address_boundary_issues(
         # Count parents, to get target number of partitions
         uniqueh3 = sorted(list(ddf.index.unique().compute()))
 
-    LOGGER.debug(
+    common.LOGGER.debug(
         "Repartitioning into %d partitions, based on parent cells", len(uniqueh3) + 1
     )
-    LOGGER.debug("Aggregating cell values where conflicts exist")
+    common.LOGGER.debug("Aggregating cell values where conflicts exist")
 
     with TqdmCallback(desc="Repartioning/aggregating"):
         ddf = (
@@ -288,12 +248,12 @@ def _address_boundary_issues(
                 engine="pyarrow",
                 write_index=True,
                 append=False,
-                name_function=lambda i: f'{uniqueh3[i]}.parquet',
+                name_function=lambda i: f"{uniqueh3[i]}.parquet",
                 compression=kwargs["compression"],
             )
         )
 
-    LOGGER.debug(
+    common.LOGGER.debug(
         "Stage 2 (parent cell repartioning) and Stage 3 (aggregation) complete"
     )
 
@@ -301,47 +261,47 @@ def _address_boundary_issues(
 
 
 @click.command(context_settings={"show_default": True})
-@click_log.simple_verbosity_option(LOGGER)
+@click_log.simple_verbosity_option(common.LOGGER)
 @click.argument("raster_input", type=click.Path(), nargs=1)
 @click.argument("output_directory", type=click.Path(), nargs=1)
 @click.option(
     "-r",
     "--resolution",
     required=True,
-    type=click.Choice(list(map(str, range(MIN_H3, MAX_H3 + 1)))),
+    type=click.Choice(list(map(str, range(const.MIN_H3, const.MAX_H3 + 1)))),
     help="H3 resolution to index",
 )
 @click.option(
     "-pr",
     "--parent_res",
     required=False,
-    type=click.Choice(list(map(str, range(MIN_H3, MAX_H3 + 1)))),
+    type=click.Choice(list(map(str, range(const.MIN_H3, const.MAX_H3 + 1)))),
     help="H3 Parent resolution to index and aggregate to. Defaults to resolution - 6",
 )
 @click.option(
     "-u",
     "--upscale",
-    default=DEFAULTS["upscale"],
+    default=const.DEFAULTS["upscale"],
     type=int,
     help="Upscaling factor, used to upsample input data on the fly; useful when the raster resolution is lower than the target DGGS resolution. Default (1) applies no upscaling. The resampling method controls interpolation.",
 )
 @click.option(
     "-c",
     "--compression",
-    default=DEFAULTS["compression"],
+    default=const.DEFAULTS["compression"],
     type=click.Choice(["snappy", "gzip", "zstd"]),
     help="Name of the compression to use when writing to Parquet.",
 )
 @click.option(
     "-t",
     "--threads",
-    default=DEFAULTS["threads"],
+    default=const.DEFAULTS["threads"],
     help="Number of threads to use when running in parallel. The default is determined based dynamically as the total number of available cores, minus one.",
 )
 @click.option(
     "-a",
     "--aggfunc",
-    default=DEFAULTS["aggfunc"],
+    default=const.DEFAULTS["aggfunc"],
     type=click.Choice(
         ["count", "mean", "sum", "prod", "std", "var", "min", "max", "median", "mode"]
     ),
@@ -350,28 +310,28 @@ def _address_boundary_issues(
 @click.option(
     "-d",
     "--decimals",
-    default=DEFAULTS["decimals"],
+    default=const.DEFAULTS["decimals"],
     type=int,
     help="Number of decimal places to round values when aggregating. Use 0 for integer output.",
 )
 @click.option("-o", "--overwrite", is_flag=True)
 @click.option(
     "--warp_mem_limit",
-    default=DEFAULTS["warp_mem_limit"],
+    default=const.DEFAULTS["warp_mem_limit"],
     type=int,
     help="Input raster may be warped to EPSG:4326 if it is not already in this CRS. This setting specifies the warp operation's memory limit in MB.",
 )
 @click.option(
     "--resampling",
-    default=DEFAULTS["resampling"],
+    default=const.DEFAULTS["resampling"],
     type=click.Choice(Resampling._member_names_),
     help="Input raster may be warped to EPSG:4326 if it is not already in this CRS. Or, if the upscale parameter is greater than 1, there is a need to resample. This setting specifies this resampling algorithm.",
 )
 @click.option(
     "--tempdir",
-    default=DEFAULTS["tempdir"],
+    default=const.DEFAULTS["tempdir"],
     type=click.Path(),
-    help="Temporary data is created during the execution of this program. This parameter allows you to control where this data will be written."
+    help="Temporary data is created during the execution of this program. This parameter allows you to control where this data will be written.",
 )
 @click.version_option(version=__version__)
 def h3(
@@ -396,44 +356,23 @@ def h3(
     OUTPUT_DIRECTORY should be a directory, not a file, as it will be the write location for an Apache Parquet data store, with partitions equivalent to parent cells of target cells at a fixed offset. However, this can also be remote (use the appropriate prefix, e.g. s3://).
     """
     tempfile.tempdir = tempdir if tempdir is not None else tempfile.tempdir
-    if parent_res is not None and not int(parent_res) < int(resolution):
-        raise ParentResolutionException(
-            "Parent resolution ({pr}) must be less than target resolution ({r})".format(
-                pr=parent_res, r=resolution
-            )
-        )
-    if not Path(raster_input).exists():
-        if not urlparse(raster_input).scheme:
-            LOGGER.warning(
-                f"Input raster {raster_input} does not exist, and is not recognised as a remote URI"
-            )
-            raise FileNotFoundError(
-                errno.ENOENT, os.strerror(errno.ENOENT), raster_input
-            )
-        # Quacks like a path to remote data
-        raster_input = str(raster_input)
-    else:
-        raster_input = Path(raster_input)
-    warp_args: dict = {
-        "resampling": Resampling._member_map_[resampling],
-        "crs": crs.CRS.from_epsg(
-            4326
-        ),  # Input raster must be converted to WGS84 (4326) for H3 indexing
-        "warp_mem_limit": warp_mem_limit,
-    }
-    if aggfunc == 'mode':
-        logging.warning('Mode aggregation: arbitrary behaviour: if there is more than one mode when aggregating, only the first value will be recorded.')
-        aggfunc = lambda x: pd.Series.mode(x)[0]
-    kwargs = {
-        "upscale": upscale,
-        "compression": compression,
-        "threads": threads,
-        "aggfunc": aggfunc,
-        "decimals": decimals,
-        "warp_mem_limit": warp_mem_limit,
-        "resampling": resampling,
-        "overwrite": overwrite,
-    }
+
+    common.check_resolutions(resolution, parent_res)
+
+    raster_input = common.resolve_input_path(raster_input)
+    warp_args = common.assemble_warp_args(resampling, warp_mem_limit)
+    aggfunc = common.create_aggfunc(aggfunc)
+    kwargs = common.assemble_kwargs(
+        upscale,
+        compression,
+        threads,
+        aggfunc,
+        decimals,
+        warp_mem_limit,
+        resampling,
+        overwrite,
+    )
+
     _initial_index(
         raster_input,
         output_directory,

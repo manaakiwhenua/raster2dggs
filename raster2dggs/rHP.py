@@ -11,70 +11,53 @@ from rasterio.enums import Resampling
 
 import raster2dggs.rHPpandas
 
+import raster2dggs.constants as const
+import raster2dggs.common as common
 from raster2dggs import __version__
-
-LOGGER = logging.getLogger(__name__)
-click_log.basic_config(LOGGER)
-
-MIN_RHP, MAX_RHP = 0, 15
-DEFAULT_NAME: str = "value"
-
-DEFAULTS = {
-    "upscale": 1,
-    "compression": "snappy",
-    "threads": (multiprocessing.cpu_count() - 1),
-    "aggfunc": "mean",
-    "decimals": 1,
-    "warp_mem_limit": 12000,
-    "resampling": "average",
-    "tempdir": tempfile.tempdir,
-}
-
-DEFAULT_PARENT_OFFSET = 6
 
 
 @click.command(context_settings={"show_default": True})
-@click_log.simple_verbosity_option(LOGGER)
+@click_log.simple_verbosity_option(common.LOGGER)
 @click.argument("raster_input", type=click.Path(), nargs=1)
 @click.argument("output_directory", type=click.Path(), nargs=1)
 @click.option(
     "-r",
     "--resolution",
     required=True,
-    type=click.Choice(list(map(str, range(MIN_RHP, MAX_RHP + 1)))),
+    type=click.Choice(list(map(str, range(const.MIN_RHP, const.MAX_RHP + 1)))),
     help="rHEALPix resolution to index",
 )
 @click.option(
     "-pr",
     "--parent_res",
     required=False,
-    type=click.Choice(list(map(str, range(MIN_RHP, MAX_RHP + 1)))),
+    type=click.Choice(list(map(str, range(const.MIN_RHP, const.MAX_RHP + 1)))),
     help="rHEALPix Parent resolution to index and aggregate to. Defaults to resolution - 6",
 )
 @click.option(
     "-u",
     "--upscale",
-    default=DEFAULTS["upscale"],
+    default=const.DEFAULTS["upscale"],
     type=int,
     help="Upscaling factor, used to upsample input data on the fly; useful when the raster resolution is lower than the target DGGS resolution. Default (1) applies no upscaling. The resampling method controls interpolation.",
 )
 @click.option(
     "-c",
     "--compression",
-    default=DEFAULTS["compression"],
+    default=const.DEFAULTS["compression"],
     type=click.Choice(["snappy", "gzip", "zstd"]),
     help="Name of the compression to use when writing to Parquet.",
 )
 @click.option(
     "-t",
     "--threads",
-    default=DEFAULTS["threads"],
+    default=const.DEFAULTS["threads"],
     help="Number of threads to use when running in parallel. The default is determined based dynamically as the total number of available cores, minus one.",
 )
 @click.option(
     "-a",
     "--aggfunc",
-    default=DEFAULTS["aggfunc"],
+    default=const.DEFAULTS["aggfunc"],
     type=click.Choice(
         ["count", "mean", "sum", "prod", "std", "var", "min", "max", "median", "mode"]
     ),
@@ -83,26 +66,26 @@ DEFAULT_PARENT_OFFSET = 6
 @click.option(
     "-d",
     "--decimals",
-    default=DEFAULTS["decimals"],
+    default=const.DEFAULTS["decimals"],
     type=int,
     help="Number of decimal places to round values when aggregating. Use 0 for integer output.",
 )
 @click.option("-o", "--overwrite", is_flag=True)
 @click.option(
     "--warp_mem_limit",
-    default=DEFAULTS["warp_mem_limit"],
+    default=const.DEFAULTS["warp_mem_limit"],
     type=int,
     help="Input raster may be warped to EPSG:4326 if it is not already in this CRS. This setting specifies the warp operation's memory limit in MB.",
 )
 @click.option(
     "--resampling",
-    default=DEFAULTS["resampling"],
+    default=const.DEFAULTS["resampling"],
     type=click.Choice(Resampling._member_names_),
     help="Input raster may be warped to EPSG:4326 if it is not already in this CRS. Or, if the upscale parameter is greater than 1, there is a need to resample. This setting specifies this resampling algorithm.",
 )
 @click.option(
     "--tempdir",
-    default=DEFAULTS["tempdir"],
+    default=const.DEFAULTS["tempdir"],
     type=click.Path(),
     help="Temporary data is created during the execution of this program. This parameter allows you to control where this data will be written.",
 )
@@ -122,5 +105,31 @@ def rhp(
     resampling: str,
     tempdir: Union[str, Path],
 ):
-    # TODO: process input parameters
+    """
+    Ingest a raster image and index it to the rHEALPix DGGS.
+
+    RASTER_INPUT is the path to input raster data; prepend with protocol like s3:// or hdfs:// for remote data.
+    OUTPUT_DIRECTORY should be a directory, not a file, as it will be the write location for an Apache Parquet data store, with partitions equivalent to parent cells of target cells at a fixed offset. However, this can also be remote (use the appropriate prefix, e.g. s3://).
+
+    TODO: loads!
+    """
+    tempfile.tempdir = tempdir if tempdir is not None else tempfile.tempdir
+
+    common.check_resolutions(resolution, parent_res)
+
+    raster_input = common.resolve_input_path(raster_input)
+    warp_args = common.assemble_warp_args(resampling, warp_mem_limit)
+    aggfunc = common.create_aggfunc(aggfunc)
+    kwargs = common.assemble_kwargs(
+        upscale,
+        compression,
+        threads,
+        aggfunc,
+        decimals,
+        warp_mem_limit,
+        resampling,
+        overwrite,
+    )
+
+    # TODO: the actual heavy lifting!
     print("Called rhp top-level function")
