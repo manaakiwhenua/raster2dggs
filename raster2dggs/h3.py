@@ -216,7 +216,7 @@ def _address_boundary_issues(
         of the original (i.e. window-based) partitioning. Using the nested structure of the DGGS is an useful property
         to address this problem.
     """
-    parent_res = _get_parent_res(parent_res, resolution)
+    parent_res = common.get_parent_res("h3", parent_res, resolution)
 
     common.LOGGER.debug(
         f"Reading Stage 1 output ({pq_input}) and setting index for parent-based partitioning"
