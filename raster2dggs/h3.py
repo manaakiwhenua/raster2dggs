@@ -9,7 +9,6 @@ from typing import Callable, Tuple, Union
 import click
 import click_log
 import dask
-import dask.dataframe as dd
 import h3pandas  # Necessary import despite lack of explicit use
 import pandas as pd
 import pyarrow as pa
@@ -20,7 +19,6 @@ from rasterio.vrt import WarpedVRT
 from rasterio.warp import calculate_default_transform
 import rioxarray
 from tqdm import tqdm
-from tqdm.dask import TqdmCallback
 import xarray as xr
 
 import raster2dggs.constants as const
@@ -172,8 +170,14 @@ def _initial_index(
                                 pbar.update(1)
 
             common.LOGGER.debug("Stage 1 (primary indexing) complete")
-            return _address_boundary_issues(
-                tmpdir, output, resolution, parent_res, **kwargs
+            return common.address_boundary_issues(
+                "h3",
+                _h3_parent_groupby,
+                tmpdir,
+                output,
+                resolution,
+                parent_res,
+                **kwargs,
             )
 
 
@@ -194,70 +198,6 @@ def _h3_parent_groupby(
             .round(decimals)
             .astype("Int64")
         )
-
-
-def _address_boundary_issues(
-    pq_input: tempfile.TemporaryDirectory,
-    output: Path,
-    resolution: int,
-    parent_res: int,
-    **kwargs,
-) -> Path:
-    """
-    After "stage 1" processing, there is an H3 cell and band value/s for each pixel in the input image. Partitions are based
-    on raster windows.
-
-    This function will re-partition based on H3 parent cell IDs at a fixed offset from the target resolution.
-
-    Once re-partitioned on this basis, values are aggregated at the target resolution, to account for multiple pixels mapping
-        to the same H3 cell.
-
-    This re-partitioning is necessary to address the issue of the same H3 cell IDs being present in different partitions
-        of the original (i.e. window-based) partitioning. Using the nested structure of the DGGS is an useful property
-        to address this problem.
-    """
-    parent_res = common.get_parent_res("h3", parent_res, resolution)
-
-    common.LOGGER.debug(
-        f"Reading Stage 1 output ({pq_input}) and setting index for parent-based partitioning"
-    )
-    with TqdmCallback(desc="Reading window partitions"):
-        # Set index as parent cell
-        ddf = dd.read_parquet(pq_input).set_index(f"h3_{parent_res:02}")
-
-    with TqdmCallback(desc="Counting parents"):
-        # Count parents, to get target number of partitions
-        uniqueh3 = sorted(list(ddf.index.unique().compute()))
-
-    common.LOGGER.debug(
-        "Repartitioning into %d partitions, based on parent cells", len(uniqueh3) + 1
-    )
-    common.LOGGER.debug("Aggregating cell values where conflicts exist")
-
-    with TqdmCallback(desc="Repartioning/aggregating"):
-        ddf = (
-            ddf.repartition(  # See "notes" on why divisions expects repetition of the last item https://docs.dask.org/en/stable/generated/dask.dataframe.DataFrame.repartition.html
-                divisions=(uniqueh3 + [uniqueh3[-1]])
-            )
-            .map_partitions(
-                _h3_parent_groupby, resolution, kwargs["aggfunc"], kwargs["decimals"]
-            )
-            .to_parquet(
-                output,
-                overwrite=kwargs["overwrite"],
-                engine="pyarrow",
-                write_index=True,
-                append=False,
-                name_function=lambda i: f"{uniqueh3[i]}.parquet",
-                compression=kwargs["compression"],
-            )
-        )
-
-    common.LOGGER.debug(
-        "Stage 2 (parent cell repartioning) and Stage 3 (aggregation) complete"
-    )
-
-    return output
 
 
 @click.command(context_settings={"show_default": True})

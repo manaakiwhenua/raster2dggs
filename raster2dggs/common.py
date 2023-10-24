@@ -1,14 +1,17 @@
 import os
 import errno
+import tempfile
 import logging
 import click_log
 
 import pandas as pd
 
-from typing import Union
+from typing import Union, Callable
 from pathlib import Path
 from rasterio import crs
 from rasterio.enums import Resampling
+from tqdm.dask import TqdmCallback
+import dask.dataframe as dd
 
 from urllib.parse import urlparse
 
@@ -118,3 +121,70 @@ def get_parent_res(dggs: str, parent_res: Union[None, int], resolution: int) -> 
         raise RuntimeError(
             "Unknown dggs {dggs}) -  must be one of [ 'h3', 'rhp' ]".format(dggs=dggs)
         )
+
+
+def address_boundary_issues(
+    dggs: str,
+    parent_groupby: Callable,
+    pq_input: tempfile.TemporaryDirectory,
+    output: Path,
+    resolution: int,
+    parent_res: int,
+    **kwargs,
+) -> Path:
+    """
+    After "stage 1" processing, there is a DGGS cell and band value/s for each pixel in the input image. Partitions are based
+    on raster windows.
+
+    This function will re-partition based on parent cell IDs at a fixed offset from the target resolution.
+
+    Once re-partitioned on this basis, values are aggregated at the target resolution, to account for multiple pixels mapping
+        to the same cell.
+
+    This re-partitioning is necessary to address the issue of the same cell IDs being present in different partitions
+        of the original (i.e. window-based) partitioning. Using the nested structure of the DGGS is an useful property
+        to address this problem.
+    """
+    parent_res = get_parent_res(dggs, parent_res, resolution)
+
+    LOGGER.debug(
+        f"Reading Stage 1 output ({pq_input}) and setting index for parent-based partitioning"
+    )
+    with TqdmCallback(desc="Reading window partitions"):
+        # Set index as parent cell
+        ddf = dd.read_parquet(pq_input).set_index(f"{dggs}_{parent_res:02}")
+
+    with TqdmCallback(desc="Counting parents"):
+        # Count parents, to get target number of partitions
+        uniqueparents = sorted(list(ddf.index.unique().compute()))
+
+    LOGGER.debug(
+        "Repartitioning into %d partitions, based on parent cells",
+        len(uniqueparents) + 1,
+    )
+    LOGGER.debug("Aggregating cell values where conflicts exist")
+
+    with TqdmCallback(desc="Repartioning/aggregating"):
+        ddf = (
+            ddf.repartition(  # See "notes" on why divisions expects repetition of the last item https://docs.dask.org/en/stable/generated/dask.dataframe.DataFrame.repartition.html
+                divisions=(uniqueparents + [uniqueparents[-1]])
+            )
+            .map_partitions(
+                parent_groupby, resolution, kwargs["aggfunc"], kwargs["decimals"]
+            )
+            .to_parquet(
+                output,
+                overwrite=kwargs["overwrite"],
+                engine="pyarrow",
+                write_index=True,
+                append=False,
+                name_function=lambda i: f"{uniqueparents[i]}.parquet",
+                compression=kwargs["compression"],
+            )
+        )
+
+    LOGGER.debug(
+        "Stage 2 (parent cell repartioning) and Stage 3 (aggregation) complete"
+    )
+
+    return output
