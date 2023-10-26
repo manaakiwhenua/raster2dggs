@@ -4,7 +4,7 @@ from functools import partial, update_wrapper
 import pandas as pd
 import geopandas as gpd
 
-import raster2dggs.rhealpixdggs_py.rhealpixdggs.wrappers as rhp_py
+import raster2dggs.rhealpixdggs_py.rhealpixdggs.rhp_wrappers as rhp_py
 
 AnyDataFrame = Union[pd.DataFrame, gpd.GeoDataFrame]
 
@@ -22,6 +22,12 @@ def wrapped_partial(func, *args, **kwargs):
 
 @pd.api.extensions.register_dataframe_accessor("rHP")
 class rHPAccessor:
+    """
+    Shamelessly appropriated from equivalent class in h3pandas package
+
+    WIP: adapt more functions as needed
+    """
+
     def __init__(self, df: pd.DataFrame) -> None:
         self._df = df
 
@@ -87,9 +93,7 @@ class rHPAccessor:
         processor: Callable = lambda x: x,
         finalizer: Callable = lambda x: x,
     ) -> Any:
-        """
-        Appropriated from h3pandas package
-        """
         result = [processor(func(rhpaddress)) for rhpaddress in self._df.index]
         assign_args = {column_name: result}
+
         return finalizer(self._df.assign(**assign_args))
