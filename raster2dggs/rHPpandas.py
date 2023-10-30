@@ -1,6 +1,7 @@
 from typing import Union, Callable, Any
 from functools import partial, update_wrapper
 
+import shapely
 import pandas as pd
 import geopandas as gpd
 
@@ -68,7 +69,8 @@ class rHPAccessor:
 
         # Index conversion
         rhpaddresses = [
-            rhp_py.geo_to_rhp(lat, lng, resolution) for lat, lng in zip(lats, lngs)
+            rhp_py.geo_to_rhp(lat, lng, resolution, False)
+            for lat, lng in zip(lats, lngs)
         ]
 
         # Add results to DataFrame
@@ -80,10 +82,32 @@ class rHPAccessor:
         return df
 
     def rhp_to_parent(self, resolution: int = None) -> AnyDataFrame:
+        """
+        Parameters
+        ----------
+        resolution : int or None
+            rHEALPix resolution. If None, then returns the direct parent of each rHEALPix cell.
+        """
         column = f"rhp_{resolution:02}" if resolution else "rhp_parent"
 
         return self._apply_index_assign(
             wrapped_partial(rhp_py.rhp_to_parent, res=resolution), column
+        )
+
+    def rhp_to_geo_boundary(self) -> AnyDataFrame:
+        """Add `geometry` with rHEALPix squares to the DataFrame. Assumes rHEALPix index.
+
+        Returns
+        -------
+        GeoDataFrame with rHEALPix geometry
+        """
+        return self._apply_index_assign(
+            wrapped_partial(rhp_py.rhp_to_geo_boundary, geo_json=True, plane=False),
+            "geometry",
+            lambda x: shapely.geometry.Polygon(x),
+            lambda x: gpd.GeoDataFrame(
+                x, crs="epsg:4326"
+            ),  # TODO: add correct coordinate system?
         )
 
     def _apply_index_assign(
@@ -93,6 +117,25 @@ class rHPAccessor:
         processor: Callable = lambda x: x,
         finalizer: Callable = lambda x: x,
     ) -> Any:
+        """
+        Helper method. Applies `func` to index and assigns the result to `column`.
+
+        Parameters
+        ----------
+        func : Callable
+            single-argument function to be applied to each rHEALPix address
+        column_name : str
+            name of the resulting column
+        processor : Callable
+            (Optional) further processes the result of func. Default: identity
+        finalizer : Callable
+            (Optional) further processes the resulting dataframe. Default: identity
+
+        Returns
+        -------
+        Dataframe with column `column` containing the result of `func`.
+        If using `finalizer`, can return anything the `finalizer` returns.
+        """
         result = [processor(func(rhpaddress)) for rhpaddress in self._df.index]
         assign_args = {column_name: result}
 
