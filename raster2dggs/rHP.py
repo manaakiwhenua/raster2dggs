@@ -40,11 +40,11 @@ def _rhpfunc(
     subset = pd.pivot_table(
         subset, values=const.DEFAULT_NAME, index=["x", "y"], columns=["band"]
     ).reset_index()
-    # Primary H3 index
+    # Primary rHEALPix index
     rhpindex = subset.rHP.geo_to_rhp(resolution, lat_col="y", lng_col="x").drop(
         columns=["x", "y"]
     )
-    # Secondary (parent) H3 index, used later for partitioning
+    # Secondary (parent) rHEALPix index, used later for partitioning
     rhpindex = rhpindex.rHP.rhp_to_parent(parent_res).reset_index()
     # Renaming columns to actual band labels
     bands = sdf["band"].unique()
@@ -67,10 +67,13 @@ def _rhp_parent_groupby(
     high resolution raster at a coarser resolution.
     """
     if decimals > 0:
-        return df.groupby(f"rhp_{resolution}").agg(aggfunc).round(decimals)
+        return df.groupby(f"rhp_{resolution:02}").agg(aggfunc).round(decimals)
     else:
         return (
-            df.groupby(f"rhp_{resolution}").agg(aggfunc).round(decimals).astype("Int64")
+            df.groupby(f"rhp_{resolution:02}")
+            .agg(aggfunc)
+            .round(decimals)
+            .astype("Int64")
         )
 
 
