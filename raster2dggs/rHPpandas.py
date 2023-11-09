@@ -88,7 +88,7 @@ class rHPAccessor:
         resolution : int or None
             rHEALPix resolution. If None, then returns the direct parent of each rHEALPix cell.
         """
-        column = f"rhp_{resolution:02}" if resolution else "rhp_parent"
+        column = f"rhp_{resolution:02}" if resolution is not None else "rhp_parent"
 
         return self._apply_index_assign(
             wrapped_partial(rhp_py.rhp_to_parent, res=resolution), column
