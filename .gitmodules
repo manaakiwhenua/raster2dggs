@@ -1,4 +1,0 @@
-[submodule "raster2dggs/rhealpixdggs_py"]
-	path = raster2dggs/rhealpixdggs_py
-	url = git@github.com:manaakiwhenua/rhealpixdggs-py.git
-	branch = demaion/raster2dggs
