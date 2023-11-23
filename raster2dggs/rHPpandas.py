@@ -5,7 +5,7 @@ import shapely
 import pandas as pd
 import geopandas as gpd
 
-import raster2dggs.rhealpixdggs_py.rhealpixdggs.rhp_wrappers as rhp_py
+import rhealpixdggs.rhp_wrappers as rhp_py
 
 AnyDataFrame = Union[pd.DataFrame, gpd.GeoDataFrame]
 
