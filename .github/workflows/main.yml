@@ -11,4 +11,4 @@ jobs:
       - name : 'Checkout'
         uses : 'actions/checkout@v2'
       - name : 'manaakiwhenua-standards'
-        uses : manaakiwhenua/manaakiwhenua-standards@v0.1.1
+        uses : manaakiwhenua/manaakiwhenua-standards@v0.2.2
