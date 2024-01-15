@@ -159,6 +159,6 @@ raster2dggs h3 --resolution 13 --compression zstd --resampling nearest -a median
 
 APA/Harvard
 
-> Ardo, J., & Law, R. (2023). raster2dggs (0.2.4) [Computer software]. https://github.com/manaakiwhenua/raster2dggs 
+> Ardo, J., & Law, R. (2023). raster2dggs (0.2.4) [Computer software]. https://github.com/manaakiwhenua/raster2dggs
 
 [![manaakiwhenua-standards](https://github.com/manaakiwhenua/raster2dggs/workflows/manaakiwhenua-standards/badge.svg)](https://github.com/manaakiwhenua/manaakiwhenua-standards)

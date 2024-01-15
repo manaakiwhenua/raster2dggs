@@ -45,7 +45,7 @@ DEFAULTS = {
     "decimals": 1,
     "warp_mem_limit": 12000,
     "resampling": "average",
-    "tempdir": tempfile.tempdir
+    "tempdir": tempfile.tempdir,
 }
 
 DEFAULT_PARENT_OFFSET = 6
@@ -219,7 +219,9 @@ def _initial_index(
             )
 
 
-def _h3_parent_groupby(df, resolution: int, aggfunc: Union[str, Callable], decimals: int):
+def _h3_parent_groupby(
+    df, resolution: int, aggfunc: Union[str, Callable], decimals: int
+):
     """
     Function for aggregating the h3 resolution values per parent partition. Each partition will be run through with a
     pandas .groupby function. This step is to ensure there are no duplicate h3 values, which will happen when indexing a
@@ -288,7 +290,7 @@ def _address_boundary_issues(
                 engine="pyarrow",
                 write_index=True,
                 append=False,
-                name_function=lambda i: f'{uniqueh3[i]}.parquet',
+                name_function=lambda i: f"{uniqueh3[i]}.parquet",
                 compression=kwargs["compression"],
             )
         )
@@ -371,7 +373,7 @@ def _address_boundary_issues(
     "--tempdir",
     default=DEFAULTS["tempdir"],
     type=click.Path(),
-    help="Temporary data is created during the execution of this program. This parameter allows you to control where this data will be written."
+    help="Temporary data is created during the execution of this program. This parameter allows you to control where this data will be written.",
 )
 @click.version_option(version=__version__)
 def h3(
@@ -421,8 +423,10 @@ def h3(
         ),  # Input raster must be converted to WGS84 (4326) for H3 indexing
         "warp_mem_limit": warp_mem_limit,
     }
-    if aggfunc == 'mode':
-        logging.warning('Mode aggregation: arbitrary behaviour: if there is more than one mode when aggregating, only the first value will be recorded.')
+    if aggfunc == "mode":
+        logging.warning(
+            "Mode aggregation: arbitrary behaviour: if there is more than one mode when aggregating, only the first value will be recorded."
+        )
         aggfunc = lambda x: pd.Series.mode(x)[0]
     kwargs = {
         "upscale": upscale,
