@@ -152,13 +152,13 @@ raster2dggs h3 --resolution 13 --compression zstd --resampling nearest -a median
   title={{raster2dggs}},
   author={Ardo, James and Law, Richard},
   url={https://github.com/manaakiwhenua/raster2dggs},
-  version={0.2.5},
+  version={0.2.6},
   date={2023-02-09}
 }
 ```
 
 APA/Harvard
 
-> Ardo, J., & Law, R. (2023). raster2dggs (0.2.5) [Computer software]. https://github.com/manaakiwhenua/raster2dggs
+> Ardo, J., & Law, R. (2023). raster2dggs (0.2.6) [Computer software]. https://github.com/manaakiwhenua/raster2dggs
 
 [![manaakiwhenua-standards](https://github.com/manaakiwhenua/raster2dggs/workflows/manaakiwhenua-standards/badge.svg)](https://github.com/manaakiwhenua/manaakiwhenua-standards)
