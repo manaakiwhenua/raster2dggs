@@ -17,6 +17,7 @@ import dask
 import dask.dataframe as dd
 import h3pandas  # Necessary import despite lack of explicit use
 import pandas as pd
+import geopandas as gpd
 import pyarrow as pa
 import pyarrow.parquet as pq
 import rasterio as rio
@@ -74,11 +75,14 @@ def _h3func(
     sdf: xr.DataArray,
     resolution: int,
     parent_res: int,
+    crs: int,
     nodata: Number = np.nan,
     band_labels: Tuple[str] = None,
 ) -> pa.Table:
     """
     Index a raster window to H3.
+    Midpoints of raster are transformed into 4326, instead of raster windows as 
+    reprojection of points are more precise than raster reprojection.
     Subsequent steps are necessary to resolve issues at the boundaries of windows.
     If windows are very small, or in strips rather than blocks, processing may be slower
     than necessary and the recommendation is to write different windows in the source raster.
@@ -89,7 +93,14 @@ def _h3func(
     subset = pd.pivot_table(
         subset, values=DEFAULT_NAME, index=["x", "y"], columns=["band"]
     ).reset_index()
+
     # Primary H3 index
+
+    subset["geometry"]= gpd.points_from_xy(subset["x"],subset["y"], crs=crs)
+    subset=subset.set_geometry("geometry").to_crs(4326) #EPSG hardcoded transformation for h3 indexing
+    subset["x"] = subset["geometry"].x
+    subset["y"] = subset["geometry"].y
+    subset=subset.drop(columns=["geometry"])
     h3index = subset.h3.geo_to_h3(resolution, lat_col="y", lng_col="x").drop(
         columns=["x", "y"]
     )
@@ -146,7 +157,7 @@ def _initial_index(
 
                 upscale_factor = kwargs["upscale"]
                 if upscale_factor > 1:
-                    dst_crs = warp_args["crs"]
+                    dst_crs = src.crs
                     transform, width, height = calculate_default_transform(
                         src.crs,
                         dst_crs,
@@ -189,6 +200,7 @@ def _initial_index(
                             sdf,
                             resolution,
                             parent_res,
+                            vrt.crs,
                             vrt.nodata,
                             band_labels=band_names,
                         )
@@ -418,9 +430,9 @@ def h3(
         raster_input = Path(raster_input)
     warp_args: dict = {
         "resampling": Resampling._member_map_[resampling],
-        "crs": crs.CRS.from_epsg(
-            4326
-        ),  # Input raster must be converted to WGS84 (4326) for H3 indexing
+        # "crs": crs.CRS.from_epsg(
+        #     4326
+        # ),  # Input raster must be converted to WGS84 (4326) for H3 indexing
         "warp_mem_limit": warp_mem_limit,
     }
     if aggfunc == "mode":
