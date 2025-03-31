@@ -1,20 +1,16 @@
-import logging
-import multiprocessing
+from numbers import Number
+import numpy as np
+from pathlib import Path
 import tempfile
+from typing import Callable, Tuple, Union
+
 import click
 import click_log
-
-import numpy as np
-import xarray as xr
+import rhppandas  # Necessary import despite lack of explicit use
 import pandas as pd
 import pyarrow as pa
-
-from numbers import Number
-from pathlib import Path
-from typing import Callable, Tuple, Union
 from rasterio.enums import Resampling
-
-import raster2dggs.rHPpandas
+import xarray as xr
 
 import raster2dggs.constants as const
 import raster2dggs.common as common
@@ -41,11 +37,11 @@ def _rhpfunc(
         subset, values=const.DEFAULT_NAME, index=["x", "y"], columns=["band"]
     ).reset_index()
     # Primary rHEALPix index
-    rhpindex = subset.rHP.geo_to_rhp(resolution, lat_col="y", lng_col="x").drop(
+    rhpindex = subset.rhp.geo_to_rhp(resolution, lat_col="y", lng_col="x").drop(
         columns=["x", "y"]
     )
     # Secondary (parent) rHEALPix index, used later for partitioning
-    rhpindex = rhpindex.rHP.rhp_to_parent(parent_res).reset_index()
+    rhpindex = rhpindex.rhp.rhp_to_parent(parent_res).reset_index()
     # Renaming columns to actual band labels
     bands = sdf["band"].unique()
     band_names = dict(zip(bands, map(lambda i: band_labels[i - 1], bands)))

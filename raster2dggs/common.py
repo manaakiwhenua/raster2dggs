@@ -118,13 +118,13 @@ def get_parent_res(dggs: str, parent_res: Union[None, int], resolution: int) -> 
     """
     if dggs == "h3":
         return (
-            int(parent_res)
+            parent_res
             if parent_res is not None
             else max(const.MIN_H3, (resolution - const.DEFAULT_PARENT_OFFSET))
         )
     elif dggs == "rhp":
         return (
-            int(parent_res)
+            parent_res
             if parent_res is not None
             else max(const.MIN_RHP, (resolution - const.DEFAULT_PARENT_OFFSET))
         )
