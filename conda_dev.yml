@@ -21,5 +21,5 @@ dependencies:
   - pip
   - pip:
     # Use pip to install rhppandas from dev branch of git repo
-    - git+https://github.com/manaakiwhenua/rHP-Pandas.git@demaion/polyfill
-    - git+https://github.com/manaakiwhenua/rhealpixdggs-py.git@demaion/polyfill
+    - git+https://github.com/manaakiwhenua/rHP-Pandas.git
+    - git+https://github.com/manaakiwhenua/rhealpixdggs-py.git
