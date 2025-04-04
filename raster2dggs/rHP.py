@@ -6,7 +6,7 @@ from typing import Callable, Tuple, Union
 
 import click
 import click_log
-import h3pandas  # Necessary import despite lack of explicit use
+import rhppandas  # Necessary import despite lack of explicit use
 import pandas as pd
 import pyarrow as pa
 from rasterio.enums import Resampling
@@ -17,7 +17,7 @@ import raster2dggs.common as common
 from raster2dggs import __version__
 
 
-def _h3func(
+def _rhpfunc(
     sdf: xr.DataArray,
     resolution: int,
     parent_res: int,
@@ -25,7 +25,7 @@ def _h3func(
     band_labels: Tuple[str] = None,
 ) -> pa.Table:
     """
-    Index a raster window to H3.
+    Index a raster window to rHEALPix.
     Subsequent steps are necessary to resolve issues at the boundaries of windows.
     If windows are very small, or in strips rather than blocks, processing may be slower
     than necessary and the recommendation is to write different windows in the source raster.
@@ -36,12 +36,12 @@ def _h3func(
     subset = pd.pivot_table(
         subset, values=const.DEFAULT_NAME, index=["x", "y"], columns=["band"]
     ).reset_index()
-    # Primary H3 index
-    h3index = subset.h3.geo_to_h3(resolution, lat_col="y", lng_col="x").drop(
+    # Primary rHEALPix index
+    rhpindex = subset.rhp.geo_to_rhp(resolution, lat_col="y", lng_col="x").drop(
         columns=["x", "y"]
     )
-    # Secondary (parent) H3 index, used later for partitioning
-    h3index = h3index.h3.h3_to_parent(parent_res).reset_index()
+    # Secondary (parent) rHEALPix index, used later for partitioning
+    rhpindex = rhpindex.rhp.rhp_to_parent(parent_res).reset_index()
     # Renaming columns to actual band labels
     bands = sdf["band"].unique()
     band_names = dict(zip(bands, map(lambda i: band_labels[i - 1], bands)))
@@ -50,23 +50,23 @@ def _h3func(
             band_names[k] = str(bands[k - 1])
         else:
             band_names = band_names
-    h3index = h3index.rename(columns=band_names)
-    return pa.Table.from_pandas(h3index)
+    rhpindex = rhpindex.rename(columns=band_names)
+    return pa.Table.from_pandas(rhpindex)
 
 
-def _h3_parent_groupby(
+def _rhp_parent_groupby(
     df, resolution: int, aggfunc: Union[str, Callable], decimals: int
 ):
     """
     Function for aggregating the h3 resolution values per parent partition. Each partition will be run through with a
-    pandas .groupby function. This step is to ensure there are no duplicate h3 values, which will happen when indexing a
-    high resolution raster at a coarser h3 resolution.
+    pandas .groupby function. This step is to ensure there are no duplicate rHEALPix values, which will happen when indexing a
+    high resolution raster at a coarser resolution.
     """
     if decimals > 0:
-        return df.groupby(f"h3_{resolution:02}").agg(aggfunc).round(decimals)
+        return df.groupby(f"rhp_{resolution:02}").agg(aggfunc).round(decimals)
     else:
         return (
-            df.groupby(f"h3_{resolution:02}")
+            df.groupby(f"rhp_{resolution:02}")
             .agg(aggfunc)
             .round(decimals)
             .astype("Int64")
@@ -81,15 +81,15 @@ def _h3_parent_groupby(
     "-r",
     "--resolution",
     required=True,
-    type=click.Choice(list(map(str, range(const.MIN_H3, const.MAX_H3 + 1)))),
-    help="H3 resolution to index",
+    type=click.Choice(list(map(str, range(const.MIN_RHP, const.MAX_RHP + 1)))),
+    help="rHEALPix resolution to index",
 )
 @click.option(
     "-pr",
     "--parent_res",
     required=False,
-    type=click.Choice(list(map(str, range(const.MIN_H3, const.MAX_H3 + 1)))),
-    help="H3 Parent resolution to index and aggregate to. Defaults to resolution - 6",
+    type=click.Choice(list(map(str, range(const.MIN_RHP, const.MAX_RHP + 1)))),
+    help="rHEALPix Parent resolution to index and aggregate to. Defaults to resolution - 6",
 )
 @click.option(
     "-u",
@@ -147,7 +147,7 @@ def _h3_parent_groupby(
     help="Temporary data is created during the execution of this program. This parameter allows you to control where this data will be written.",
 )
 @click.version_option(version=__version__)
-def h3(
+def rhp(
     raster_input: Union[str, Path],
     output_directory: Union[str, Path],
     resolution: str,
@@ -163,7 +163,7 @@ def h3(
     tempdir: Union[str, Path],
 ):
     """
-    Ingest a raster image and index it to the H3 DGGS.
+    Ingest a raster image and index it to the rHEALPix DGGS.
 
     RASTER_INPUT is the path to input raster data; prepend with protocol like s3:// or hdfs:// for remote data.
     OUTPUT_DIRECTORY should be a directory, not a file, as it will be the write location for an Apache Parquet data store, with partitions equivalent to parent cells of target cells at a fixed offset. However, this can also be remote (use the appropriate prefix, e.g. s3://).
@@ -187,9 +187,9 @@ def h3(
     )
 
     common.initial_index(
-        "h3",
-        _h3func,
-        _h3_parent_groupby,
+        "rhp",
+        _rhpfunc,
+        _rhp_parent_groupby,
         raster_input,
         output_directory,
         int(resolution),
