@@ -4,15 +4,28 @@
 
 Python-based CLI tool to index raster files to DGGS in parallel, writing out to Parquet.
 
-Currently only supports H3 DGGS, and probably has other limitations since it has been developed for a specific internal use case, though it is intended as a general-purpose abstraction. Contributions, suggestions, bug reports and strongly worded letters are all welcome.
+Currently this supports the H3 and rHEALPix DGGSs. Contributions (particularly for additional DGGSs), suggestions, bug reports and strongly worded letters are all welcome.
 
-![Example use case for raster2dggs, showing how an input raster can be indexed at different H3 resolutions, while retaining information in separate, named bands](docs/imgs/raster2dggs-example.png "Example use case for raster2dggs, showing how an input raster can be indexed at different H3 resolutions, while retaining information in separate, named bands")
+![Example use case for raster2dggs, showing how an input raster can be indexed at different DGGS resolutions, while retaining information in separate, named bands](docs/imgs/raster2dggs-example.png "Example use case for raster2dggs, showing how an input raster can be indexed at different H3 resolutions, while retaining information in separate, named bands")
 
 ## Installation
 
 `pip install raster2dggs`
 
 ## Usage
+
+```
+raster2dggs --help                                                                                                  [17:54:54]
+Usage: raster2dggs [OPTIONS] COMMAND [ARGS]...
+
+Options:
+  --version  Show the version and exit.
+  --help     Show this message and exit.
+
+Commands:
+  h3   Ingest a raster image and index it to the H3 DGGS.
+  rhp  Ingest a raster image and index it to the rHEALPix DGGS.
+```
 
 ```
 raster2dggs h3 --help
@@ -48,8 +61,8 @@ Options:
   -t, --threads INTEGER           Number of threads to use when running in
                                   parallel. The default is determined based
                                   dynamically as the total number of available
-                                  cores, minus one.  [default: 7]
-  -a, --aggfunc [count|mean|sum|prod|std|var|min|max|median]
+                                  cores, minus one.  [default: 11]
+  -a, --aggfunc [count|mean|sum|prod|std|var|min|max|median|mode]
                                   Numpy aggregate function to apply when
                                   aggregating cell values after DGGS indexing,
                                   in case of multiple pixels mapping to the
@@ -69,6 +82,10 @@ Options:
                                   is a need to resample. This setting
                                   specifies this resampling algorithm.
                                   [default: average]
+  --tempdir PATH                  Temporary data is created during the
+                                  execution of this program. This parameter
+                                  allows you to control where this data will
+                                  be written.
   --version                       Show the version and exit.
   --help                          Show this message and exit.
 ```
@@ -102,10 +119,56 @@ h3_09
 >>> o.h3.h3_to_geo_boundary().to_file('~/Downloads/Sen2_Test_h3-9.gpkg', driver='GPKG')
 ```
 
+For rHEALPix DGGS output, you can use [`rHP-Pandas`](https://github.com/manaakiwhenua/rHP-Pandas):
+
+```python
+>>> import pandas as pd
+>>> import rhppandas
+>>> o = pd.read_parquet('./tests/data/output/11/Sen2_Test_rhp')
+>>> o
+band          B02  B03  B04  B05  B06  B07  B08  B8A  B11  B12
+rhp_11                                                        
+R88723652267   11   31   16   65  191  217  263  274   99   36
+R88723652268   11   30   15   66  190  214  258  269   96   34
+R88723652276   11   27   17   66  179  203  240  255   98   36
+R88723652277   13   30   19   68  179  204  246  260  108   41
+R88723652278   12   29   20   66  176  199  243  255  110   43
+...           ...  ...  ...  ...  ...  ...  ...  ...  ...  ...
+R88727068804   22   39   41   81  151  167  182  203  166   84
+R88727068805   22   40   42   81  150  166  185  203  167   85
+R88727068806   23   41   43   83  156  175  188  211  164   83
+R88727068807   23   41   42   82  154  171  186  207  164   83
+R88727068808   22   39   43   80  146  163  177  198  165   83
+
+[223104 rows x 10 columns]
+>>> o.rhp.rhp_to_geo_boundary().to_file('~/Downloads/Sen2_Test_rhp-11.gpkg', driver='GPKG')
+```
+
 ## Installation
 
-<!-- TODO: package raster2dggs and make available on PyPI -->
-<!-- TODO: package raster2dggs and make available on Conda -->
+PyPi:
+
+```bash
+pip install raster2dggs
+```
+
+Conda environment:
+
+```yaml
+name: raster2dggs
+channels:
+  - conda-forge
+channel_priority: strict
+dependencies:
+  - python>=3.11,<3.12
+  - pip=23.1.*
+  - gdal>=3.8.5
+  - pyproj=3.6.*
+  - pip:
+    - raster2dggs>=0.2.6
+```
+
+<!-- TODO: package raster2dggs and make available on Conda without pip -->
 
 ### For development
 
@@ -141,7 +204,11 @@ You may use these for testing. However you can also test with local files too, w
 raster2dggs h3 --resolution 11 -d 0 s3://raster2dggs-test-data/Sen2_Test.tif ./tests/data/output/11/Sen2_Test
 ```
 
+```bash
+raster2dggs rhp --resolution 11 -d 0 s3://raster2dggs-test-data/Sen2_Test.tif ./tests/data/output/11/Sen2_Test_rhp
 ```
+
+```bash
 raster2dggs h3 --resolution 13 --compression zstd --resampling nearest -a median -d 1 -u 2 s3://raster2dggs-test-data/TestDEM.tif ./tests/data/output/13/TestDEM
 ```
 
@@ -159,6 +226,6 @@ raster2dggs h3 --resolution 13 --compression zstd --resampling nearest -a median
 
 APA/Harvard
 
-> Ardo, J., & Law, R. (2023). raster2dggs (0.2.7) [Computer software]. https://github.com/manaakiwhenua/raster2dggs
+> Ardo, J., & Law, R. (2024). raster2dggs (0.2.7) [Computer software]. https://github.com/manaakiwhenua/raster2dggs
 
 [![manaakiwhenua-standards](https://github.com/manaakiwhenua/raster2dggs/workflows/manaakiwhenua-standards/badge.svg)](https://github.com/manaakiwhenua/manaakiwhenua-standards)
