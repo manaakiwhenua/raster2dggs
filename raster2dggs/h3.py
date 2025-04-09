@@ -64,7 +64,7 @@ def _get_parent_res(parent_res: Union[None, int], resolution: int) -> int:
     Used for intermediate re-partioning.
     """
     return (
-        int(parent_res)
+        parent_res
         if parent_res is not None
         else max(MIN_H3, (resolution - DEFAULT_PARENT_OFFSET))
     )
@@ -310,14 +310,14 @@ def _address_boundary_issues(
     "-r",
     "--resolution",
     required=True,
-    type=click.Choice(list(map(str, range(MIN_H3, MAX_H3 + 1)))),
+    type=click.IntRange(MIN_H3, MAX_H3),
     help="H3 resolution to index",
 )
 @click.option(
     "-pr",
     "--parent_res",
     required=False,
-    type=click.Choice(list(map(str, range(MIN_H3, MAX_H3 + 1)))),
+    type=click.IntRange(MIN_H3, MAX_H3),
     help="H3 Parent resolution to index and aggregate to. Defaults to resolution - 6",
 )
 @click.option(
@@ -379,8 +379,8 @@ def _address_boundary_issues(
 def h3(
     raster_input: Union[str, Path],
     output_directory: Union[str, Path],
-    resolution: str,
-    parent_res: str,
+    resolution: int,
+    parent_res: int,
     upscale: int,
     compression: str,
     threads: int,
@@ -398,7 +398,7 @@ def h3(
     OUTPUT_DIRECTORY should be a directory, not a file, as it will be the write location for an Apache Parquet data store, with partitions equivalent to parent cells of target cells at a fixed offset. However, this can also be remote (use the appropriate prefix, e.g. s3://).
     """
     tempfile.tempdir = tempdir if tempdir is not None else tempfile.tempdir
-    if parent_res is not None and not int(parent_res) < int(resolution):
+    if parent_res is not None and not parent_res < resolution:
         raise ParentResolutionException(
             "Parent resolution ({pr}) must be less than target resolution ({r})".format(
                 pr=parent_res, r=resolution
@@ -441,7 +441,7 @@ def h3(
     _initial_index(
         raster_input,
         output_directory,
-        int(resolution),
+        resolution,
         parent_res,
         warp_args,
         **kwargs,
