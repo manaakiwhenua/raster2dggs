@@ -16,6 +16,7 @@ import raster2dggs.constants as const
 import raster2dggs.common as common
 from raster2dggs import __version__
 
+
 def _maidenheadfunc(
     sdf: xr.DataArray,
     level: int,
@@ -37,14 +38,15 @@ def _maidenheadfunc(
     ).reset_index()
     # Primary Maidenhead index
     maidenhead = [
-        mh.to_maiden(lat, lon, level)
-        for lat, lon in zip(subset['y'], subset['x'])
-    ] # Vectorised
+        mh.to_maiden(lat, lon, level) for lat, lon in zip(subset["y"], subset["x"])
+    ]  # Vectorised
     # Secondary (parent) Maidenhead index, used later for partitioning
-    maidenhead_parent = [mh[:parent_level*2] for mh in maidenhead]
+    maidenhead_parent = [mh[: parent_level * 2] for mh in maidenhead]
     subset = subset.drop(columns=["x", "y"])
-    subset[f'maidenhead_{level:02}'] = pd.Series(maidenhead, index=subset.index)
-    subset[f'maidenhead_{parent_level:02}'] = pd.Series(maidenhead_parent, index=subset.index)
+    subset[f"maidenhead_{level:02}"] = pd.Series(maidenhead, index=subset.index)
+    subset[f"maidenhead_{parent_level:02}"] = pd.Series(
+        maidenhead_parent, index=subset.index
+    )
     # Rename bands
     bands = sdf["band"].unique()
     band_names = dict(zip(bands, map(lambda i: band_labels[i - 1], bands)))
@@ -55,6 +57,7 @@ def _maidenheadfunc(
             band_names = band_names
     subset = subset.rename(columns=band_names)
     return pa.Table.from_pandas(subset)
+
 
 def _maidenhead_parent_groupby(
     df, precision: int, aggfunc: Union[str, Callable], decimals: int
@@ -73,6 +76,7 @@ def _maidenhead_parent_groupby(
             .astype("Int64")
         )
 
+
 @click.command(context_settings={"show_default": True})
 @click_log.simple_verbosity_option(common.LOGGER)
 @click.argument("raster_input", type=click.Path(), nargs=1)
@@ -81,14 +85,18 @@ def _maidenhead_parent_groupby(
     "-r",
     "--resolution",
     required=True,
-    type=click.Choice(list(map(str, range(const.MIN_MAIDENHEAD, const.MAX_MAIDENHEAD + 1)))),
+    type=click.Choice(
+        list(map(str, range(const.MIN_MAIDENHEAD, const.MAX_MAIDENHEAD + 1)))
+    ),
     help="Maidenhead level to index",
 )
 @click.option(
     "-pr",
     "--parent_res",
     required=False,
-    type=click.Choice(list(map(str, range(const.MIN_MAIDENHEAD, const.MAX_MAIDENHEAD + 1)))),
+    type=click.Choice(
+        list(map(str, range(const.MIN_MAIDENHEAD, const.MAX_MAIDENHEAD + 1)))
+    ),
     help="Maidenhead 'parent' level to index and aggregate to. Defaults to level 1",
 )
 @click.option(

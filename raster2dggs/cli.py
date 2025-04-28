@@ -26,5 +26,6 @@ cli.add_command(rhp)
 cli.add_command(geohash)
 cli.add_command(maidenhead)
 
+
 def main():
     cli()

@@ -16,6 +16,7 @@ import raster2dggs.constants as const
 import raster2dggs.common as common
 from raster2dggs import __version__
 
+
 def _geohashfunc(
     sdf: xr.DataArray,
     precision: int,
@@ -38,13 +39,15 @@ def _geohashfunc(
     # Primary Geohash index
     geohash = [
         gh.encode(lat, lon, precision=precision)
-        for lat, lon in zip(subset['y'], subset['x'])
-    ] # Vectorised
+        for lat, lon in zip(subset["y"], subset["x"])
+    ]  # Vectorised
     # Secondary (parent) Geohash index, used later for partitioning
     geohash_parent = [gh[:parent_precision] for gh in geohash]
     subset = subset.drop(columns=["x", "y"])
-    subset[f'geohash_{precision:02}'] = pd.Series(geohash, index=subset.index)
-    subset[f'geohash_{parent_precision:02}'] = pd.Series(geohash_parent, index=subset.index)
+    subset[f"geohash_{precision:02}"] = pd.Series(geohash, index=subset.index)
+    subset[f"geohash_{parent_precision:02}"] = pd.Series(
+        geohash_parent, index=subset.index
+    )
     # Rename bands
     bands = sdf["band"].unique()
     band_names = dict(zip(bands, map(lambda i: band_labels[i - 1], bands)))
@@ -55,6 +58,7 @@ def _geohashfunc(
             band_names = band_names
     subset = subset.rename(columns=band_names)
     return pa.Table.from_pandas(subset)
+
 
 def _geohash_parent_groupby(
     df, precision: int, aggfunc: Union[str, Callable], decimals: int
@@ -73,6 +77,7 @@ def _geohash_parent_groupby(
             .round(decimals)
             .astype("Int64")
         )
+
 
 @click.command(context_settings={"show_default": True})
 @click_log.simple_verbosity_option(common.LOGGER)

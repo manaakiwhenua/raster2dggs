@@ -142,7 +142,9 @@ def get_parent_res(dggs: str, parent_res: Union[None, int], resolution: int) -> 
         )
     else:
         raise RuntimeError(
-            "Unknown dggs {dggs}) -  must be one of [ 'h3', 'rhp', 'geopandas', 'maidenhead' ]".format(dggs=dggs)
+            "Unknown dggs {dggs}) -  must be one of [ 'h3', 'rhp', 'geopandas', 'maidenhead' ]".format(
+                dggs=dggs
+            )
         )
 
 
