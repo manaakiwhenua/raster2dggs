@@ -4,7 +4,14 @@
 
 Python-based CLI tool to index raster files to DGGS in parallel, writing out to Parquet.
 
-Currently this supports the H3 and rHEALPix DGGSs. Contributions (particularly for additional DGGSs), suggestions, bug reports and strongly worded letters are all welcome.
+Currently this supports the following DGGSs and geocode systems:
+
+- [H3](https://h3geo.org/)
+- [rHEALPix](https://datastore.landcareresearch.co.nz/dataset/rhealpix-discrete-global-grid-system)
+- [Geohash](https://en.wikipedia.org/wiki/Geohash)
+- [Maidenhead Locator System](https://en.wikipedia.org/wiki/Maidenhead_Locator_System)
+
+Contributions (particularly for additional DGGSs), suggestions, bug reports and strongly worded letters are all welcome.
 
 ![Example use case for raster2dggs, showing how an input raster can be indexed at different DGGS resolutions, while retaining information in separate, named bands](docs/imgs/raster2dggs-example.png "Example use case for raster2dggs, showing how an input raster can be indexed at different H3 resolutions, while retaining information in separate, named bands")
 
@@ -23,8 +30,11 @@ Options:
   --help     Show this message and exit.
 
 Commands:
-  h3   Ingest a raster image and index it to the H3 DGGS.
-  rhp  Ingest a raster image and index it to the rHEALPix DGGS.
+  geohash     Ingest a raster image and index it using Geohash.
+  h3          Ingest a raster image and index it to the H3 DGGS.
+  maidenhead  Ingest a raster image and index it using the Maidenhead...
+  rhp         Ingest a raster image and index it to the rHEALPix DGGS.
+
 ```
 
 ```
@@ -96,6 +106,9 @@ Output is in the Apache Parquet format, a directory with one file per partition.
 
 For a quick view of your output, you can read Apache Parquet with pandas, and then use h3-pandas and geopandas to convert this into a GeoPackage for visualisation in a desktop GIS, such as QGIS. The Apache Parquet output is indexed by the DGGS column, so it should be ready for association with other data prepared in the same DGGS.
 
+<details>
+<summary>For rHEALPix DGGS output...</summary>
+
 ```python
 >>> import pandas as pd
 >>> import h3pandas
@@ -118,6 +131,10 @@ h3_09
 [5656 rows x 10 columns]
 >>> o.h3.h3_to_geo_boundary().to_file('~/Downloads/Sen2_Test_h3-9.gpkg', driver='GPKG')
 ```
+</details>
+
+<details>
+<summary>For rHEALPix DGGS output...</summary>
 
 For rHEALPix DGGS output, you can use [`rHP-Pandas`](https://github.com/manaakiwhenua/rHP-Pandas):
 
@@ -143,6 +160,54 @@ R88727068808   22   39   43   80  146  163  177  198  165   83
 [223104 rows x 10 columns]
 >>> o.rhp.rhp_to_geo_boundary().to_file('~/Downloads/Sen2_Test_rhp-11.gpkg', driver='GPKG')
 ```
+</details>
+
+<details>
+<summary>For Geohash output...</summary>
+
+For Geohash output, you can use [`python-geohash`] or other similar Geohash library. Example:
+
+```python
+import pandas as pd
+import geohash
+from shapely.geometry import Point, box
+import geopandas as gpd
+o = pd.read_parquet('./tests/data/output/8/sample_geohash')
+
+
+def geohash_to_geometry(gh, mode="polygon"):
+    lat, lon, lat_err, lon_err = geohash.decode_exactly(gh)
+    
+    if mode == "point":
+        return Point(lon, lat)
+    elif mode == "polygon":
+        return box(lon - lon_err, lat - lat_err, lon + lon_err, lat + lat_err)
+    else:
+        raise ValueError("mode must be 'point' or 'polygon'")
+
+o["geometry"] = o["geohash_08"].apply(lambda gh: geohash_to_geometry(gh, mode="polygon"))
+
+'''
+band   geohash_08  1  2  3                                           geometry
+0        u170f2sq  0  0  0  POLYGON ((4.3238067626953125 52.16686248779297...
+1        u170f2sr  0  0  0  POLYGON ((4.3238067626953125 52.16703414916992...
+2        u170f2sw  0  0  0  POLYGON ((4.324150085449219 52.16686248779297,...
+3        u170f2sx  0  0  0  POLYGON ((4.324150085449219 52.16703414916992,...
+4        u170f2sy  0  0  0  POLYGON ((4.324493408203125 52.16686248779297,...
+...           ... .. .. ..                                                ...
+232720   u171mc2g  0  0  0  POLYGON ((4.472808837890625 52.258358001708984...
+232721   u171mc2h  0  0  0  POLYGON ((4.471778869628906 52.25852966308594,...
+232722   u171mc2k  0  0  0  POLYGON ((4.4721221923828125 52.25852966308594...
+232723   u171mc2s  0  0  0  POLYGON ((4.472465515136719 52.25852966308594,...
+232724   u171mc2u  0  0  0  POLYGON ((4.472808837890625 52.25852966308594,...
+
+[232725 rows x 5 columns]
+'''
+
+gdf = gpd.GeoDataFrame(o, geometry="geometry", crs="EPSG:4326")
+gdf.to_file('sample.gpkg')
+```
+</details>
 
 ## Installation
 
@@ -196,7 +261,7 @@ Two sample files have been uploaded to an S3 bucket with `s3:GetObject` public p
 - `s3://raster2dggs-test-data/Sen2_Test.tif` (sample Sentinel 2 imagery, 10 bands, rectangular, Int16, LZW compression, ~10x10m pixels, 68.6 MB)
 - `s3://raster2dggs-test-data/TestDEM.tif` (sample LiDAR-derived DEM, 1 band, irregular shape with null data, Float32, uncompressed, 10x10m pixels, 183.5 MB)
 
-You may use these for testing. However you can also test with local files too, which will be faster.
+You may use these for testing. However you can also test with local files too, which will be faster. A good, small (5 MB) sample image is available [here](https://github.com/mommermi/geotiff_sample).
 
 ## Example commands
 

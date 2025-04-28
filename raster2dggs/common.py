@@ -67,7 +67,7 @@ def assemble_warp_args(resampling: str, warp_mem_limit: int) -> dict:
         "resampling": Resampling._member_map_[resampling],
         "crs": crs.CRS.from_epsg(
             4326
-        ),  # Input raster must be converted to WGS84 (4326) for H3 indexing
+        ),  # Input raster must be converted to WGS84 (4326) for DGGS indexing
         "warp_mem_limit": warp_mem_limit,
     }
 
@@ -128,9 +128,21 @@ def get_parent_res(dggs: str, parent_res: Union[None, int], resolution: int) -> 
             if parent_res is not None
             else max(const.MIN_RHP, (resolution - const.DEFAULT_PARENT_OFFSET))
         )
+    elif dggs == "geohash":
+        return (
+            parent_res
+            if parent_res is not None
+            else max(const.MIN_GEOHASH, (resolution - const.DEFAULT_PARENT_OFFSET))
+        )
+    elif dggs == "maidenhead":
+        return (
+            parent_res
+            if parent_res is not None
+            else max(const.MIN_MAIDENHEAD, (resolution - const.DEFAULT_PARENT_OFFSET))
+        )
     else:
         raise RuntimeError(
-            "Unknown dggs {dggs}) -  must be one of [ 'h3', 'rhp' ]".format(dggs=dggs)
+            "Unknown dggs {dggs}) -  must be one of [ 'h3', 'rhp', 'geopandas', 'maidenhead' ]".format(dggs=dggs)
         )
 
 
@@ -215,7 +227,7 @@ def initial_index(
     """
     Responsible for opening the raster_input, and performing DGGS indexing per window of a WarpedVRT.
 
-    A WarpedVRT is used to enforce reprojection to https://epsg.io/4326, which is required for H3 indexing.
+    A WarpedVRT is used to enforce reprojection to https://epsg.io/4326, which is used for all DGGS indexing.
 
     It also allows on-the-fly resampling of the input, which is useful if the target DGGS resolution exceeds the resolution
         of the input.
@@ -227,9 +239,9 @@ def initial_index(
     LOGGER.info(
         "Indexing %s at %s resolution %d, parent resolution %d",
         raster_input,
-        str.upper(dggs),
-        resolution,
-        parent_res,
+        str(dggs),
+        int(resolution),
+        int(parent_res),
     )
 
     with tempfile.TemporaryDirectory() as tmpdir:
@@ -239,7 +251,7 @@ def initial_index(
         with rio.Env(CHECK_WITH_INVERT_PROJ=True):
             with rio.open(raster_input) as src:
                 LOGGER.debug("Source CRS: %s", src.crs)
-                # VRT used to avoid additional disk use given the potential for reprojection to 4326 prior to H3 indexing
+                # VRT used to avoid additional disk use given the potential for reprojection to 4326 prior to DGGS indexing
                 band_names = src.descriptions
 
                 upscale_factor = kwargs["upscale"]

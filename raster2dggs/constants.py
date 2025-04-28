@@ -3,6 +3,9 @@ import tempfile
 
 MIN_H3, MAX_H3 = 0, 15
 MIN_RHP, MAX_RHP = 0, 15
+MIN_GEOHASH, MAX_GEOHASH = 1, 12
+MIN_MAIDENHEAD, MAX_MAIDENHEAD = 1, 4
+
 DEFAULT_NAME: str = "value"
 
 DEFAULTS = {
