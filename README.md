@@ -34,11 +34,11 @@ Options:
   --help     Show this message and exit.
 
 Commands:
-  geohash     Ingest a raster image and index it using Geohash.
+  geohash     Ingest a raster image and index it using the Geohash...
   h3          Ingest a raster image and index it to the H3 DGGS.
   maidenhead  Ingest a raster image and index it using the Maidenhead...
   rhp         Ingest a raster image and index it to the rHEALPix DGGS.
-
+  s2          Ingest a raster image and index it to the S2 DGGS.
 ```
 
 ```
