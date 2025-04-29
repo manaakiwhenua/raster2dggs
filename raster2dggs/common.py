@@ -117,25 +117,19 @@ def get_parent_res(dggs: str, parent_res: Union[None, int], resolution: int) -> 
     Used for intermediate re-partioning.
     """
     default_dggs_parent_res = {
-        'h3': max(const.MIN_H3, (resolution - const.DEFAULT_PARENT_OFFSET)),
-        'rhp': max(const.MIN_RHP, (resolution - const.DEFAULT_PARENT_OFFSET)),
-        'geohash': max(const.MIN_GEOHASH, (resolution - const.DEFAULT_PARENT_OFFSET)),
-        'maidenhead': const.MIN_MAIDENHEAD,
-        's2': max(const.MIN_S2, (resolution - const.DEFAULT_PARENT_OFFSET))
+        "h3": max(const.MIN_H3, (resolution - const.DEFAULT_PARENT_OFFSET)),
+        "rhp": max(const.MIN_RHP, (resolution - const.DEFAULT_PARENT_OFFSET)),
+        "geohash": max(const.MIN_GEOHASH, (resolution - const.DEFAULT_PARENT_OFFSET)),
+        "maidenhead": const.MIN_MAIDENHEAD,
+        "s2": max(const.MIN_S2, (resolution - const.DEFAULT_PARENT_OFFSET)),
     }
     if not dggs in default_dggs_parent_res:
         raise RuntimeError(
             "Unknown dggs {dggs}) -  must be one of [ {options} ]".format(
-                dggs=dggs,
-                options=', '.join(default_dggs_parent_res.keys())
+                dggs=dggs, options=", ".join(default_dggs_parent_res.keys())
             )
         )
-    return (
-        parent_res
-        if parent_res is not None
-        else default_dggs_parent_res[dggs]
-    )
-   
+    return parent_res if parent_res is not None else default_dggs_parent_res[dggs]
 
 
 def address_boundary_issues(

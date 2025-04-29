@@ -45,9 +45,7 @@ def _s2func(
     s2_parent = [cell.parent(parent_res).to_token() for cell in cells]
     subset = subset.drop(columns=["x", "y"])
     subset[f"s2_{resolution:02}"] = pd.Series(s2, index=subset.index)
-    subset[f"s2_{parent_res:02}"] = pd.Series(
-        s2_parent, index=subset.index
-    )
+    subset[f"s2_{parent_res:02}"] = pd.Series(s2_parent, index=subset.index)
     # Renaming columns to actual band labels
     bands = sdf["band"].unique()
     band_names = dict(zip(bands, map(lambda i: band_labels[i - 1], bands)))
