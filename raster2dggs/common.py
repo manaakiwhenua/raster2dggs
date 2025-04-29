@@ -116,36 +116,26 @@ def get_parent_res(dggs: str, parent_res: Union[None, int], resolution: int) -> 
 
     Used for intermediate re-partioning.
     """
-    if dggs == "h3":
-        return (
-            parent_res
-            if parent_res is not None
-            else max(const.MIN_H3, (resolution - const.DEFAULT_PARENT_OFFSET))
-        )
-    elif dggs == "rhp":
-        return (
-            parent_res
-            if parent_res is not None
-            else max(const.MIN_RHP, (resolution - const.DEFAULT_PARENT_OFFSET))
-        )
-    elif dggs == "geohash":
-        return (
-            parent_res
-            if parent_res is not None
-            else max(const.MIN_GEOHASH, (resolution - const.DEFAULT_PARENT_OFFSET))
-        )
-    elif dggs == "maidenhead":
-        return (
-            parent_res
-            if parent_res is not None
-            else max(const.MIN_MAIDENHEAD, (resolution - const.DEFAULT_PARENT_OFFSET))
-        )
-    else:
+    default_dggs_parent_res = {
+        'h3': max(const.MIN_H3, (resolution - const.DEFAULT_PARENT_OFFSET)),
+        'rhp': max(const.MIN_RHP, (resolution - const.DEFAULT_PARENT_OFFSET)),
+        'geohash': max(const.MIN_GEOHASH, (resolution - const.DEFAULT_PARENT_OFFSET)),
+        'maidenhead': const.MIN_MAIDENHEAD,
+        's2': max(const.MIN_S2, (resolution - const.DEFAULT_PARENT_OFFSET))
+    }
+    if not dggs in default_dggs_parent_res:
         raise RuntimeError(
-            "Unknown dggs {dggs}) -  must be one of [ 'h3', 'rhp', 'geopandas', 'maidenhead' ]".format(
-                dggs=dggs
+            "Unknown dggs {dggs}) -  must be one of [ {options} ]".format(
+                dggs=dggs,
+                options=', '.join(default_dggs_parent_res.keys())
             )
         )
+    return (
+        parent_res
+        if parent_res is not None
+        else default_dggs_parent_res[dggs]
+    )
+   
 
 
 def address_boundary_issues(

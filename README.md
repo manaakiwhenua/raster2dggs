@@ -4,10 +4,14 @@
 
 Python-based CLI tool to index raster files to DGGS in parallel, writing out to Parquet.
 
-Currently this supports the following DGGSs and geocode systems:
+Currently this supports the following DGGSs:
 
 - [H3](https://h3geo.org/)
 - [rHEALPix](https://datastore.landcareresearch.co.nz/dataset/rhealpix-discrete-global-grid-system)
+- [S2](http://s2geometry.io/)
+
+And these geocode systems:
+
 - [Geohash](https://en.wikipedia.org/wiki/Geohash)
 - [Maidenhead Locator System](https://en.wikipedia.org/wiki/Maidenhead_Locator_System)
 
@@ -159,6 +163,41 @@ R88727068808   22   39   43   80  146  163  177  198  165   83
 
 [223104 rows x 10 columns]
 >>> o.rhp.rhp_to_geo_boundary().to_file('~/Downloads/Sen2_Test_rhp-11.gpkg', driver='GPKG')
+```
+</details>
+
+<details>
+<summary>For S2 output...</summary>
+
+For S2 output, use [`s2sphere`](https://pypi.org/project/s2sphere/):
+
+```python
+import pandas as pd
+import geopandas as gpd
+import s2sphere
+from shapely.geometry import Polygon
+
+df = pd.read_parquet('./tests/data/output/7/sample_tif_s2')
+df = df.reset_index()
+
+def s2id_to_polygon(s2_id_hex):
+    # Parse the S2CellId
+    cell_id = s2sphere.CellId.from_token(s2_id_hex)
+    cell = s2sphere.Cell(cell_id)
+
+    # Get the 4 vertices of the S2 cell
+    vertices = []
+    for i in range(4):
+        vertex = cell.get_vertex(i)
+        # Convert to lat/lon degrees
+        lat_lng = s2sphere.LatLng.from_point(vertex)
+        vertices.append((lat_lng.lng().degrees, lat_lng.lat().degrees))  # (lon, lat)
+    
+    return Polygon(vertices)
+
+df['geometry'] = df['s2_15'].apply(s2id_to_polygon)
+gdf = gpd.GeoDataFrame(df, geometry='geometry', crs='EPSG:4326')  # WGS84
+gdf.to_parquet('sample_tif_s2_geoparquet.parquet')
 ```
 </details>
 
