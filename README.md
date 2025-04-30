@@ -111,7 +111,7 @@ Output is in the Apache Parquet format, a directory with one file per partition.
 For a quick view of your output, you can read Apache Parquet with pandas, and then use h3-pandas and geopandas to convert this into a GeoPackage for visualisation in a desktop GIS, such as QGIS. The Apache Parquet output is indexed by the DGGS column, so it should be ready for association with other data prepared in the same DGGS.
 
 <details>
-<summary>For rHEALPix DGGS output...</summary>
+<summary>For H3 output...</summary>
 
 ```python
 >>> import pandas as pd
@@ -138,7 +138,7 @@ h3_09
 </details>
 
 <details>
-<summary>For rHEALPix DGGS output...</summary>
+<summary>For rHEALPix output...</summary>
 
 For rHEALPix DGGS output, you can use [`rHP-Pandas`](https://github.com/manaakiwhenua/rHP-Pandas):
 
