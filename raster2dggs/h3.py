@@ -193,7 +193,7 @@ def h3(
         raster_input,
         output_directory,
         int(resolution),
-        parent_res,
+        int(parent_res),
         warp_args,
         **kwargs,
     )

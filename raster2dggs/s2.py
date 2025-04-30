@@ -6,10 +6,10 @@ from typing import Callable, Tuple, Union
 
 import click
 import click_log
-import rhppandas  # Necessary import despite lack of explicit use
 import pandas as pd
 import pyarrow as pa
 from rasterio.enums import Resampling
+from s2sphere import LatLng, CellId
 import xarray as xr
 
 import raster2dggs.constants as const
@@ -17,7 +17,7 @@ import raster2dggs.common as common
 from raster2dggs import __version__
 
 
-def _rhpfunc(
+def _s2func(
     sdf: xr.DataArray,
     resolution: int,
     parent_res: int,
@@ -25,7 +25,7 @@ def _rhpfunc(
     band_labels: Tuple[str] = None,
 ) -> pa.Table:
     """
-    Index a raster window to rHEALPix.
+    Index a raster window to S2.
     Subsequent steps are necessary to resolve issues at the boundaries of windows.
     If windows are very small, or in strips rather than blocks, processing may be slower
     than necessary and the recommendation is to write different windows in the source raster.
@@ -36,12 +36,16 @@ def _rhpfunc(
     subset = pd.pivot_table(
         subset, values=const.DEFAULT_NAME, index=["x", "y"], columns=["band"]
     ).reset_index()
-    # Primary rHEALPix index
-    rhpindex = subset.rhp.geo_to_rhp(resolution, lat_col="y", lng_col="x").drop(
-        columns=["x", "y"]
-    )
-    # Secondary (parent) rHEALPix index, used later for partitioning
-    rhpindex = rhpindex.rhp.rhp_to_parent(parent_res).reset_index()
+    # S2 index
+    cells = [
+        CellId.from_lat_lng(LatLng.from_degrees(lat, lon))
+        for lat, lon in zip(subset["y"], subset["x"])
+    ]
+    s2 = [cell.parent(resolution).to_token() for cell in cells]
+    s2_parent = [cell.parent(parent_res).to_token() for cell in cells]
+    subset = subset.drop(columns=["x", "y"])
+    subset[f"s2_{resolution:02}"] = pd.Series(s2, index=subset.index)
+    subset[f"s2_{parent_res:02}"] = pd.Series(s2_parent, index=subset.index)
     # Renaming columns to actual band labels
     bands = sdf["band"].unique()
     band_names = dict(zip(bands, map(lambda i: band_labels[i - 1], bands)))
@@ -50,23 +54,23 @@ def _rhpfunc(
             band_names[k] = str(bands[k - 1])
         else:
             band_names = band_names
-    rhpindex = rhpindex.rename(columns=band_names)
-    return pa.Table.from_pandas(rhpindex)
+    subset = subset.rename(columns=band_names)
+    return pa.Table.from_pandas(subset)
 
 
-def _rhp_parent_groupby(
+def _s2_parent_groupby(
     df, resolution: int, aggfunc: Union[str, Callable], decimals: int
 ):
     """
-    Function for aggregating the h3 resolution values per parent partition. Each partition will be run through with a
-    pandas .groupby function. This step is to ensure there are no duplicate rHEALPix values, which will happen when indexing a
-    high resolution raster at a coarser resolution.
+    Function for aggregating the S2 resolution values per parent partition. Each partition will be run through with a
+    pandas .groupby function. This step is to ensure there are no duplicate S2 values, which will happen when indexing a
+    high resolution raster at a coarser S2 resolution.
     """
     if decimals > 0:
-        return df.groupby(f"rhp_{resolution:02}").agg(aggfunc).round(decimals)
+        return df.groupby(f"s2_{resolution:02}").agg(aggfunc).round(decimals)
     else:
         return (
-            df.groupby(f"rhp_{resolution:02}")
+            df.groupby(f"s2_{resolution:02}")
             .agg(aggfunc)
             .round(decimals)
             .astype("Int64")
@@ -81,15 +85,15 @@ def _rhp_parent_groupby(
     "-r",
     "--resolution",
     required=True,
-    type=click.Choice(list(map(str, range(const.MIN_RHP, const.MAX_RHP + 1)))),
-    help="rHEALPix resolution to index",
+    type=click.Choice(list(map(str, range(const.MIN_S2, const.MAX_S2 + 1)))),
+    help="S2 resolution to index",
 )
 @click.option(
     "-pr",
     "--parent_res",
     required=False,
-    type=click.Choice(list(map(str, range(const.MIN_RHP, const.MAX_RHP + 1)))),
-    help="rHEALPix Parent resolution to index and aggregate to. Defaults to resolution - 6",
+    type=click.Choice(list(map(str, range(const.MIN_S2, const.MAX_S2 + 1)))),
+    help="S2 parent resolution to index and aggregate to. Defaults to resolution - 6",
 )
 @click.option(
     "-u",
@@ -147,7 +151,7 @@ def _rhp_parent_groupby(
     help="Temporary data is created during the execution of this program. This parameter allows you to control where this data will be written.",
 )
 @click.version_option(version=__version__)
-def rhp(
+def s2(
     raster_input: Union[str, Path],
     output_directory: Union[str, Path],
     resolution: str,
@@ -163,7 +167,7 @@ def rhp(
     tempdir: Union[str, Path],
 ):
     """
-    Ingest a raster image and index it to the rHEALPix DGGS.
+    Ingest a raster image and index it to the S2 DGGS.
 
     RASTER_INPUT is the path to input raster data; prepend with protocol like s3:// or hdfs:// for remote data.
     OUTPUT_DIRECTORY should be a directory, not a file, as it will be the write location for an Apache Parquet data store, with partitions equivalent to parent cells of target cells at a fixed offset. However, this can also be remote (use the appropriate prefix, e.g. s3://).
@@ -187,9 +191,9 @@ def rhp(
     )
 
     common.initial_index(
-        "rhp",
-        _rhpfunc,
-        _rhp_parent_groupby,
+        "s2",
+        _s2func,
+        _s2_parent_groupby,
         raster_input,
         output_directory,
         int(resolution),
