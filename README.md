@@ -26,7 +26,8 @@ Contributions (particularly for additional DGGSs), suggestions, bug reports and 
 ## Usage
 
 ```
-raster2dggs --help                                                                                                  [17:54:54]
+raster2dggs --help
+
 Usage: raster2dggs [OPTIONS] COMMAND [ARGS]...
 
 Options:
@@ -204,7 +205,7 @@ gdf.to_parquet('sample_tif_s2_geoparquet.parquet')
 <details>
 <summary>For Geohash output...</summary>
 
-For Geohash output, you can use [`python-geohash`] or other similar Geohash library. Example:
+For Geohash output, you can use [`python-geohash`](https://github.com/hkwi/python-geohash) or other similar Geohash library. Example:
 
 ```python
 import pandas as pd
