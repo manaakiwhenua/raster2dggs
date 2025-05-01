@@ -16,6 +16,7 @@ import raster2dggs.constants as const
 import raster2dggs.common as common
 from raster2dggs import __version__
 
+PAD_WIDTH = common.zero_padding("s2")
 
 def _s2func(
     sdf: xr.DataArray,
@@ -44,8 +45,8 @@ def _s2func(
     s2 = [cell.parent(resolution).to_token() for cell in cells]
     s2_parent = [cell.parent(parent_res).to_token() for cell in cells]
     subset = subset.drop(columns=["x", "y"])
-    subset[f"s2_{resolution:02}"] = pd.Series(s2, index=subset.index)
-    subset[f"s2_{parent_res:02}"] = pd.Series(s2_parent, index=subset.index)
+    subset[f"s2_{resolution:0{PAD_WIDTH}d}"] = pd.Series(s2, index=subset.index)
+    subset[f"s2_{parent_res:0{PAD_WIDTH}d}"] = pd.Series(s2_parent, index=subset.index)
     # Renaming columns to actual band labels
     bands = sdf["band"].unique()
     band_names = dict(zip(bands, map(lambda i: band_labels[i - 1], bands)))
@@ -67,10 +68,10 @@ def _s2_parent_groupby(
     high resolution raster at a coarser S2 resolution.
     """
     if decimals > 0:
-        return df.groupby(f"s2_{resolution:02}").agg(aggfunc).round(decimals)
+        return df.groupby(f"s2_{resolution:0{PAD_WIDTH}d}").agg(aggfunc).round(decimals)
     else:
         return (
-            df.groupby(f"s2_{resolution:02}")
+            df.groupby(f"s2_{resolution:0{PAD_WIDTH}d}")
             .agg(aggfunc)
             .round(decimals)
             .astype("Int64")

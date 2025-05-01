@@ -67,10 +67,10 @@ def _maidenhead_parent_groupby(
     pandas .groupby function. This step is to ensure there are no duplicate Maidenhead indices, which will certainly happen when indexing most raster datasets as Maidenhead has low precision.
     """
     if decimals > 0:
-        return df.groupby(f"maidenhead_{precision:02}").agg(aggfunc).round(decimals)
+        return df.groupby(f"maidenhead_{precision}").agg(aggfunc).round(decimals)
     else:
         return (
-            df.groupby(f"maidenhead_{precision:02}")
+            df.groupby(f"maidenhead_{precision}")
             .agg(aggfunc)
             .round(decimals)
             .astype("Int64")

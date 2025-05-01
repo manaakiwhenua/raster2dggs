@@ -16,6 +16,7 @@ import raster2dggs.constants as const
 import raster2dggs.common as common
 from raster2dggs import __version__
 
+PAD_WIDTH = common.zero_padding("h3")
 
 def _rhpfunc(
     sdf: xr.DataArray,
@@ -63,10 +64,10 @@ def _rhp_parent_groupby(
     high resolution raster at a coarser resolution.
     """
     if decimals > 0:
-        return df.groupby(f"rhp_{resolution:02}").agg(aggfunc).round(decimals)
+        return df.groupby(f"rhp_{resolution:0{PAD_WIDTH}d}").agg(aggfunc).round(decimals)
     else:
         return (
-            df.groupby(f"rhp_{resolution:02}")
+            df.groupby(f"rhp_{resolution:0{PAD_WIDTH}d}")
             .agg(aggfunc)
             .round(decimals)
             .astype("Int64")

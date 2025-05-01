@@ -107,6 +107,18 @@ def assemble_kwargs(
 
     return kwargs
 
+def zero_padding(dggs: str) -> int:
+    max_res_lookup = {
+        "h3": const.MAX_H3,
+        "rhp": const.MAX_RHP,
+        "geohash": const.MAX_GEOHASH,
+        "maidenhead": const.MAX_MAIDENHEAD,
+        "s2": const.MAX_S2,
+    }
+    max_res = max_res_lookup.get(dggs)
+    if max_res is None:
+        raise ValueError(f"Unknown DGGS type: {dggs}")
+    return len(str(max_res))
 
 def get_parent_res(dggs: str, parent_res: Union[None, int], resolution: int) -> int:
     """
@@ -161,7 +173,9 @@ def address_boundary_issues(
     )
     with TqdmCallback(desc="Reading window partitions"):
         # Set index as parent cell
-        ddf = dd.read_parquet(pq_input).set_index(f"{dggs}_{parent_res:02}")
+        pad_width = zero_padding(dggs)
+        index_col = f"{dggs}_{parent_res:0{pad_width}d}"
+        ddf = dd.read_parquet(pq_input).set_index(index_col)
 
     with TqdmCallback(desc="Counting parents"):
         # Count parents, to get target number of partitions

@@ -17,6 +17,8 @@ import raster2dggs.common as common
 from raster2dggs import __version__
 
 
+PAD_WIDTH = common.zero_padding('geohash')
+
 def _geohashfunc(
     sdf: xr.DataArray,
     precision: int,
@@ -44,8 +46,8 @@ def _geohashfunc(
     # Secondary (parent) Geohash index, used later for partitioning
     geohash_parent = [gh[:parent_precision] for gh in geohash]
     subset = subset.drop(columns=["x", "y"])
-    subset[f"geohash_{precision:02}"] = pd.Series(geohash, index=subset.index)
-    subset[f"geohash_{parent_precision:02}"] = pd.Series(
+    subset[f"geohash_{precision:0{PAD_WIDTH}d}"] = pd.Series(geohash, index=subset.index)
+    subset[f"geohash_{parent_precision:0{PAD_WIDTH}d}"] = pd.Series(
         geohash_parent, index=subset.index
     )
     # Rename bands
@@ -69,10 +71,10 @@ def _geohash_parent_groupby(
     high resolution raster at a coarse Geohash precision.
     """
     if decimals > 0:
-        return df.groupby(f"geohash_{precision:02}").agg(aggfunc).round(decimals)
+        return df.groupby(f"geohash_{precision:0{PAD_WIDTH}d}").agg(aggfunc).round(decimals)
     else:
         return (
-            df.groupby(f"geohash_{precision:02}")
+            df.groupby(f"geohash_{precision:0{PAD_WIDTH}d}")
             .agg(aggfunc)
             .round(decimals)
             .astype("Int64")
