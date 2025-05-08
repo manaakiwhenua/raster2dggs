@@ -3,8 +3,10 @@ package:
   version: 0.3.0
 
 source:
-  url: https://pypi.io/packages/source/r/raster2dggs/raster2dggs-0.3.0.tar.gz
-  sha256: 7304b18126e63428e2d2bc8908507cb63604dcb575f55d6ce0166010bb633000
+  ### url: https://pypi.io/packages/source/r/raster2dggs/raster2dggs-0.3.0.tar.gz
+  ### sha256: 7304b18126e63428e2d2bc8908507cb63604dcb575f55d6ce0166010bb633000
+  url: https://github.com/manaakiwhenua/raster2dggs/archive/refs/heads/conda-package.zip
+  sha256: 3fd150c98754307c07218da5be8761fcf44fe88206636e7b9828dfd5ad02c7d9
 
 build:
   noarch: python
