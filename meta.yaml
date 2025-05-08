@@ -1,0 +1,59 @@
+package:
+  name: raster2dggs
+  version: 0.3.0
+
+source:
+  url: https://pypi.io/packages/source/r/raster2dggs/raster2dggs-0.3.0.tar.gz
+  sha256: 7304b18126e63428e2d2bc8908507cb63604dcb575f55d6ce0166010bb633000
+
+build:
+  noarch: python
+  script: pip install .
+  number: 0
+
+requirements:
+  host:
+    - python >=3.11
+    - poetry >=1.00
+    - wheel
+    - pip
+  run:
+
+    - python >=3.11, <3.12
+    - rhppandas>=0.1, <1.0
+    - rhealpixdggs>=0.5, <1.0
+    ### - gdal >=3.8, <3.9
+    - gdal >=3.8
+    - geopandas>=1.0, <2.0
+    - h3pandas>=0.3, <1.0
+    - rioxarray>=0.19, <1.0
+    - dask-geopandas>=0.4, <1.0
+    - pyarrow>=20.0, <21.0
+    - dask>=2025.1, <2026
+    - click>=8.1, <9.0
+    - boto3>=1, <2
+    - tqdm>=4, <5
+    - click-log>=0.4, <1.0
+    - rasterio>=1.4, <2.0
+    - dask-expr>=2, <3
+    - numpy>=2, <3
+    - python-geohash>=0.8, <1.0
+    - s2sphere>=0.2, <1.0
+    - maidenhead>=1.7, <2.0
+
+## tests require rhppandas
+### tests:
+  ### - python:
+      ### imports:
+        ### - raster2dggs
+      ### ### ### pip_check: true
+
+about:
+  ### homepage: "https://datastore.landcareresearch.co.nz/dataset/rhealpix-discrete-global-grid-system"
+  repository: "https://github.com/manaakiwhenua/raster2dggs"
+  summary: "Python-based CLI tool to index raster files to DGGS in parallel, writing out to Parquet."
+  license: "LGPL-3.0-or-later"
+
+### extra:
+  ### recipe-maintainers:
+    ### - name_of_maintainer
