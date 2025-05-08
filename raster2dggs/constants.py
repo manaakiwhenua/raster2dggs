@@ -21,3 +21,13 @@ DEFAULTS = {
 }
 
 DEFAULT_PARENT_OFFSET = 6
+
+DEFAULT_DGGS_PARENT_RES = {
+    "h3": lambda resolution: max(MIN_H3, (resolution - DEFAULT_PARENT_OFFSET)),
+    "rhp": lambda resolution: max(MIN_RHP, (resolution - DEFAULT_PARENT_OFFSET)),
+    "geohash": lambda resolution: max(
+        MIN_GEOHASH, (resolution - DEFAULT_PARENT_OFFSET)
+    ),
+    "maidenhead": lambda resolution: MIN_MAIDENHEAD,
+    "s2": lambda resolution: max(MIN_S2, (resolution - DEFAULT_PARENT_OFFSET)),
+}
