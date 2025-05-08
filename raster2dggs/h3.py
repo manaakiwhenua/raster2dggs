@@ -18,6 +18,7 @@ from raster2dggs import __version__
 
 PAD_WIDTH = common.zero_padding("h3")
 
+
 def _h3func(
     sdf: xr.DataArray,
     resolution: int,
@@ -194,7 +195,7 @@ def h3(
         raster_input,
         output_directory,
         int(resolution),
-        int(parent_res),
+        parent_res,
         warp_args,
         **kwargs,
     )

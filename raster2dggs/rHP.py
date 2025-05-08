@@ -18,6 +18,7 @@ from raster2dggs import __version__
 
 PAD_WIDTH = common.zero_padding("h3")
 
+
 def _rhpfunc(
     sdf: xr.DataArray,
     resolution: int,
@@ -64,7 +65,9 @@ def _rhp_parent_groupby(
     high resolution raster at a coarser resolution.
     """
     if decimals > 0:
-        return df.groupby(f"rhp_{resolution:0{PAD_WIDTH}d}").agg(aggfunc).round(decimals)
+        return (
+            df.groupby(f"rhp_{resolution:0{PAD_WIDTH}d}").agg(aggfunc).round(decimals)
+        )
     else:
         return (
             df.groupby(f"rhp_{resolution:0{PAD_WIDTH}d}")
@@ -194,7 +197,7 @@ def rhp(
         raster_input,
         output_directory,
         int(resolution),
-        int(parent_res),
+        parent_res,
         warp_args,
         **kwargs,
     )

@@ -201,7 +201,7 @@ def maidenhead(
         raster_input,
         output_directory,
         int(resolution),
-        int(parent_res),
+        parent_res,
         warp_args,
         **kwargs,
     )

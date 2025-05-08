@@ -107,6 +107,7 @@ def assemble_kwargs(
 
     return kwargs
 
+
 def zero_padding(dggs: str) -> int:
     max_res_lookup = {
         "h3": const.MAX_H3,
@@ -120,6 +121,7 @@ def zero_padding(dggs: str) -> int:
         raise ValueError(f"Unknown DGGS type: {dggs}")
     return len(str(max_res))
 
+
 def get_parent_res(dggs: str, parent_res: Union[None, int], resolution: int) -> int:
     """
     Uses a parent resolution,
@@ -128,20 +130,17 @@ def get_parent_res(dggs: str, parent_res: Union[None, int], resolution: int) -> 
 
     Used for intermediate re-partioning.
     """
-    default_dggs_parent_res = {
-        "h3": max(const.MIN_H3, (resolution - const.DEFAULT_PARENT_OFFSET)),
-        "rhp": max(const.MIN_RHP, (resolution - const.DEFAULT_PARENT_OFFSET)),
-        "geohash": max(const.MIN_GEOHASH, (resolution - const.DEFAULT_PARENT_OFFSET)),
-        "maidenhead": const.MIN_MAIDENHEAD,
-        "s2": max(const.MIN_S2, (resolution - const.DEFAULT_PARENT_OFFSET)),
-    }
-    if not dggs in default_dggs_parent_res:
+    if not dggs in const.DEFAULT_DGGS_PARENT_RES.keys():
         raise RuntimeError(
             "Unknown dggs {dggs}) -  must be one of [ {options} ]".format(
-                dggs=dggs, options=", ".join(default_dggs_parent_res.keys())
+                dggs=dggs, options=", ".join(const.DEFAULT_DGGS_PARENT_RES.keys())
             )
         )
-    return parent_res if parent_res is not None else default_dggs_parent_res[dggs]
+    return (
+        int(parent_res)
+        if parent_res is not None
+        else const.DEFAULT_DGGS_PARENT_RES[dggs]
+    )
 
 
 def address_boundary_issues(
@@ -166,8 +165,6 @@ def address_boundary_issues(
         of the original (i.e. window-based) partitioning. Using the nested structure of the DGGS is an useful property
         to address this problem.
     """
-    parent_res = get_parent_res(dggs, parent_res, resolution)
-
     LOGGER.debug(
         f"Reading Stage 1 output ({pq_input}) and setting index for parent-based partitioning"
     )
