@@ -139,7 +139,7 @@ def get_parent_res(dggs: str, parent_res: Union[None, int], resolution: int) -> 
     return (
         int(parent_res)
         if parent_res is not None
-        else const.DEFAULT_DGGS_PARENT_RES[dggs]
+        else const.DEFAULT_DGGS_PARENT_RES[dggs](resolution)
     )
 
 
