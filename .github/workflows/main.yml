@@ -1,4 +1,6 @@
 name: manaakiwhenua-standards
+permissions:
+  contents: read
 
 on: [push]
 
