@@ -34,7 +34,7 @@ numpy = "^2"
 rhppandas = "^0.1"
 rhealpixdggs = "^0.5"
 python-geohash = "^0.8"
-maidenhead = "^1.7"
+maidenhead = "^1.8"
 s2sphere = "^0.2"
 
 [tool.poetry.group.dev.dependencies]
