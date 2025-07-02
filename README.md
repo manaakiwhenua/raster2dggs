@@ -225,7 +225,7 @@ def geohash_to_geometry(gh, mode="polygon"):
     else:
         raise ValueError("mode must be 'point' or 'polygon'")
 
-o["geometry"] = o["geohash_08"].apply(lambda gh: geohash_to_geometry(gh, mode="polygon"))
+o["geometry"] = o.index.map(lambda gh: geohash_to_geometry(gh, mode="polygon"))
 
 '''
 band   geohash_08  1  2  3                                           geometry
@@ -244,8 +244,7 @@ band   geohash_08  1  2  3                                           geometry
 [232725 rows x 5 columns]
 '''
 
-gdf = gpd.GeoDataFrame(o, geometry="geometry", crs="EPSG:4326")
-gdf.to_file('sample.gpkg')
+gpd.GeoDataFrame(o, geometry="geometry", crs="EPSG:4326").to_file('tests/data/output/8/sample_geohash.gpkg')
 ```
 </details>
 
