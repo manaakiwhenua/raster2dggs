@@ -78,12 +78,14 @@ def _h3_parent_groupby(
 
 def h3_cell_to_children_size(cell, desired_resolution: int) -> int:
     """
-    Use h3 cell conversion to determine total number of children at some offset resolution
+    Determine total number of children at some offset resolution
     """
-    # NB we enumerate all children due to the presence of pentagonal cells
-    # The H3 API has cellToChildrenSize, but it is not available in Python API?
-    return len(h3py.cell_to_children(cell, desired_resolution))
-
+    current_resolution = h3py.get_resolution(cell)
+    n = desired_resolution - current_resolution
+    if h3py.is_pentagon(cell):
+        return 1 + 5 * (7 ** n - 1) // 6
+    else:
+        return  7 ** n
 
 def _h3_compaction(df: pd.DataFrame, resolution: int, parent_res: int) -> pd.DataFrame:
     """
@@ -92,17 +94,14 @@ def _h3_compaction(df: pd.DataFrame, resolution: int, parent_res: int) -> pd.Dat
     Compaction will not be performed beyond parent_res or resolution.
     It assumes and requires that the input has unique DGGS cell values as the index.
     """
-    unprocessed_indices = set(df.index)
+    unprocessed_indices = set(filter(lambda c: (not pd.isna(c)) and h3py.is_valid_cell(c), set(df.index)))
+    if not unprocessed_indices:
+        return df
     compaction_map = {}
     for r in range(parent_res, resolution):
-        try:
-            parent_cells = map(lambda x: h3py.cell_to_parent(x, r), unprocessed_indices)
-            grouped = df.loc[list(unprocessed_indices)].groupby(list(parent_cells))
-        except ValueError as e:
-            # Indices that aren't DGGS cells; ignore and break
-            # TODO how is this possible?
-            break
-        for parent, group in grouped:
+        parent_cells = map(lambda x: h3py.cell_to_parent(x, r), unprocessed_indices)
+        parent_groups = df.loc[list(unprocessed_indices)].groupby(list(parent_cells))
+        for parent, group in parent_groups:
             if parent in compaction_map:
                 continue
             expected_count = h3_cell_to_children_size(parent, resolution)
@@ -111,16 +110,11 @@ def _h3_compaction(df: pd.DataFrame, resolution: int, parent_res: int) -> pd.Dat
                 compact_row.name = parent  # Rename the index to the parent cell
                 compaction_map[parent] = compact_row
                 unprocessed_indices -= set(group.index)
-    else:
-        # Didn't break
-        compacted_df = pd.DataFrame(list(compaction_map.values()))
-        remaining_df = df.loc[list(unprocessed_indices)]
-        result_df = pd.concat([compacted_df, remaining_df])
-        result_df = result_df.rename_axis(df.index.name)
-        return result_df
-    # Did break
-    return df
-
+    compacted_df = pd.DataFrame(list(compaction_map.values()))
+    remaining_df = df.loc[list(unprocessed_indices)]
+    result_df = pd.concat([compacted_df, remaining_df])
+    result_df = result_df.rename_axis(df.index.name)
+    return result_df
 
 @click.command(context_settings={"show_default": True})
 @click_log.simple_verbosity_option(common.LOGGER)
@@ -190,16 +184,16 @@ def _h3_compaction(df: pd.DataFrame, resolution: int, parent_res: int) -> pd.Dat
     help="Input raster may be warped to EPSG:4326 if it is not already in this CRS. Or, if the upscale parameter is greater than 1, there is a need to resample. This setting specifies this resampling algorithm.",
 )
 @click.option(
-    "--tempdir",
-    default=const.DEFAULTS["tempdir"],
-    type=click.Path(),
-    help="Temporary data is created during the execution of this program. This parameter allows you to control where this data will be written.",
-)
-@click.option(
     "-co",
     "--compact",
     is_flag=True,
     help="Compact the H3 cells up to the parent resolution. Compaction is not applied for cells without identical values across all bands.",
+)
+@click.option(
+    "--tempdir",
+    default=const.DEFAULTS["tempdir"],
+    type=click.Path(),
+    help="Temporary data is created during the execution of this program. This parameter allows you to control where this data will be written.",
 )
 @click.version_option(version=__version__)
 def h3(

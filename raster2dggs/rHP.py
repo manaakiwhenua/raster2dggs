@@ -10,14 +10,15 @@ import rhppandas  # Necessary import despite lack of explicit use
 import pandas as pd
 import pyarrow as pa
 from rasterio.enums import Resampling
+import rhealpixdggs.rhp_wrappers as rhpw
 import xarray as xr
 
 import raster2dggs.constants as const
 import raster2dggs.common as common
 from raster2dggs import __version__
 
-PAD_WIDTH = common.zero_padding("h3")
-
+PAD_WIDTH = common.zero_padding("rhp")
+# RDGGS = WGS84_003 # Static DGGS currently used by rHP wrappers
 
 def _rhpfunc(
     sdf: xr.DataArray,
@@ -76,6 +77,43 @@ def _rhp_parent_groupby(
             .astype("Int64")
         )
 
+def rhp_cell_to_children_size(cell: str, desired_resolution: int) -> int:
+    """
+    Determine total number of children at some offset resolution
+    """
+    if desired_resolution < len(cell): return 0
+    return 9 ** (desired_resolution - len(cell) + 1)
+
+def _rhp_compaction(
+    df: pd.DataFrame, resolution: int, parent_res: int
+) -> pd.DataFrame:
+    """
+    Returns a compacted version of the input dataframe.
+    Compaction only occurs if all values (i.e. bands) of the input share common values across all sibling cells.
+    Compaction will not be performed beyond parent_res or resolution.
+    It assumes and requires that the input has unique DGGS cell values as the index.
+    """
+    unprocessed_indices = set(filter(lambda c: not pd.isna(c), set(df.index)))
+    if not unprocessed_indices:
+        return df
+    compaction_map = {}
+    for r in range(parent_res, resolution):
+        parent_cells = map(lambda x: rhpw.rhp_to_parent(x, r), unprocessed_indices)
+        parent_groups = df.loc[list(unprocessed_indices)].groupby(list(parent_cells))
+        for parent, group in parent_groups:
+            if parent in compaction_map:
+                continue
+            expected_count = rhp_cell_to_children_size(parent, resolution)
+            if len(group) == expected_count and all(group.nunique() == 1):
+                compact_row = group.iloc[0]
+                compact_row.name = parent  # Rename the index to the parent cell
+                compaction_map[parent] = compact_row
+                unprocessed_indices -= set(group.index)
+    compacted_df = pd.DataFrame(list(compaction_map.values()))
+    remaining_df = df.loc[list(unprocessed_indices)]
+    result_df = pd.concat([compacted_df, remaining_df])
+    result_df = result_df.rename_axis(df.index.name)
+    return result_df
 
 @click.command(context_settings={"show_default": True})
 @click_log.simple_verbosity_option(common.LOGGER)
@@ -145,6 +183,12 @@ def _rhp_parent_groupby(
     help="Input raster may be warped to EPSG:4326 if it is not already in this CRS. Or, if the upscale parameter is greater than 1, there is a need to resample. This setting specifies this resampling algorithm.",
 )
 @click.option(
+    "-co",
+    "--compact",
+    is_flag=True,
+    help="Compact the H3 cells up to the parent resolution. Compaction is not applied for cells without identical values across all bands.",
+)
+@click.option(
     "--tempdir",
     default=const.DEFAULTS["tempdir"],
     type=click.Path(),
@@ -164,6 +208,7 @@ def rhp(
     overwrite: bool,
     warp_mem_limit: int,
     resampling: str,
+    compact: bool,
     tempdir: Union[str, Path],
 ):
     """
@@ -194,6 +239,7 @@ def rhp(
         "rhp",
         _rhpfunc,
         _rhp_parent_groupby,
+        _rhp_compaction if compact else None,
         raster_input,
         output_directory,
         int(resolution),

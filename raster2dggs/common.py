@@ -186,7 +186,7 @@ def address_boundary_issues(
     LOGGER.debug("Aggregating cell values where conflicts exist")
 
     with TqdmCallback(
-        desc=f"Repartioning/aggregating{'/compacting' if compaction else ''}"
+        desc=f"Repartitioning/aggregating{'/compacting' if compaction else ''}"
     ):
         ddf = ddf.repartition(  # See "notes" on why divisions expects repetition of the last item https://docs.dask.org/en/stable/generated/dask.dataframe.DataFrame.repartition.html
             divisions=(uniqueparents + [uniqueparents[-1]])
@@ -207,7 +207,7 @@ def address_boundary_issues(
         )
 
     LOGGER.debug(
-        "Stage 2 (parent cell repartioning) and Stage 3 (aggregation) complete"
+        "Stage 2 (parent cell repartitioning) and Stage 3 (aggregation) complete"
     )
 
     return output
