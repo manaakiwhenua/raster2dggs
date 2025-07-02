@@ -20,6 +20,7 @@ from raster2dggs import __version__
 PAD_WIDTH = common.zero_padding("rhp")
 # RDGGS = WGS84_003 # Static DGGS currently used by rHP wrappers
 
+
 def _rhpfunc(
     sdf: xr.DataArray,
     resolution: int,
@@ -77,16 +78,17 @@ def _rhp_parent_groupby(
             .astype("Int64")
         )
 
+
 def rhp_cell_to_children_size(cell: str, desired_resolution: int) -> int:
     """
     Determine total number of children at some offset resolution
     """
-    if desired_resolution < len(cell): return 0
+    if desired_resolution < len(cell):
+        return 0
     return 9 ** (desired_resolution - len(cell) + 1)
 
-def _rhp_compaction(
-    df: pd.DataFrame, resolution: int, parent_res: int
-) -> pd.DataFrame:
+
+def _rhp_compaction(df: pd.DataFrame, resolution: int, parent_res: int) -> pd.DataFrame:
     """
     Returns a compacted version of the input dataframe.
     Compaction only occurs if all values (i.e. bands) of the input share common values across all sibling cells.
@@ -114,6 +116,7 @@ def _rhp_compaction(
     result_df = pd.concat([compacted_df, remaining_df])
     result_df = result_df.rename_axis(df.index.name)
     return result_df
+
 
 @click.command(context_settings={"show_default": True})
 @click_log.simple_verbosity_option(common.LOGGER)

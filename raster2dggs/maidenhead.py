@@ -18,6 +18,7 @@ from raster2dggs import __version__
 
 PAD_WIDTH = common.zero_padding("maidenhead")
 
+
 def _maidenheadfunc(
     sdf: xr.DataArray,
     level: int,
@@ -42,9 +43,13 @@ def _maidenheadfunc(
         mh.to_maiden(lat, lon, level) for lat, lon in zip(subset["y"], subset["x"])
     ]  # Vectorised
     # Secondary (parent) Maidenhead index, used later for partitioning
-    maidenhead_parent = [maidenhead_cell_to_parent(mh, parent_level) for mh in maidenhead]
+    maidenhead_parent = [
+        maidenhead_cell_to_parent(mh, parent_level) for mh in maidenhead
+    ]
     subset = subset.drop(columns=["x", "y"])
-    subset[f"maidenhead_{level:0{PAD_WIDTH}d}"] = pd.Series(maidenhead, index=subset.index)
+    subset[f"maidenhead_{level:0{PAD_WIDTH}d}"] = pd.Series(
+        maidenhead, index=subset.index
+    )
     subset[f"maidenhead_{parent_level:0{PAD_WIDTH}d}"] = pd.Series(
         maidenhead_parent, index=subset.index
     )
@@ -68,7 +73,11 @@ def _maidenhead_parent_groupby(
     pandas .groupby function. This step is to ensure there are no duplicate Maidenhead indices, which will certainly happen when indexing most raster datasets as Maidenhead has low precision.
     """
     if decimals > 0:
-        return df.groupby(f"maidenhead_{precision:0{PAD_WIDTH}d}").agg(aggfunc).round(decimals)
+        return (
+            df.groupby(f"maidenhead_{precision:0{PAD_WIDTH}d}")
+            .agg(aggfunc)
+            .round(decimals)
+        )
     else:
         return (
             df.groupby(f"maidenhead_{precision:0{PAD_WIDTH}d}")
@@ -77,21 +86,23 @@ def _maidenhead_parent_groupby(
             .astype("Int64")
         )
 
+
 def maidenhead_cell_to_parent(cell: str, parent_level: int) -> str:
     """
     Returns cell parent at some offset level.
     """
-    return cell[:parent_level*2]
+    return cell[: parent_level * 2]
 
-def maidenhead_cell_to_children_size(
-    cell: str, desired_level: int
-) -> int:
+
+def maidenhead_cell_to_children_size(cell: str, desired_level: int) -> int:
     """
     Determine total number of children at some offset level.
     """
     level = len(cell) // 2
-    if desired_level < level: return 0
+    if desired_level < level:
+        return 0
     return 100 ** (desired_level - level)
+
 
 def _maidenhead_compaction(
     df: pd.DataFrame, level: int, parent_level: int
@@ -102,12 +113,16 @@ def _maidenhead_compaction(
     Compaction will not be performed beyond parent_level or level.
     It assumes and requires that the input has unique DGGS cell values as the index.
     """
-    unprocessed_indices = set(filter(lambda c: not pd.isna(c) and len(c) >= 2, set(df.index)))
+    unprocessed_indices = set(
+        filter(lambda c: not pd.isna(c) and len(c) >= 2, set(df.index))
+    )
     if not unprocessed_indices:
         return df
     compaction_map = {}
     for l in range(parent_level, level):
-        parent_cells = list(map(lambda x: maidenhead_cell_to_parent(x, l), unprocessed_indices))
+        parent_cells = list(
+            map(lambda x: maidenhead_cell_to_parent(x, l), unprocessed_indices)
+        )
         parent_groups = df.loc[list(unprocessed_indices)].groupby(list(parent_cells))
         for parent, group in parent_groups:
             if parent in compaction_map:
@@ -123,6 +138,7 @@ def _maidenhead_compaction(
     result_df = pd.concat([compacted_df, remaining_df])
     result_df = result_df.rename_axis(df.index.name)
     return result_df
+
 
 @click.command(context_settings={"show_default": True})
 @click_log.simple_verbosity_option(common.LOGGER)

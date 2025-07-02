@@ -83,9 +83,10 @@ def h3_cell_to_children_size(cell, desired_resolution: int) -> int:
     current_resolution = h3py.get_resolution(cell)
     n = desired_resolution - current_resolution
     if h3py.is_pentagon(cell):
-        return 1 + 5 * (7 ** n - 1) // 6
+        return 1 + 5 * (7**n - 1) // 6
     else:
-        return  7 ** n
+        return 7**n
+
 
 def _h3_compaction(df: pd.DataFrame, resolution: int, parent_res: int) -> pd.DataFrame:
     """
@@ -94,7 +95,9 @@ def _h3_compaction(df: pd.DataFrame, resolution: int, parent_res: int) -> pd.Dat
     Compaction will not be performed beyond parent_res or resolution.
     It assumes and requires that the input has unique DGGS cell values as the index.
     """
-    unprocessed_indices = set(filter(lambda c: (not pd.isna(c)) and h3py.is_valid_cell(c), set(df.index)))
+    unprocessed_indices = set(
+        filter(lambda c: (not pd.isna(c)) and h3py.is_valid_cell(c), set(df.index))
+    )
     if not unprocessed_indices:
         return df
     compaction_map = {}
@@ -115,6 +118,7 @@ def _h3_compaction(df: pd.DataFrame, resolution: int, parent_res: int) -> pd.Dat
     result_df = pd.concat([compacted_df, remaining_df])
     result_df = result_df.rename_axis(df.index.name)
     return result_df
+
 
 @click.command(context_settings={"show_default": True})
 @click_log.simple_verbosity_option(common.LOGGER)
