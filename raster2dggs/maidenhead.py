@@ -114,7 +114,6 @@ def _maidenhead_compaction(
                 continue
             expected_count = maidenhead_cell_to_children_size(parent, level)
             if len(group) == expected_count and all(group.nunique() == 1):
-                print('compact')
                 compact_row = group.iloc[0]
                 compact_row.name = parent  # Rename the index to the parent cell
                 compaction_map[parent] = compact_row
