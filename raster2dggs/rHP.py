@@ -85,6 +85,8 @@ def rhp_cell_to_children_size(cell: str, desired_resolution: int) -> int:
     """
     if desired_resolution < len(cell):
         return 0
+    if len(cell) == 1:  # Level 0 has 6 faces, each then divides into 9
+        return 6 * (9 ** (desired_resolution - 1))
     return 9 ** (desired_resolution - len(cell) + 1)
 
 
