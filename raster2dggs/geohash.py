@@ -87,26 +87,26 @@ def _geohash_parent_groupby(
             .astype("Int64")
         )
 
-def geohash_to_parent(
-        cell: str, desired_precision: int
-) -> str:
+
+def geohash_to_parent(cell: str, desired_precision: int) -> str:
     """
     Returns cell parent at some offset level.
     """
     return cell[:desired_precision]
 
-def geohash_to_children_size(
-        cell: str, desired_level: int
-) -> int:
+
+def geohash_to_children_size(cell: str, desired_level: int) -> int:
     """
+    Determine total number of children at some offset resolution
     """
     level = len(cell)
     if desired_level < level:
         return 0
     return 32 ** (desired_level - level)
 
+
 def _geohash_compaction(
-        df: pd.DataFrame, precision: int, parent_precision: int
+    df: pd.DataFrame, precision: int, parent_precision: int
 ) -> pd.DataFrame:
     """
     Returns a compacted version of the input dataframe.
@@ -114,9 +114,7 @@ def _geohash_compaction(
     Compaction will not be performed beyond parent_level or level.
     It assumes and requires that the input has unique DGGS cell values as the index.
     """
-    unprocessed_indices = set(
-        filter(lambda c: not pd.isna(c), set(df.index))
-    )
+    unprocessed_indices = set(filter(lambda c: not pd.isna(c), set(df.index)))
     if not unprocessed_indices:
         return df
     compaction_map = {}
@@ -139,6 +137,7 @@ def _geohash_compaction(
     result_df = pd.concat([compacted_df, remaining_df])
     result_df = result_df.rename_axis(df.index.name)
     return result_df
+
 
 @click.command(context_settings={"show_default": True})
 @click_log.simple_verbosity_option(common.LOGGER)
