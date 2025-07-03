@@ -178,8 +178,7 @@ import geopandas as gpd
 import s2sphere
 from shapely.geometry import Polygon
 
-df = pd.read_parquet('./tests/data/output/7/sample_tif_s2')
-df = df.reset_index()
+o = pd.read_parquet('./tests/data/output/7/sample_tif_s2')
 
 def s2id_to_polygon(s2_id_hex):
     # Parse the S2CellId
@@ -196,9 +195,8 @@ def s2id_to_polygon(s2_id_hex):
     
     return Polygon(vertices)
 
-df['geometry'] = df['s2_15'].apply(s2id_to_polygon)
-gdf = gpd.GeoDataFrame(df, geometry='geometry', crs='EPSG:4326')  # WGS84
-gdf.to_parquet('sample_tif_s2_geoparquet.parquet')
+o['geometry'] = o.index.map(s2id_to_polygon)
+gpd.GeoDataFrame(o, geometry='geometry', crs='EPSG:4326').to_parquet('./tests/data/output/7/sample_tif_s2_geoparquet.parquet')
 ```
 </details>
 
