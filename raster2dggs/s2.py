@@ -79,6 +79,66 @@ def _s2_parent_groupby(
         )
 
 
+def s2_cell_to_children_size(cell: CellId, desired_resolution: int) -> int:
+    """
+    Determine total number of children at some offset resolution
+    """
+    # return sum(1 for _ in cell.children(desired_resolution)) # Expensive eumeration
+    cell_level = cell.level()
+    if cell_level == 0:
+        # At level 0, there are 6 initial cells on the S2 sphere.
+        # Each of these divides into 4^n children at any subsequent level n.
+        return 6 * (4 ** (desired_resolution - 1))
+    # For levels greater than 0, the cell divides into 4^(n-m) children
+    return 4 ** (desired_resolution - cell_level)
+
+
+def _s2_compaction(df: pd.DataFrame, resolution: int, parent_res: int) -> pd.DataFrame:
+    """
+    Returns a compacted version of the input dataframe.
+    Compaction only occurs if all values (i.e. bands) of the input share common values across all sibling cells.
+    Compaction will not be performed beyond parent_res or resolution.
+    It assumes and requires that the input has unique DGGS cell values as the index.
+    """
+    unprocessed_indices = set(
+        map(
+            lambda c: c.to_token(),
+            filter(
+                lambda c: c.is_valid(),
+                map(
+                    lambda c: CellId.from_token(c),
+                    filter(lambda c: not pd.isna(c), set(df.index)),
+                ),
+            ),
+        )
+    )
+    if not unprocessed_indices:
+        return df
+    compaction_map = {}
+    for r in range(parent_res, resolution):
+        parent_cells = map(
+            lambda token: CellId.from_token(token).parent(r).to_token(),
+            unprocessed_indices,
+        )
+        parent_groups = df.loc[list(unprocessed_indices)].groupby(list(parent_cells))
+        for parent, group in parent_groups:
+            if parent in compaction_map:
+                continue
+            expected_count = s2_cell_to_children_size(
+                CellId.from_token(parent), resolution
+            )
+            if len(group) == expected_count and all(group.nunique() == 1):
+                compact_row = group.iloc[0]
+                compact_row.name = parent  # Rename the index to the parent cell
+                compaction_map[parent] = compact_row
+                unprocessed_indices -= set(group.index)
+    compacted_df = pd.DataFrame(list(compaction_map.values()))
+    remaining_df = df.loc[list(unprocessed_indices)]
+    result_df = pd.concat([compacted_df, remaining_df])
+    result_df = result_df.rename_axis(df.index.name)
+    return result_df
+
+
 @click.command(context_settings={"show_default": True})
 @click_log.simple_verbosity_option(common.LOGGER)
 @click.argument("raster_input", type=click.Path(), nargs=1)
@@ -147,6 +207,12 @@ def _s2_parent_groupby(
     help="Input raster may be warped to EPSG:4326 if it is not already in this CRS. Or, if the upscale parameter is greater than 1, there is a need to resample. This setting specifies this resampling algorithm.",
 )
 @click.option(
+    "-co",
+    "--compact",
+    is_flag=True,
+    help="Compact the H3 cells up to the parent resolution. Compaction is not applied for cells without identical values across all bands.",
+)
+@click.option(
     "--tempdir",
     default=const.DEFAULTS["tempdir"],
     type=click.Path(),
@@ -166,6 +232,7 @@ def s2(
     overwrite: bool,
     warp_mem_limit: int,
     resampling: str,
+    compact: bool,
     tempdir: Union[str, Path],
 ):
     """
@@ -196,6 +263,7 @@ def s2(
         "s2",
         _s2func,
         _s2_parent_groupby,
+        _s2_compaction if compact else None,
         raster_input,
         output_directory,
         int(resolution),

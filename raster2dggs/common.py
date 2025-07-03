@@ -146,6 +146,7 @@ def get_parent_res(dggs: str, parent_res: Union[None, int], resolution: int) -> 
 def address_boundary_issues(
     dggs: str,
     parent_groupby: Callable,
+    compaction: Callable,
     pq_input: tempfile.TemporaryDirectory,
     output: Path,
     resolution: int,
@@ -184,27 +185,29 @@ def address_boundary_issues(
     )
     LOGGER.debug("Aggregating cell values where conflicts exist")
 
-    with TqdmCallback(desc="Repartioning/aggregating"):
-        ddf = (
-            ddf.repartition(  # See "notes" on why divisions expects repetition of the last item https://docs.dask.org/en/stable/generated/dask.dataframe.DataFrame.repartition.html
-                divisions=(uniqueparents + [uniqueparents[-1]])
-            )
-            .map_partitions(
-                parent_groupby, resolution, kwargs["aggfunc"], kwargs["decimals"]
-            )
-            .to_parquet(
-                output,
-                overwrite=kwargs["overwrite"],
-                engine="pyarrow",
-                write_index=True,
-                append=False,
-                name_function=lambda i: f"{uniqueparents[i]}.parquet",
-                compression=kwargs["compression"],
-            )
+    with TqdmCallback(
+        desc=f"Repartitioning/aggregating{'/compacting' if compaction else ''}"
+    ):
+        ddf = ddf.repartition(  # See "notes" on why divisions expects repetition of the last item https://docs.dask.org/en/stable/generated/dask.dataframe.DataFrame.repartition.html
+            divisions=(uniqueparents + [uniqueparents[-1]])
+        ).map_partitions(
+            parent_groupby, resolution, kwargs["aggfunc"], kwargs["decimals"]
+        )
+        if compaction:
+            ddf = ddf.map_partitions(compaction, resolution, parent_res)
+
+        ddf.to_parquet(
+            output,
+            overwrite=kwargs["overwrite"],
+            engine="pyarrow",
+            write_index=True,
+            append=False,
+            name_function=lambda i: f"{uniqueparents[i]}.parquet",
+            compression=kwargs["compression"],
         )
 
     LOGGER.debug(
-        "Stage 2 (parent cell repartioning) and Stage 3 (aggregation) complete"
+        "Stage 2 (parent cell repartitioning) and Stage 3 (aggregation) complete"
     )
 
     return output
@@ -214,6 +217,7 @@ def initial_index(
     dggs: str,
     dggsfunc: Callable,
     parent_groupby: Callable,
+    compaction: Union[None, Callable],
     raster_input: Union[Path, str],
     output: Path,
     resolution: int,
@@ -324,6 +328,7 @@ def initial_index(
             return address_boundary_issues(
                 dggs,
                 parent_groupby,
+                compaction,
                 tmpdir,
                 output,
                 resolution,

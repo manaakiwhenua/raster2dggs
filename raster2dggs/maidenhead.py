@@ -16,6 +16,8 @@ import raster2dggs.constants as const
 import raster2dggs.common as common
 from raster2dggs import __version__
 
+PAD_WIDTH = common.zero_padding("maidenhead")
+
 
 def _maidenheadfunc(
     sdf: xr.DataArray,
@@ -41,10 +43,14 @@ def _maidenheadfunc(
         mh.to_maiden(lat, lon, level) for lat, lon in zip(subset["y"], subset["x"])
     ]  # Vectorised
     # Secondary (parent) Maidenhead index, used later for partitioning
-    maidenhead_parent = [mh[: parent_level * 2] for mh in maidenhead]
+    maidenhead_parent = [
+        maidenhead_cell_to_parent(mh, parent_level) for mh in maidenhead
+    ]
     subset = subset.drop(columns=["x", "y"])
-    subset[f"maidenhead_{level}"] = pd.Series(maidenhead, index=subset.index)
-    subset[f"maidenhead_{parent_level}"] = pd.Series(
+    subset[f"maidenhead_{level:0{PAD_WIDTH}d}"] = pd.Series(
+        maidenhead, index=subset.index
+    )
+    subset[f"maidenhead_{parent_level:0{PAD_WIDTH}d}"] = pd.Series(
         maidenhead_parent, index=subset.index
     )
     # Rename bands
@@ -67,14 +73,71 @@ def _maidenhead_parent_groupby(
     pandas .groupby function. This step is to ensure there are no duplicate Maidenhead indices, which will certainly happen when indexing most raster datasets as Maidenhead has low precision.
     """
     if decimals > 0:
-        return df.groupby(f"maidenhead_{precision}").agg(aggfunc).round(decimals)
+        return (
+            df.groupby(f"maidenhead_{precision:0{PAD_WIDTH}d}")
+            .agg(aggfunc)
+            .round(decimals)
+        )
     else:
         return (
-            df.groupby(f"maidenhead_{precision}")
+            df.groupby(f"maidenhead_{precision:0{PAD_WIDTH}d}")
             .agg(aggfunc)
             .round(decimals)
             .astype("Int64")
         )
+
+
+def maidenhead_cell_to_parent(cell: str, parent_level: int) -> str:
+    """
+    Returns cell parent at some offset level.
+    """
+    return cell[: parent_level * 2]
+
+
+def maidenhead_cell_to_children_size(cell: str, desired_level: int) -> int:
+    """
+    Determine total number of children at some offset level.
+    """
+    level = len(cell) // 2
+    if desired_level < level:
+        return 0
+    return 100 ** (desired_level - level)
+
+
+def _maidenhead_compaction(
+    df: pd.DataFrame, level: int, parent_level: int
+) -> pd.DataFrame:
+    """
+    Returns a compacted version of the input dataframe.
+    Compaction only occurs if all values (i.e. bands) of the input share common values across all sibling cells.
+    Compaction will not be performed beyond parent_level or level.
+    It assumes and requires that the input has unique DGGS cell values as the index.
+    """
+    unprocessed_indices = set(
+        filter(lambda c: not pd.isna(c) and len(c) >= 2, set(df.index))
+    )
+    if not unprocessed_indices:
+        return df
+    compaction_map = {}
+    for l in range(parent_level, level):
+        parent_cells = list(
+            map(lambda x: maidenhead_cell_to_parent(x, l), unprocessed_indices)
+        )
+        parent_groups = df.loc[list(unprocessed_indices)].groupby(list(parent_cells))
+        for parent, group in parent_groups:
+            if parent in compaction_map:
+                continue
+            expected_count = maidenhead_cell_to_children_size(parent, level)
+            if len(group) == expected_count and all(group.nunique() == 1):
+                compact_row = group.iloc[0]
+                compact_row.name = parent  # Rename the index to the parent cell
+                compaction_map[parent] = compact_row
+                unprocessed_indices -= set(group.index)
+    compacted_df = pd.DataFrame(list(compaction_map.values()))
+    remaining_df = df.loc[list(unprocessed_indices)]
+    result_df = pd.concat([compacted_df, remaining_df])
+    result_df = result_df.rename_axis(df.index.name)
+    return result_df
 
 
 @click.command(context_settings={"show_default": True})
@@ -149,6 +212,12 @@ def _maidenhead_parent_groupby(
     help="Input raster may be warped to EPSG:4326 if it is not already in this CRS. Or, if the upscale parameter is greater than 1, there is a need to resample. This setting specifies this resampling algorithm.",
 )
 @click.option(
+    "-co",
+    "--compact",
+    is_flag=True,
+    help="Compact the H3 cells up to the parent resolution. Compaction is not applied for cells without identical values across all bands.",
+)
+@click.option(
     "--tempdir",
     default=const.DEFAULTS["tempdir"],
     type=click.Path(),
@@ -168,6 +237,7 @@ def maidenhead(
     overwrite: bool,
     warp_mem_limit: int,
     resampling: str,
+    compact: bool,
     tempdir: Union[str, Path],
 ):
     """
@@ -198,6 +268,7 @@ def maidenhead(
         "maidenhead",
         _maidenheadfunc,
         _maidenhead_parent_groupby,
+        _maidenhead_compaction if compact else None,
         raster_input,
         output_directory,
         int(resolution),

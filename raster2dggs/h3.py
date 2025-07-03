@@ -6,6 +6,7 @@ from typing import Callable, Tuple, Union
 
 import click
 import click_log
+import h3 as h3py
 import h3pandas  # Necessary import despite lack of explicit use
 import pandas as pd
 import pyarrow as pa
@@ -73,6 +74,50 @@ def _h3_parent_groupby(
             .round(decimals)
             .astype("Int64")
         )
+
+
+def h3_cell_to_children_size(cell, desired_resolution: int) -> int:
+    """
+    Determine total number of children at some offset resolution
+    """
+    current_resolution = h3py.get_resolution(cell)
+    n = desired_resolution - current_resolution
+    if h3py.is_pentagon(cell):
+        return 1 + 5 * (7**n - 1) // 6
+    else:
+        return 7**n
+
+
+def _h3_compaction(df: pd.DataFrame, resolution: int, parent_res: int) -> pd.DataFrame:
+    """
+    Returns a compacted version of the input dataframe.
+    Compaction only occurs if all values (i.e. bands) of the input share common values across all sibling cells.
+    Compaction will not be performed beyond parent_res or resolution.
+    It assumes and requires that the input has unique DGGS cell values as the index.
+    """
+    unprocessed_indices = set(
+        filter(lambda c: (not pd.isna(c)) and h3py.is_valid_cell(c), set(df.index))
+    )
+    if not unprocessed_indices:
+        return df
+    compaction_map = {}
+    for r in range(parent_res, resolution):
+        parent_cells = map(lambda x: h3py.cell_to_parent(x, r), unprocessed_indices)
+        parent_groups = df.loc[list(unprocessed_indices)].groupby(list(parent_cells))
+        for parent, group in parent_groups:
+            if parent in compaction_map:
+                continue
+            expected_count = h3_cell_to_children_size(parent, resolution)
+            if len(group) == expected_count and all(group.nunique() == 1):
+                compact_row = group.iloc[0]
+                compact_row.name = parent  # Rename the index to the parent cell
+                compaction_map[parent] = compact_row
+                unprocessed_indices -= set(group.index)
+    compacted_df = pd.DataFrame(list(compaction_map.values()))
+    remaining_df = df.loc[list(unprocessed_indices)]
+    result_df = pd.concat([compacted_df, remaining_df])
+    result_df = result_df.rename_axis(df.index.name)
+    return result_df
 
 
 @click.command(context_settings={"show_default": True})
@@ -143,6 +188,12 @@ def _h3_parent_groupby(
     help="Input raster may be warped to EPSG:4326 if it is not already in this CRS. Or, if the upscale parameter is greater than 1, there is a need to resample. This setting specifies this resampling algorithm.",
 )
 @click.option(
+    "-co",
+    "--compact",
+    is_flag=True,
+    help="Compact the H3 cells up to the parent resolution. Compaction is not applied for cells without identical values across all bands.",
+)
+@click.option(
     "--tempdir",
     default=const.DEFAULTS["tempdir"],
     type=click.Path(),
@@ -162,6 +213,7 @@ def h3(
     overwrite: bool,
     warp_mem_limit: int,
     resampling: str,
+    compact: bool,
     tempdir: Union[str, Path],
 ):
     """
@@ -192,6 +244,7 @@ def h3(
         "h3",
         _h3func,
         _h3_parent_groupby,
+        _h3_compaction if compact else None,
         raster_input,
         output_directory,
         int(resolution),

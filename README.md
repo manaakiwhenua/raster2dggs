@@ -178,8 +178,7 @@ import geopandas as gpd
 import s2sphere
 from shapely.geometry import Polygon
 
-df = pd.read_parquet('./tests/data/output/7/sample_tif_s2')
-df = df.reset_index()
+o = pd.read_parquet('./tests/data/output/7/sample_tif_s2')
 
 def s2id_to_polygon(s2_id_hex):
     # Parse the S2CellId
@@ -196,9 +195,8 @@ def s2id_to_polygon(s2_id_hex):
     
     return Polygon(vertices)
 
-df['geometry'] = df['s2_15'].apply(s2id_to_polygon)
-gdf = gpd.GeoDataFrame(df, geometry='geometry', crs='EPSG:4326')  # WGS84
-gdf.to_parquet('sample_tif_s2_geoparquet.parquet')
+o['geometry'] = o.index.map(s2id_to_polygon)
+gpd.GeoDataFrame(o, geometry='geometry', crs='EPSG:4326').to_parquet('./tests/data/output/7/sample_tif_s2_geoparquet.parquet')
 ```
 </details>
 
@@ -225,7 +223,7 @@ def geohash_to_geometry(gh, mode="polygon"):
     else:
         raise ValueError("mode must be 'point' or 'polygon'")
 
-o["geometry"] = o["geohash_08"].apply(lambda gh: geohash_to_geometry(gh, mode="polygon"))
+o["geometry"] = o.index.map(lambda gh: geohash_to_geometry(gh, mode="polygon"))
 
 '''
 band   geohash_08  1  2  3                                           geometry
@@ -244,8 +242,7 @@ band   geohash_08  1  2  3                                           geometry
 [232725 rows x 5 columns]
 '''
 
-gdf = gpd.GeoDataFrame(o, geometry="geometry", crs="EPSG:4326")
-gdf.to_file('sample.gpkg')
+gpd.GeoDataFrame(o, geometry="geometry", crs="EPSG:4326").to_file('tests/data/output/8/sample_geohash.gpkg')
 ```
 </details>
 

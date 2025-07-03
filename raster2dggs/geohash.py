@@ -88,6 +88,57 @@ def _geohash_parent_groupby(
         )
 
 
+def geohash_to_parent(cell: str, desired_precision: int) -> str:
+    """
+    Returns cell parent at some offset level.
+    """
+    return cell[:desired_precision]
+
+
+def geohash_to_children_size(cell: str, desired_level: int) -> int:
+    """
+    Determine total number of children at some offset resolution
+    """
+    level = len(cell)
+    if desired_level < level:
+        return 0
+    return 32 ** (desired_level - level)
+
+
+def _geohash_compaction(
+    df: pd.DataFrame, precision: int, parent_precision: int
+) -> pd.DataFrame:
+    """
+    Returns a compacted version of the input dataframe.
+    Compaction only occurs if all values (i.e. bands) of the input share common values across all sibling cells.
+    Compaction will not be performed beyond parent_level or level.
+    It assumes and requires that the input has unique DGGS cell values as the index.
+    """
+    unprocessed_indices = set(filter(lambda c: not pd.isna(c), set(df.index)))
+    if not unprocessed_indices:
+        return df
+    compaction_map = {}
+    for p in range(parent_precision, precision):
+        parent_cells = list(
+            map(lambda gh: geohash_to_parent(gh, p), unprocessed_indices)
+        )
+        parent_groups = df.loc[list(unprocessed_indices)].groupby(list(parent_cells))
+        for parent, group in parent_groups:
+            if parent in compaction_map:
+                continue
+            expected_count = geohash_to_children_size(parent, precision)
+            if len(group) == expected_count and all(group.nunique() == 1):
+                compact_row = group.iloc[0]
+                compact_row.name = parent  # Rename the index to the parent cell
+                compaction_map[parent] = compact_row
+                unprocessed_indices -= set(group.index)
+    compacted_df = pd.DataFrame(list(compaction_map.values()))
+    remaining_df = df.loc[list(unprocessed_indices)]
+    result_df = pd.concat([compacted_df, remaining_df])
+    result_df = result_df.rename_axis(df.index.name)
+    return result_df
+
+
 @click.command(context_settings={"show_default": True})
 @click_log.simple_verbosity_option(common.LOGGER)
 @click.argument("raster_input", type=click.Path(), nargs=1)
@@ -156,6 +207,12 @@ def _geohash_parent_groupby(
     help="Input raster may be warped to EPSG:4326 if it is not already in this CRS. Or, if the upscale parameter is greater than 1, there is a need to resample. This setting specifies this resampling algorithm.",
 )
 @click.option(
+    "-co",
+    "--compact",
+    is_flag=True,
+    help="Compact the H3 cells up to the parent resolution. Compaction is not applied for cells without identical values across all bands.",
+)
+@click.option(
     "--tempdir",
     default=const.DEFAULTS["tempdir"],
     type=click.Path(),
@@ -175,6 +232,7 @@ def geohash(
     overwrite: bool,
     warp_mem_limit: int,
     resampling: str,
+    compact: bool,
     tempdir: Union[str, Path],
 ):
     """
@@ -205,6 +263,7 @@ def geohash(
         "geohash",
         _geohashfunc,
         _geohash_parent_groupby,
+        _geohash_compaction if compact else None,
         raster_input,
         output_directory,
         int(resolution),
