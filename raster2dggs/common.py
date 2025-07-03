@@ -196,7 +196,7 @@ def address_boundary_issues(
         if compaction:
             ddf = ddf.map_partitions(compaction, resolution, parent_res)
 
-        ddf.to_parquet(
+        ddf.map_partitions(lambda df: df.sort_index()).to_parquet(
             output,
             overwrite=kwargs["overwrite"],
             engine="pyarrow",
