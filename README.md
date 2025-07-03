@@ -70,9 +70,11 @@ Options:
                                   resolution. Default (1) applies no
                                   upscaling. The resampling method controls
                                   interpolation.  [default: 1]
-  -c, --compression [snappy|gzip|zstd]
-                                  Name of the compression to use when writing
-                                  to Parquet.  [default: snappy]
+  -c, --compression TEXT          Compression method to use for the output
+                                  Parquet files. Options include 'snappy',
+                                  'gzip', 'brotli', 'lz4', 'zstd', etc. Use
+                                  'none' for no compression.  [default:
+                                  snappy]
   -t, --threads INTEGER           Number of threads to use when running in
                                   parallel. The default is determined based
                                   dynamically as the total number of available

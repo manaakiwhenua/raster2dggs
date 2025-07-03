@@ -149,8 +149,8 @@ def _h3_compaction(df: pd.DataFrame, resolution: int, parent_res: int) -> pd.Dat
     "-c",
     "--compression",
     default=const.DEFAULTS["compression"],
-    type=click.Choice(["snappy", "gzip", "zstd"]),
-    help="Name of the compression to use when writing to Parquet.",
+    type=str,
+    help="Compression method to use for the output Parquet files. Options include 'snappy', 'gzip', 'brotli', 'lz4', 'zstd', etc. Use 'none' for no compression.",
 )
 @click.option(
     "-t",
