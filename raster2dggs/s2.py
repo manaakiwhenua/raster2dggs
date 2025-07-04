@@ -210,7 +210,7 @@ def _s2_compaction(df: pd.DataFrame, resolution: int, parent_res: int) -> pd.Dat
     "-co",
     "--compact",
     is_flag=True,
-    help="Compact the H3 cells up to the parent resolution. Compaction is not applied for cells without identical values across all bands.",
+    help="Compact the cells up to the parent resolution. Compaction is not applied for cells without identical values across all bands.",
 )
 @click.option(
     "--tempdir",

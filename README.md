@@ -99,6 +99,10 @@ Options:
                                   is a need to resample. This setting
                                   specifies this resampling algorithm.
                                   [default: average]
+  -co, --compact                  Compact the H3 cells up to the parent
+                                  resolution. Compaction is not applied for
+                                  cells without identical values across all
+                                  bands.
   --tempdir PATH                  Temporary data is created during the
                                   execution of this program. This parameter
                                   allows you to control where this data will
