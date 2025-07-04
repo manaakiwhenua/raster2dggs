@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "raster2dggs"
-version = "0.4.1"
+version = "0.4.2"
 description = ""
 authors = ["James Ardo <ardoj@landcareresearch.co.nz>"]
 maintainers = ["Richard Law <lawr@landcareresearch.co.nz>"]

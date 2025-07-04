@@ -273,7 +273,7 @@ dependencies:
   - gdal>=3.8.5
   - pyproj=3.6.*
   - pip:
-    - raster2dggs>=0.4.1
+    - raster2dggs>=0.4.2
 ```
 
 <!-- TODO: package raster2dggs and make available on Conda without pip -->
@@ -327,7 +327,7 @@ raster2dggs h3 --resolution 13 --compression zstd --resampling nearest -a median
   title={{raster2dggs}},
   author={Ardo, James and Law, Richard},
   url={https://github.com/manaakiwhenua/raster2dggs},
-  version={0.4.1},
+  version={0.4.2},
   date={2024-06-12}
 }
 ```
