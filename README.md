@@ -4,6 +4,8 @@
 
 Python-based CLI tool to index raster files to DGGS in parallel, writing out to Parquet.
 
+This is the raster equivalent of [vector2dggs](https://github.com/manaakiwhenua/vector2dggs).
+
 Currently this supports the following DGGSs:
 
 - [H3](https://h3geo.org/)
