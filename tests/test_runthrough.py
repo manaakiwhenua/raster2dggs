@@ -1,4 +1,7 @@
 # -*- coding: utf-8 -*-
+"""
+@author: ndemaio
+"""
 
 from unittest import *
 from data.datapaths import *
