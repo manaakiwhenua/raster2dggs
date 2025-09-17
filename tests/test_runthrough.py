@@ -41,8 +41,7 @@ class TestH3(TestRunthrough):
     
     def test_h3_run(self):
         try:
-            #TODO: run h3 with standard test data
-            raise NotImplementedError()
+            h3([TEST_FILE_PATH, str(TEST_OUTPUT_PATH), "-r", "6"], standalone_mode = False)
         
         except Exception:
             self.fail(f"TestH3.test_h3_run: H3 runthrough failed.")
@@ -55,8 +54,7 @@ class TestRHP(TestRunthrough):
     
     def test_rhp_run(self):
         try:
-            #TODO: run rhp with standard test data
-            raise NotImplementedError()
+            rhp([TEST_FILE_PATH, str(TEST_OUTPUT_PATH), "-r", "6"], standalone_mode = False)
         
         except Exception:
             self.fail(f"TestRHP.test_rhp_run: rHP runthrough failed.")
@@ -69,8 +67,7 @@ class TestGeohash(TestRunthrough):
     
     def test_geohash_run(self):
         try:
-            #TODO: run geohash with standard test data
-            raise NotImplementedError()
+            geohash([TEST_FILE_PATH, str(TEST_OUTPUT_PATH), "-r", "6"], standalone_mode = False)
         
         except Exception:
             self.fail(f"TestGeohash.test_geohash_run: Geohash runthrough failed.")
@@ -83,8 +80,7 @@ class TestMaidenhead(TestRunthrough):
     
     def test_maidenhead_run(self):
         try:
-            #TODO: run maidenhead with standard test data
-            raise NotImplementedError()
+            maidenhead([TEST_FILE_PATH, str(TEST_OUTPUT_PATH), "-r", "6"], standalone_mode = False)
         
         except Exception as e:
             self.fail(f"TestMaidenhead.test_maidenhead_run: Maidenhead runthrough failed.")
@@ -97,8 +93,7 @@ class TestS2(TestRunthrough):
     
     def test_s2_run(self):
         try:
-            #TODO: run s2 with standard test data
-            raise NotImplementedError()
+            s2([TEST_FILE_PATH, str(TEST_OUTPUT_PATH), "-r", "6"], standalone_mode = False)
         
         except Exception:
             self.fail(f"TestS2.test_s2_run: S2 runthrough failed.")
