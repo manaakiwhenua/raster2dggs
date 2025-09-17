@@ -5,6 +5,7 @@ class RHPRasterIndexer(RasterIndexer):
     Class description here
     '''
     def index_func(    
+            self,
             sdf: xr.DataArray,
             resolution: int,
             parent_res: int,
@@ -15,6 +16,7 @@ class RHPRasterIndexer(RasterIndexer):
         pass
         
     def parent_groupby(
+            self,
             df,
             resolution: int,
             aggfunc: Union[str, Callable],
@@ -24,6 +26,7 @@ class RHPRasterIndexer(RasterIndexer):
         pass
         
     def compaction(
+            self,
             df: pd.DataFrame,
             resolution: int,
             parent_res: int

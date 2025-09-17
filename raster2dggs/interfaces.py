@@ -6,7 +6,8 @@ class RasterIndexer:
     '''
     Interface description here
     '''
-    def index_func(    
+    def index_func(
+            self,
             sdf: xr.DataArray,
             resolution: int,
             parent_res: int,
@@ -16,6 +17,7 @@ class RasterIndexer:
         raise NotImplementedError()
         
     def parent_groupby(
+            self,
             df,
             resolution: int,
             aggfunc: Union[str, Callable],
@@ -24,6 +26,7 @@ class RasterIndexer:
         raise NotImplementedError()
         
     def compaction(
+            self,
             df: pd.DataFrame,
             resolution: int,
             parent_res: int
