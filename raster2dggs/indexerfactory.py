@@ -10,7 +10,9 @@ import raster2dggs.indexers.geohashrasterindexer as geohashrasterindexer
 import raster2dggs.indexers.maidenheadrasterindexer as maidenheadrasterindexer
 import raster2dggs.indexers.s2rasterindexer as s2rasterindexer
 
-# Match DGGS name to indexer class name
+'''
+Match DGGS name to indexer class name
+'''
 indexer_lookup = {
     "h3": h3rasterindexer.H3RasterIndexer,
     "rhp": rhprasterindexer.RHPRasterIndexer,
@@ -19,6 +21,11 @@ indexer_lookup = {
     "s2": s2rasterindexer.S2RasterIndexer,
     }
 
+
+'''
+Looks up and instantiates an appropriate indexer class given a DGGS name
+as defined in the list of click commands
+'''
 def indexer_instance(dggs: str) -> RasterIndexer:
     # Create and return appropriate indexer instance
     # Raise an exception for unsupported DGGS names

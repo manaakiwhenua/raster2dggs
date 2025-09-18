@@ -4,7 +4,6 @@
 
 from numbers import Number
 from typing import Callable, Tuple, Union
-
 from s2sphere import LatLng, CellId
 
 import pandas as pd
@@ -16,10 +15,12 @@ import raster2dggs.constants as const
 
 from raster2dggs.interfaces import RasterIndexer
 
+
 class S2RasterIndexer(RasterIndexer):
     '''
     Class description here
     '''
+    
     def index_func(
             self,
             sdf: xr.DataArray,
@@ -33,6 +34,8 @@ class S2RasterIndexer(RasterIndexer):
         Subsequent steps are necessary to resolve issues at the boundaries of windows.
         If windows are very small, or in strips rather than blocks, processing may be slower
         than necessary and the recommendation is to write different windows in the source raster.
+
+        Implementation of interface function.
         """
         PAD_WIDTH = const.zero_padding("s2")
         
@@ -75,6 +78,8 @@ class S2RasterIndexer(RasterIndexer):
         Function for aggregating the S2 resolution values per parent partition. Each partition will be run through with a
         pandas .groupby function. This step is to ensure there are no duplicate S2 values, which will happen when indexing a
         high resolution raster at a coarser S2 resolution.
+
+        Implementation of interface function.
         """
         PAD_WIDTH = const.zero_padding("s2")
 
@@ -88,6 +93,7 @@ class S2RasterIndexer(RasterIndexer):
                 .astype("Int64")
             )
 
+
     def cell_to_children_size(
             self,
             cell,
@@ -95,6 +101,8 @@ class S2RasterIndexer(RasterIndexer):
             ) -> int:
         """
         Determine total number of children at some offset resolution
+
+        Implementation of interface function.
         """
         # return sum(1 for _ in cell.children(desired_resolution)) # Expensive eumeration
         cell_level = cell.level()
@@ -105,6 +113,7 @@ class S2RasterIndexer(RasterIndexer):
         # For levels greater than 0, the cell divides into 4^(n-m) children
         return 4 ** (desired_resolution - cell_level)
         
+    
     def compaction(
             self,
             df: pd.DataFrame,
@@ -116,6 +125,8 @@ class S2RasterIndexer(RasterIndexer):
         Compaction only occurs if all values (i.e. bands) of the input share common values across all sibling cells.
         Compaction will not be performed beyond parent_res or resolution.
         It assumes and requires that the input has unique DGGS cell values as the index.
+
+        Implementation of interface function.
         """
         unprocessed_indices = set(
             map(
@@ -141,7 +152,7 @@ class S2RasterIndexer(RasterIndexer):
             for parent, group in parent_groups:
                 if parent in compaction_map:
                     continue
-                expected_count = s2_cell_to_children_size(
+                expected_count = self.cell_to_children_size(
                     CellId.from_token(parent), resolution
                 )
                 if len(group) == expected_count and all(group.nunique() == 1):

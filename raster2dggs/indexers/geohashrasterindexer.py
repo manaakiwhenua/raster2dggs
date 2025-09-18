@@ -6,7 +6,6 @@ from numbers import Number
 from typing import Callable, Tuple, Union
 
 import geohash as gh
-
 import pandas as pd
 import pyarrow as pa
 import xarray as xr
@@ -16,10 +15,12 @@ import raster2dggs.constants as const
 
 from raster2dggs.interfaces import RasterIndexer
 
+
 class GeohashRasterIndexer(RasterIndexer):
     '''
     Class description here
     '''
+    
     def index_func(    
             self,
             sdf: xr.DataArray,
@@ -33,6 +34,8 @@ class GeohashRasterIndexer(RasterIndexer):
         Subsequent steps are necessary to resolve issues at the boundaries of windows.
         If windows are very small, or in strips rather than blocks, processing may be slower
         than necessary and the recommendation is to write different windows in the source raster.
+
+        Implementation of interface function.
         """
         PAD_WIDTH = const.zero_padding("geohash")
         
@@ -79,6 +82,8 @@ class GeohashRasterIndexer(RasterIndexer):
         Function for aggregating the Geohash values per parent partition. Each partition will be run through with a
         pandas .groupby function. This step is to ensure there are no duplicate Geohashes, which will happen when indexing a
         high resolution raster at a coarse Geohash precision.
+
+        Implementation of interface function.
         """
         PAD_WIDTH = const.zero_padding("geohash")
 
@@ -96,6 +101,7 @@ class GeohashRasterIndexer(RasterIndexer):
                 .astype("Int64")
             )
         
+        
     def cell_to_children_size(
             self,
             cell,
@@ -103,12 +109,15 @@ class GeohashRasterIndexer(RasterIndexer):
             ) -> int:
         """
         Determine total number of children at some offset resolution
+
+        Implementation of interface function.
         """
         level = len(cell)
         if desired_level < level:
             return 0
         return 32 ** (desired_level - level)
         
+    
     def compaction(
             self,
             df: pd.DataFrame,
@@ -120,6 +129,8 @@ class GeohashRasterIndexer(RasterIndexer):
         Compaction only occurs if all values (i.e. bands) of the input share common values across all sibling cells.
         Compaction will not be performed beyond parent_level or level.
         It assumes and requires that the input has unique DGGS cell values as the index.
+
+        Implementation of interface function.
         """
         unprocessed_indices = set(filter(lambda c: not pd.isna(c), set(df.index)))
         if not unprocessed_indices:
@@ -145,8 +156,11 @@ class GeohashRasterIndexer(RasterIndexer):
         result_df = result_df.rename_axis(df.index.name)
         return result_df
     
+    
     def to_parent(self, cell: str, desired_precision: int) -> str:
         """
         Returns cell parent at some offset level.
+        
+        Not a part of the RasterIndexer interface
         """
         return cell[:desired_precision]

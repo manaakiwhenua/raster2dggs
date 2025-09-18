@@ -7,6 +7,7 @@ from typing import Callable, Tuple, Union
 
 import rhppandas  # Necessary import despite lack of explicit use
 
+import rhealpixdggs.rhp_wrappers as rhpw
 import pandas as pd
 import pyarrow as pa
 import xarray as xr
@@ -16,10 +17,12 @@ import raster2dggs.constants as const
 
 from raster2dggs.interfaces import RasterIndexer
 
+
 class RHPRasterIndexer(RasterIndexer):
     '''
     Class description here
     '''
+    
     def index_func(    
             self,
             sdf: xr.DataArray,
@@ -33,6 +36,8 @@ class RHPRasterIndexer(RasterIndexer):
         Subsequent steps are necessary to resolve issues at the boundaries of windows.
         If windows are very small, or in strips rather than blocks, processing may be slower
         than necessary and the recommendation is to write different windows in the source raster.
+
+        Implementation of interface function.
         """
         sdf: pd.DataFrame = sdf.to_dataframe().drop(columns=["spatial_ref"]).reset_index()
         subset: pd.DataFrame = sdf.dropna()
@@ -69,6 +74,8 @@ class RHPRasterIndexer(RasterIndexer):
         Function for aggregating the h3 resolution values per parent partition. Each partition will be run through with a
         pandas .groupby function. This step is to ensure there are no duplicate rHEALPix values, which will happen when indexing a
         high resolution raster at a coarser resolution.
+
+        Implementation of interface function.
         """
         PAD_WIDTH = const.zero_padding("rhp")
 
@@ -84,6 +91,7 @@ class RHPRasterIndexer(RasterIndexer):
                 .astype("Int64")
             )
         
+        
     def cell_to_children_size(
             self,
             cell,
@@ -91,6 +99,8 @@ class RHPRasterIndexer(RasterIndexer):
             ) -> int:
         """
         Determine total number of children at some offset resolution
+
+        Implementation of interface function.
         """
         if desired_resolution < len(cell):
             return 0
@@ -98,6 +108,7 @@ class RHPRasterIndexer(RasterIndexer):
             return 6 * (9 ** (desired_resolution - 1))
         return 9 ** (desired_resolution - len(cell) + 1)
         
+    
     def compaction(
             self,
             df: pd.DataFrame,
@@ -109,6 +120,8 @@ class RHPRasterIndexer(RasterIndexer):
         Compaction only occurs if all values (i.e. bands) of the input share common values across all sibling cells.
         Compaction will not be performed beyond parent_res or resolution.
         It assumes and requires that the input has unique DGGS cell values as the index.
+
+        Implementation of interface function.
         """
         unprocessed_indices = set(filter(lambda c: not pd.isna(c), set(df.index)))
         if not unprocessed_indices:
@@ -120,7 +133,7 @@ class RHPRasterIndexer(RasterIndexer):
             for parent, group in parent_groups:
                 if parent in compaction_map:
                     continue
-                expected_count = rhp_cell_to_children_size(parent, resolution)
+                expected_count = self.cell_to_children_size(parent, resolution)
                 if len(group) == expected_count and all(group.nunique() == 1):
                     compact_row = group.iloc[0]
                     compact_row.name = parent  # Rename the index to the parent cell

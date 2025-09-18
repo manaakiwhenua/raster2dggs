@@ -40,7 +40,6 @@ class TestH3(TestRunthrough):
     Sends the test data file through H3 indexing using default parameters.
     '''
     
-    
     def test_h3_run(self):
         try:
             h3([TEST_FILE_PATH, str(TEST_OUTPUT_PATH), "-r", "6"], standalone_mode = False)

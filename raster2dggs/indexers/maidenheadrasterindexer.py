@@ -6,7 +6,6 @@ from numbers import Number
 from typing import Callable, Tuple, Union
 
 import maidenhead as mh
-
 import pandas as pd
 import pyarrow as pa
 import xarray as xr
@@ -16,10 +15,12 @@ import raster2dggs.constants as const
 
 from raster2dggs.interfaces import RasterIndexer
 
+
 class MaidenheadRasterIndexer(RasterIndexer):
     '''
     Class description here
     '''
+    
     def index_func(    
             self,
             sdf: xr.DataArray,
@@ -33,6 +34,8 @@ class MaidenheadRasterIndexer(RasterIndexer):
         Subsequent steps are necessary to resolve issues at the boundaries of windows.
         If windows are very small, or in strips rather than blocks, processing may be slower
         than necessary and the recommendation is to write different windows in the source raster.
+
+        Implementation of interface function.
         """
         PAD_WIDTH = const.zero_padding("maidenhead")
         
@@ -68,6 +71,7 @@ class MaidenheadRasterIndexer(RasterIndexer):
         subset = subset.rename(columns=band_names)
         return pa.Table.from_pandas(subset)
         
+    
     def parent_groupby(
             self,
             df,
@@ -78,6 +82,8 @@ class MaidenheadRasterIndexer(RasterIndexer):
         """
         Function for aggregating the Maidenhead values per parent partition. Each partition will be run through with a
         pandas .groupby function. This step is to ensure there are no duplicate Maidenhead indices, which will certainly happen when indexing most raster datasets as Maidenhead has low precision.
+
+        Implementation of interface function.
         """
         PAD_WIDTH = const.zero_padding("maidenhead")
         
@@ -95,6 +101,7 @@ class MaidenheadRasterIndexer(RasterIndexer):
                 .astype("Int64")
             )
         
+        
     def cell_to_children_size(
             self,
             cell,
@@ -102,12 +109,15 @@ class MaidenheadRasterIndexer(RasterIndexer):
             ) -> int:
         """
         Determine total number of children at some offset level.
+
+        Implementation of interface function.
         """
         level = len(cell) // 2
         if desired_level < level:
             return 0
         return 100 ** (desired_level - level)
         
+    
     def compaction(
             self,
             df: pd.DataFrame,
@@ -119,6 +129,8 @@ class MaidenheadRasterIndexer(RasterIndexer):
         Compaction only occurs if all values (i.e. bands) of the input share common values across all sibling cells.
         Compaction will not be performed beyond parent_level or level.
         It assumes and requires that the input has unique DGGS cell values as the index.
+
+        Implementation of interface function.
         """
         unprocessed_indices = set(
             filter(lambda c: not pd.isna(c) and len(c) >= 2, set(df.index))
@@ -146,8 +158,11 @@ class MaidenheadRasterIndexer(RasterIndexer):
         result_df = result_df.rename_axis(df.index.name)
         return result_df
     
+    
     def cell_to_parent(self, cell: str, parent_level: int) -> str:
         """
         Returns cell parent at some offset level.
+        
+        Not a part of the RasterIndexer interface.
         """
         return cell[: parent_level * 2]
