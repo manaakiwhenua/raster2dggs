@@ -65,16 +65,38 @@ class RHPRasterIndexer(RasterIndexer):
             aggfunc: Union[str, Callable],
             decimals: int
             ) -> pd.DataFrame:
-        # TODO
-        pass
+        """
+        Function for aggregating the h3 resolution values per parent partition. Each partition will be run through with a
+        pandas .groupby function. This step is to ensure there are no duplicate rHEALPix values, which will happen when indexing a
+        high resolution raster at a coarser resolution.
+        """
+        PAD_WIDTH = const.zero_padding("rhp")
+
+        if decimals > 0:
+            return (
+                df.groupby(f"rhp_{resolution:0{PAD_WIDTH}d}").agg(aggfunc).round(decimals)
+            )
+        else:
+            return (
+                df.groupby(f"rhp_{resolution:0{PAD_WIDTH}d}")
+                .agg(aggfunc)
+                .round(decimals)
+                .astype("Int64")
+            )
         
     def cell_to_children_size(
             self,
             cell,
             desired_resolution: int
             ) -> int:
-        # TODO
-        pass
+        """
+        Determine total number of children at some offset resolution
+        """
+        if desired_resolution < len(cell):
+            return 0
+        if len(cell) == 1:  # Level 0 has 6 faces, each then divides into 9
+            return 6 * (9 ** (desired_resolution - 1))
+        return 9 ** (desired_resolution - len(cell) + 1)
         
     def compaction(
             self,
@@ -82,5 +104,30 @@ class RHPRasterIndexer(RasterIndexer):
             resolution: int,
             parent_res: int
             ) -> pd.DataFrame:
-        # TODO
-        pass
+        """
+        Returns a compacted version of the input dataframe.
+        Compaction only occurs if all values (i.e. bands) of the input share common values across all sibling cells.
+        Compaction will not be performed beyond parent_res or resolution.
+        It assumes and requires that the input has unique DGGS cell values as the index.
+        """
+        unprocessed_indices = set(filter(lambda c: not pd.isna(c), set(df.index)))
+        if not unprocessed_indices:
+            return df
+        compaction_map = {}
+        for r in range(parent_res, resolution):
+            parent_cells = map(lambda x: rhpw.rhp_to_parent(x, r), unprocessed_indices)
+            parent_groups = df.loc[list(unprocessed_indices)].groupby(list(parent_cells))
+            for parent, group in parent_groups:
+                if parent in compaction_map:
+                    continue
+                expected_count = rhp_cell_to_children_size(parent, resolution)
+                if len(group) == expected_count and all(group.nunique() == 1):
+                    compact_row = group.iloc[0]
+                    compact_row.name = parent  # Rename the index to the parent cell
+                    compaction_map[parent] = compact_row
+                    unprocessed_indices -= set(group.index)
+        compacted_df = pd.DataFrame(list(compaction_map.values()))
+        remaining_df = df.loc[list(unprocessed_indices)]
+        result_df = pd.concat([compacted_df, remaining_df])
+        result_df = result_df.rename_axis(df.index.name)
+        return result_df

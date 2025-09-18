@@ -23,8 +23,8 @@ class MaidenheadRasterIndexer(RasterIndexer):
     def index_func(    
             self,
             sdf: xr.DataArray,
-            resolution: int,
-            parent_res: int,
+            precision: int,
+            parent_precision: int,
             nodata: Number = np.nan,
             band_labels: Tuple[str] = None,
             ) -> pa.Table:
@@ -44,17 +44,17 @@ class MaidenheadRasterIndexer(RasterIndexer):
         ).reset_index()
         # Primary Maidenhead index
         maidenhead = [
-            mh.to_maiden(lat, lon, resolution) for lat, lon in zip(subset["y"], subset["x"])
+            mh.to_maiden(lat, lon, precision) for lat, lon in zip(subset["y"], subset["x"])
         ]  # Vectorised
         # Secondary (parent) Maidenhead index, used later for partitioning
         maidenhead_parent = [
-            self.cell_to_parent(mh, parent_res) for mh in maidenhead
+            self.cell_to_parent(mh, parent_precision) for mh in maidenhead
         ]
         subset = subset.drop(columns=["x", "y"])
-        subset[f"maidenhead_{resolution:0{PAD_WIDTH}d}"] = pd.Series(
+        subset[f"maidenhead_{precision:0{PAD_WIDTH}d}"] = pd.Series(
             maidenhead, index=subset.index
         )
-        subset[f"maidenhead_{parent_res:0{PAD_WIDTH}d}"] = pd.Series(
+        subset[f"maidenhead_{parent_precision:0{PAD_WIDTH}d}"] = pd.Series(
             maidenhead_parent, index=subset.index
         )
         # Rename bands
@@ -71,29 +71,80 @@ class MaidenheadRasterIndexer(RasterIndexer):
     def parent_groupby(
             self,
             df,
-            resolution: int,
+            precision: int,
             aggfunc: Union[str, Callable],
             decimals: int
             ) -> pd.DataFrame:
-        # TODO
-        pass
+        """
+        Function for aggregating the Maidenhead values per parent partition. Each partition will be run through with a
+        pandas .groupby function. This step is to ensure there are no duplicate Maidenhead indices, which will certainly happen when indexing most raster datasets as Maidenhead has low precision.
+        """
+        PAD_WIDTH = const.zero_padding("maidenhead")
+        
+        if decimals > 0:
+            return (
+                df.groupby(f"maidenhead_{precision:0{PAD_WIDTH}d}")
+                .agg(aggfunc)
+                .round(decimals)
+            )
+        else:
+            return (
+                df.groupby(f"maidenhead_{precision:0{PAD_WIDTH}d}")
+                .agg(aggfunc)
+                .round(decimals)
+                .astype("Int64")
+            )
         
     def cell_to_children_size(
             self,
             cell,
-            desired_resolution: int
+            desired_level: int
             ) -> int:
-        # TODO
-        pass
+        """
+        Determine total number of children at some offset level.
+        """
+        level = len(cell) // 2
+        if desired_level < level:
+            return 0
+        return 100 ** (desired_level - level)
         
     def compaction(
             self,
             df: pd.DataFrame,
-            resolution: int,
-            parent_res: int
+            level: int,
+            parent_level: int
             ) -> pd.DataFrame:
-        # TODO
-        pass
+        """
+        Returns a compacted version of the input dataframe.
+        Compaction only occurs if all values (i.e. bands) of the input share common values across all sibling cells.
+        Compaction will not be performed beyond parent_level or level.
+        It assumes and requires that the input has unique DGGS cell values as the index.
+        """
+        unprocessed_indices = set(
+            filter(lambda c: not pd.isna(c) and len(c) >= 2, set(df.index))
+        )
+        if not unprocessed_indices:
+            return df
+        compaction_map = {}
+        for l in range(parent_level, level):
+            parent_cells = list(
+                map(lambda x: self.cell_to_parent(x, l), unprocessed_indices)
+            )
+            parent_groups = df.loc[list(unprocessed_indices)].groupby(list(parent_cells))
+            for parent, group in parent_groups:
+                if parent in compaction_map:
+                    continue
+                expected_count = self.cell_to_children_size(parent, level)
+                if len(group) == expected_count and all(group.nunique() == 1):
+                    compact_row = group.iloc[0]
+                    compact_row.name = parent  # Rename the index to the parent cell
+                    compaction_map[parent] = compact_row
+                    unprocessed_indices -= set(group.index)
+        compacted_df = pd.DataFrame(list(compaction_map.values()))
+        remaining_df = df.loc[list(unprocessed_indices)]
+        result_df = pd.concat([compacted_df, remaining_df])
+        result_df = result_df.rename_axis(df.index.name)
+        return result_df
     
     def cell_to_parent(self, cell: str, parent_level: int) -> str:
         """

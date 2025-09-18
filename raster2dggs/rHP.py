@@ -1,86 +1,16 @@
-from numbers import Number
-import numpy as np
-from pathlib import Path
-import tempfile
-from typing import Callable, Tuple, Union
-
 import click
 import click_log
-import rhppandas  # Necessary import despite lack of explicit use
-import pandas as pd
-import pyarrow as pa
+import tempfile
+
+from pathlib import Path
+from typing import Callable, Tuple, Union
 from rasterio.enums import Resampling
-import rhealpixdggs.rhp_wrappers as rhpw
-import xarray as xr
 
 import raster2dggs.constants as const
 import raster2dggs.common as common
 from raster2dggs import __version__
 
-PAD_WIDTH = const.zero_padding("rhp")
 # RDGGS = WGS84_003 # Static DGGS currently used by rHP wrappers
-
-
-def _rhp_parent_groupby(
-    df, resolution: int, aggfunc: Union[str, Callable], decimals: int
-):
-    """
-    Function for aggregating the h3 resolution values per parent partition. Each partition will be run through with a
-    pandas .groupby function. This step is to ensure there are no duplicate rHEALPix values, which will happen when indexing a
-    high resolution raster at a coarser resolution.
-    """
-    if decimals > 0:
-        return (
-            df.groupby(f"rhp_{resolution:0{PAD_WIDTH}d}").agg(aggfunc).round(decimals)
-        )
-    else:
-        return (
-            df.groupby(f"rhp_{resolution:0{PAD_WIDTH}d}")
-            .agg(aggfunc)
-            .round(decimals)
-            .astype("Int64")
-        )
-
-
-def rhp_cell_to_children_size(cell: str, desired_resolution: int) -> int:
-    """
-    Determine total number of children at some offset resolution
-    """
-    if desired_resolution < len(cell):
-        return 0
-    if len(cell) == 1:  # Level 0 has 6 faces, each then divides into 9
-        return 6 * (9 ** (desired_resolution - 1))
-    return 9 ** (desired_resolution - len(cell) + 1)
-
-
-def _rhp_compaction(df: pd.DataFrame, resolution: int, parent_res: int) -> pd.DataFrame:
-    """
-    Returns a compacted version of the input dataframe.
-    Compaction only occurs if all values (i.e. bands) of the input share common values across all sibling cells.
-    Compaction will not be performed beyond parent_res or resolution.
-    It assumes and requires that the input has unique DGGS cell values as the index.
-    """
-    unprocessed_indices = set(filter(lambda c: not pd.isna(c), set(df.index)))
-    if not unprocessed_indices:
-        return df
-    compaction_map = {}
-    for r in range(parent_res, resolution):
-        parent_cells = map(lambda x: rhpw.rhp_to_parent(x, r), unprocessed_indices)
-        parent_groups = df.loc[list(unprocessed_indices)].groupby(list(parent_cells))
-        for parent, group in parent_groups:
-            if parent in compaction_map:
-                continue
-            expected_count = rhp_cell_to_children_size(parent, resolution)
-            if len(group) == expected_count and all(group.nunique() == 1):
-                compact_row = group.iloc[0]
-                compact_row.name = parent  # Rename the index to the parent cell
-                compaction_map[parent] = compact_row
-                unprocessed_indices -= set(group.index)
-    compacted_df = pd.DataFrame(list(compaction_map.values()))
-    remaining_df = df.loc[list(unprocessed_indices)]
-    result_df = pd.concat([compacted_df, remaining_df])
-    result_df = result_df.rename_axis(df.index.name)
-    return result_df
 
 
 @click.command(context_settings={"show_default": True})
@@ -206,8 +136,6 @@ def rhp(
 
     common.initial_index(
         "rhp",
-        _rhp_parent_groupby, #TODO: Call from interface
-        _rhp_compaction if compact else None, #TODO: Call from interface
         raster_input,
         output_directory,
         int(resolution),

@@ -71,16 +71,39 @@ class S2RasterIndexer(RasterIndexer):
             aggfunc: Union[str, Callable],
             decimals: int
             ) -> pd.DataFrame:
-        # TODO
-        pass
-        
+        """
+        Function for aggregating the S2 resolution values per parent partition. Each partition will be run through with a
+        pandas .groupby function. This step is to ensure there are no duplicate S2 values, which will happen when indexing a
+        high resolution raster at a coarser S2 resolution.
+        """
+        PAD_WIDTH = const.zero_padding("s2")
+
+        if decimals > 0:
+            return df.groupby(f"s2_{resolution:0{PAD_WIDTH}d}").agg(aggfunc).round(decimals)
+        else:
+            return (
+                df.groupby(f"s2_{resolution:0{PAD_WIDTH}d}")
+                .agg(aggfunc)
+                .round(decimals)
+                .astype("Int64")
+            )
+
     def cell_to_children_size(
             self,
             cell,
             desired_resolution: int
             ) -> int:
-        # TODO
-        pass
+        """
+        Determine total number of children at some offset resolution
+        """
+        # return sum(1 for _ in cell.children(desired_resolution)) # Expensive eumeration
+        cell_level = cell.level()
+        if cell_level == 0:
+            # At level 0, there are 6 initial cells on the S2 sphere.
+            # Each of these divides into 4^n children at any subsequent level n.
+            return 6 * (4 ** (desired_resolution - 1))
+        # For levels greater than 0, the cell divides into 4^(n-m) children
+        return 4 ** (desired_resolution - cell_level)
         
     def compaction(
             self,
@@ -88,5 +111,46 @@ class S2RasterIndexer(RasterIndexer):
             resolution: int,
             parent_res: int
             ) -> pd.DataFrame:
-        # TODO
-        pass
+        """
+        Returns a compacted version of the input dataframe.
+        Compaction only occurs if all values (i.e. bands) of the input share common values across all sibling cells.
+        Compaction will not be performed beyond parent_res or resolution.
+        It assumes and requires that the input has unique DGGS cell values as the index.
+        """
+        unprocessed_indices = set(
+            map(
+                lambda c: c.to_token(),
+                filter(
+                    lambda c: c.is_valid(),
+                    map(
+                        lambda c: CellId.from_token(c),
+                        filter(lambda c: not pd.isna(c), set(df.index)),
+                    ),
+                ),
+            )
+        )
+        if not unprocessed_indices:
+            return df
+        compaction_map = {}
+        for r in range(parent_res, resolution):
+            parent_cells = map(
+                lambda token: CellId.from_token(token).parent(r).to_token(),
+                unprocessed_indices,
+            )
+            parent_groups = df.loc[list(unprocessed_indices)].groupby(list(parent_cells))
+            for parent, group in parent_groups:
+                if parent in compaction_map:
+                    continue
+                expected_count = s2_cell_to_children_size(
+                    CellId.from_token(parent), resolution
+                )
+                if len(group) == expected_count and all(group.nunique() == 1):
+                    compact_row = group.iloc[0]
+                    compact_row.name = parent  # Rename the index to the parent cell
+                    compaction_map[parent] = compact_row
+                    unprocessed_indices -= set(group.index)
+        compacted_df = pd.DataFrame(list(compaction_map.values()))
+        remaining_df = df.loc[list(unprocessed_indices)]
+        result_df = pd.concat([compacted_df, remaining_df])
+        result_df = result_df.rename_axis(df.index.name)
+        return result_df

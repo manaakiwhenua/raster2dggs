@@ -29,6 +29,8 @@ from rasterio.warp import calculate_default_transform
 import raster2dggs.constants as const
 import raster2dggs.indexerfactory as idxfactory
 
+from raster2dggs.interfaces import RasterIndexer
+
 LOGGER = logging.getLogger(__name__)
 click_log.basic_config(LOGGER)
 
@@ -133,9 +135,7 @@ def get_parent_res(dggs: str, parent_res: Union[None, int], resolution: int) -> 
 
 
 def address_boundary_issues(
-    dggs: str, #TODO: pass in indexer instance instead
-    parent_groupby: Callable, #TODO: call from interface
-    compaction: Callable, #TODO: call from interface
+    indexer: RasterIndexer,
     pq_input: tempfile.TemporaryDirectory,
     output: Path,
     resolution: int,
@@ -160,8 +160,8 @@ def address_boundary_issues(
     )
     with TqdmCallback(desc="Reading window partitions"):
         # Set index as parent cell
-        pad_width = const.zero_padding(dggs)
-        index_col = f"{dggs}_{parent_res:0{pad_width}d}"
+        pad_width = const.zero_padding(indexer.dggs)
+        index_col = f"{indexer.dggs}_{parent_res:0{pad_width}d}"
         ddf = dd.read_parquet(pq_input).set_index(index_col)
 
     with TqdmCallback(desc="Counting parents"):
@@ -175,15 +175,15 @@ def address_boundary_issues(
     LOGGER.debug("Aggregating cell values where conflicts exist")
 
     with TqdmCallback(
-        desc=f"Repartitioning/aggregating{'/compacting' if compaction else ''}"
+        desc=f"Repartitioning/aggregating{'/compacting' if kwargs['compact'] else ''}"
     ):
         ddf = ddf.repartition(  # See "notes" on why divisions expects repetition of the last item https://docs.dask.org/en/stable/generated/dask.dataframe.DataFrame.repartition.html
             divisions=(uniqueparents + [uniqueparents[-1]])
         ).map_partitions(
-            parent_groupby, resolution, kwargs["aggfunc"], kwargs["decimals"]
+            indexer.parent_groupby, resolution, kwargs["aggfunc"], kwargs["decimals"]
         )
-        if compaction:
-            ddf = ddf.map_partitions(compaction, resolution, parent_res)
+        if kwargs["compact"]:
+            ddf = ddf.map_partitions(indexer.compaction, resolution, parent_res)
 
         ddf.map_partitions(lambda df: df.sort_index()).to_parquet(
             output,
@@ -204,8 +204,6 @@ def address_boundary_issues(
 
 def initial_index(
     dggs: str,
-    parent_groupby: Callable, #TODO: call from interface
-    compaction: Union[None, Callable], #TODO: call from interface
     raster_input: Union[Path, str],
     output: Path,
     resolution: int,
@@ -315,9 +313,7 @@ def initial_index(
 
             LOGGER.debug("Stage 1 (primary indexing) complete")
             return address_boundary_issues(
-                dggs,
-                parent_groupby,
-                compaction,
+                indexer,
                 tmpdir,
                 output,
                 resolution,
