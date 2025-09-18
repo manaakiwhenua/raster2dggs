@@ -17,45 +17,8 @@ import raster2dggs.constants as const
 import raster2dggs.common as common
 from raster2dggs import __version__
 
-PAD_WIDTH = common.zero_padding("rhp")
+PAD_WIDTH = const.zero_padding("rhp")
 # RDGGS = WGS84_003 # Static DGGS currently used by rHP wrappers
-
-
-def _rhpfunc(
-    sdf: xr.DataArray,
-    resolution: int,
-    parent_res: int,
-    nodata: Number = np.nan,
-    band_labels: Tuple[str] = None,
-) -> pa.Table:
-    """
-    Index a raster window to rHEALPix.
-    Subsequent steps are necessary to resolve issues at the boundaries of windows.
-    If windows are very small, or in strips rather than blocks, processing may be slower
-    than necessary and the recommendation is to write different windows in the source raster.
-    """
-    sdf: pd.DataFrame = sdf.to_dataframe().drop(columns=["spatial_ref"]).reset_index()
-    subset: pd.DataFrame = sdf.dropna()
-    subset = subset[subset.value != nodata]
-    subset = pd.pivot_table(
-        subset, values=const.DEFAULT_NAME, index=["x", "y"], columns=["band"]
-    ).reset_index()
-    # Primary rHEALPix index
-    rhpindex = subset.rhp.geo_to_rhp(resolution, lat_col="y", lng_col="x").drop(
-        columns=["x", "y"]
-    )
-    # Secondary (parent) rHEALPix index, used later for partitioning
-    rhpindex = rhpindex.rhp.rhp_to_parent(parent_res).reset_index()
-    # Renaming columns to actual band labels
-    bands = sdf["band"].unique()
-    band_names = dict(zip(bands, map(lambda i: band_labels[i - 1], bands)))
-    for k, v in band_names.items():
-        if band_names[k] is None:
-            band_names[k] = str(bands[k - 1])
-        else:
-            band_names = band_names
-    rhpindex = rhpindex.rename(columns=band_names)
-    return pa.Table.from_pandas(rhpindex)
 
 
 def _rhp_parent_groupby(
@@ -238,13 +201,13 @@ def rhp(
         warp_mem_limit,
         resampling,
         overwrite,
+        compact,
     )
 
     common.initial_index(
         "rhp",
-        _rhpfunc,
-        _rhp_parent_groupby,
-        _rhp_compaction if compact else None,
+        _rhp_parent_groupby, #TODO: Call from interface
+        _rhp_compaction if compact else None, #TODO: Call from interface
         raster_input,
         output_directory,
         int(resolution),

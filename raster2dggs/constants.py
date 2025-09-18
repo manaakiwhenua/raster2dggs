@@ -31,3 +31,17 @@ DEFAULT_DGGS_PARENT_RES = {
     "maidenhead": lambda resolution: MIN_MAIDENHEAD,
     "s2": lambda resolution: max(MIN_S2, (resolution - DEFAULT_PARENT_OFFSET)),
 }
+
+
+def zero_padding(dggs: str) -> int:
+    max_res_lookup = {
+        "h3": MAX_H3,
+        "rhp": MAX_RHP,
+        "geohash": MAX_GEOHASH,
+        "maidenhead": MAX_MAIDENHEAD,
+        "s2": MAX_S2,
+    }
+    max_res = max_res_lookup.get(dggs)
+    if max_res is None:
+        raise ValueError(f"Unknown DGGS type: {dggs}")
+    return len(str(max_res))

@@ -17,52 +17,52 @@ import raster2dggs.common as common
 from raster2dggs import __version__
 
 
-PAD_WIDTH = common.zero_padding("geohash")
+PAD_WIDTH = const.zero_padding("geohash")
 
 
-def _geohashfunc(
-    sdf: xr.DataArray,
-    precision: int,
-    parent_precision: int,
-    nodata: Number = np.nan,
-    band_labels: Tuple[str] = None,
-) -> pa.Table:
-    """
-    Index a raster window to Geohash.
-    Subsequent steps are necessary to resolve issues at the boundaries of windows.
-    If windows are very small, or in strips rather than blocks, processing may be slower
-    than necessary and the recommendation is to write different windows in the source raster.
-    """
-    sdf: pd.DataFrame = sdf.to_dataframe().drop(columns=["spatial_ref"]).reset_index()
-    subset: pd.DataFrame = sdf.dropna()
-    subset = subset[subset.value != nodata]
-    subset = pd.pivot_table(
-        subset, values=const.DEFAULT_NAME, index=["x", "y"], columns=["band"]
-    ).reset_index()
-    # Primary Geohash index
-    geohash = [
-        gh.encode(lat, lon, precision=precision)
-        for lat, lon in zip(subset["y"], subset["x"])
-    ]  # Vectorised
-    # Secondary (parent) Geohash index, used later for partitioning
-    geohash_parent = [gh[:parent_precision] for gh in geohash]
-    subset = subset.drop(columns=["x", "y"])
-    subset[f"geohash_{precision:0{PAD_WIDTH}d}"] = pd.Series(
-        geohash, index=subset.index
-    )
-    subset[f"geohash_{parent_precision:0{PAD_WIDTH}d}"] = pd.Series(
-        geohash_parent, index=subset.index
-    )
-    # Rename bands
-    bands = sdf["band"].unique()
-    band_names = dict(zip(bands, map(lambda i: band_labels[i - 1], bands)))
-    for k, v in band_names.items():
-        if band_names[k] is None:
-            band_names[k] = str(bands[k - 1])
-        else:
-            band_names = band_names
-    subset = subset.rename(columns=band_names)
-    return pa.Table.from_pandas(subset)
+# def _geohashfunc(
+#     sdf: xr.DataArray,
+#     precision: int,
+#     parent_precision: int,
+#     nodata: Number = np.nan,
+#     band_labels: Tuple[str] = None,
+# ) -> pa.Table:
+#     """
+#     Index a raster window to Geohash.
+#     Subsequent steps are necessary to resolve issues at the boundaries of windows.
+#     If windows are very small, or in strips rather than blocks, processing may be slower
+#     than necessary and the recommendation is to write different windows in the source raster.
+#     """
+#     sdf: pd.DataFrame = sdf.to_dataframe().drop(columns=["spatial_ref"]).reset_index()
+#     subset: pd.DataFrame = sdf.dropna()
+#     subset = subset[subset.value != nodata]
+#     subset = pd.pivot_table(
+#         subset, values=const.DEFAULT_NAME, index=["x", "y"], columns=["band"]
+#     ).reset_index()
+#     # Primary Geohash index
+#     geohash = [
+#         gh.encode(lat, lon, precision=precision)
+#         for lat, lon in zip(subset["y"], subset["x"])
+#     ]  # Vectorised
+#     # Secondary (parent) Geohash index, used later for partitioning
+#     geohash_parent = [gh[:parent_precision] for gh in geohash]
+#     subset = subset.drop(columns=["x", "y"])
+#     subset[f"geohash_{precision:0{PAD_WIDTH}d}"] = pd.Series(
+#         geohash, index=subset.index
+#     )
+#     subset[f"geohash_{parent_precision:0{PAD_WIDTH}d}"] = pd.Series(
+#         geohash_parent, index=subset.index
+#     )
+#     # Rename bands
+#     bands = sdf["band"].unique()
+#     band_names = dict(zip(bands, map(lambda i: band_labels[i - 1], bands)))
+#     for k, v in band_names.items():
+#         if band_names[k] is None:
+#             band_names[k] = str(bands[k - 1])
+#         else:
+#             band_names = band_names
+#     subset = subset.rename(columns=band_names)
+#     return pa.Table.from_pandas(subset)
 
 
 def _geohash_parent_groupby(
@@ -257,13 +257,14 @@ def geohash(
         warp_mem_limit,
         resampling,
         overwrite,
+        compact,
     )
 
     common.initial_index(
         "geohash",
-        _geohashfunc,
-        _geohash_parent_groupby,
-        _geohash_compaction if compact else None,
+        #_geohashfunc, #TODO: Call from interface
+        _geohash_parent_groupby, #TODO: Call from interface
+        _geohash_compaction if compact else None, #TODO: Call from interface
         raster_input,
         output_directory,
         int(resolution),

@@ -16,48 +16,48 @@ import raster2dggs.constants as const
 import raster2dggs.common as common
 from raster2dggs import __version__
 
-PAD_WIDTH = common.zero_padding("s2")
+PAD_WIDTH = const.zero_padding("s2")
 
 
-def _s2func(
-    sdf: xr.DataArray,
-    resolution: int,
-    parent_res: int,
-    nodata: Number = np.nan,
-    band_labels: Tuple[str] = None,
-) -> pa.Table:
-    """
-    Index a raster window to S2.
-    Subsequent steps are necessary to resolve issues at the boundaries of windows.
-    If windows are very small, or in strips rather than blocks, processing may be slower
-    than necessary and the recommendation is to write different windows in the source raster.
-    """
-    sdf: pd.DataFrame = sdf.to_dataframe().drop(columns=["spatial_ref"]).reset_index()
-    subset: pd.DataFrame = sdf.dropna()
-    subset = subset[subset.value != nodata]
-    subset = pd.pivot_table(
-        subset, values=const.DEFAULT_NAME, index=["x", "y"], columns=["band"]
-    ).reset_index()
-    # S2 index
-    cells = [
-        CellId.from_lat_lng(LatLng.from_degrees(lat, lon))
-        for lat, lon in zip(subset["y"], subset["x"])
-    ]
-    s2 = [cell.parent(resolution).to_token() for cell in cells]
-    s2_parent = [cell.parent(parent_res).to_token() for cell in cells]
-    subset = subset.drop(columns=["x", "y"])
-    subset[f"s2_{resolution:0{PAD_WIDTH}d}"] = pd.Series(s2, index=subset.index)
-    subset[f"s2_{parent_res:0{PAD_WIDTH}d}"] = pd.Series(s2_parent, index=subset.index)
-    # Renaming columns to actual band labels
-    bands = sdf["band"].unique()
-    band_names = dict(zip(bands, map(lambda i: band_labels[i - 1], bands)))
-    for k, v in band_names.items():
-        if band_names[k] is None:
-            band_names[k] = str(bands[k - 1])
-        else:
-            band_names = band_names
-    subset = subset.rename(columns=band_names)
-    return pa.Table.from_pandas(subset)
+# def _s2func(
+#     sdf: xr.DataArray,
+#     resolution: int,
+#     parent_res: int,
+#     nodata: Number = np.nan,
+#     band_labels: Tuple[str] = None,
+# ) -> pa.Table:
+#     """
+#     Index a raster window to S2.
+#     Subsequent steps are necessary to resolve issues at the boundaries of windows.
+#     If windows are very small, or in strips rather than blocks, processing may be slower
+#     than necessary and the recommendation is to write different windows in the source raster.
+#     """
+#     sdf: pd.DataFrame = sdf.to_dataframe().drop(columns=["spatial_ref"]).reset_index()
+#     subset: pd.DataFrame = sdf.dropna()
+#     subset = subset[subset.value != nodata]
+#     subset = pd.pivot_table(
+#         subset, values=const.DEFAULT_NAME, index=["x", "y"], columns=["band"]
+#     ).reset_index()
+#     # S2 index
+#     cells = [
+#         CellId.from_lat_lng(LatLng.from_degrees(lat, lon))
+#         for lat, lon in zip(subset["y"], subset["x"])
+#     ]
+#     s2 = [cell.parent(resolution).to_token() for cell in cells]
+#     s2_parent = [cell.parent(parent_res).to_token() for cell in cells]
+#     subset = subset.drop(columns=["x", "y"])
+#     subset[f"s2_{resolution:0{PAD_WIDTH}d}"] = pd.Series(s2, index=subset.index)
+#     subset[f"s2_{parent_res:0{PAD_WIDTH}d}"] = pd.Series(s2_parent, index=subset.index)
+#     # Renaming columns to actual band labels
+#     bands = sdf["band"].unique()
+#     band_names = dict(zip(bands, map(lambda i: band_labels[i - 1], bands)))
+#     for k, v in band_names.items():
+#         if band_names[k] is None:
+#             band_names[k] = str(bands[k - 1])
+#         else:
+#             band_names = band_names
+#     subset = subset.rename(columns=band_names)
+#     return pa.Table.from_pandas(subset)
 
 
 def _s2_parent_groupby(
@@ -257,13 +257,14 @@ def s2(
         warp_mem_limit,
         resampling,
         overwrite,
+        compact,
     )
 
     common.initial_index(
         "s2",
-        _s2func,
-        _s2_parent_groupby,
-        _s2_compaction if compact else None,
+        #_s2func, #TODO: Call from interface
+        _s2_parent_groupby, #TODO: Call from interface
+        _s2_compaction if compact else None, #TODO: Call from interface
         raster_input,
         output_directory,
         int(resolution),

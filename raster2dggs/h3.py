@@ -2,7 +2,7 @@ from numbers import Number
 import numpy as np
 from pathlib import Path
 import tempfile
-from typing import Callable, Tuple, Union
+from typing import Callable, Tuple, Union #TODO: remove Callable from list of imports
 
 import click
 import click_log
@@ -17,44 +17,7 @@ import raster2dggs.constants as const
 import raster2dggs.common as common
 from raster2dggs import __version__
 
-PAD_WIDTH = common.zero_padding("h3")
-
-
-def _h3func(
-    sdf: xr.DataArray,
-    resolution: int,
-    parent_res: int,
-    nodata: Number = np.nan,
-    band_labels: Tuple[str] = None,
-) -> pa.Table:
-    """
-    Index a raster window to H3.
-    Subsequent steps are necessary to resolve issues at the boundaries of windows.
-    If windows are very small, or in strips rather than blocks, processing may be slower
-    than necessary and the recommendation is to write different windows in the source raster.
-    """
-    sdf: pd.DataFrame = sdf.to_dataframe().drop(columns=["spatial_ref"]).reset_index()
-    subset: pd.DataFrame = sdf.dropna()
-    subset = subset[subset.value != nodata]
-    subset = pd.pivot_table(
-        subset, values=const.DEFAULT_NAME, index=["x", "y"], columns=["band"]
-    ).reset_index()
-    # Primary H3 index
-    h3index = subset.h3.geo_to_h3(resolution, lat_col="y", lng_col="x").drop(
-        columns=["x", "y"]
-    )
-    # Secondary (parent) H3 index, used later for partitioning
-    h3index = h3index.h3.h3_to_parent(parent_res).reset_index()
-    # Renaming columns to actual band labels
-    bands = sdf["band"].unique()
-    band_names = dict(zip(bands, map(lambda i: band_labels[i - 1], bands)))
-    for k, v in band_names.items():
-        if band_names[k] is None:
-            band_names[k] = str(bands[k - 1])
-        else:
-            band_names = band_names
-    h3index = h3index.rename(columns=band_names)
-    return pa.Table.from_pandas(h3index)
+PAD_WIDTH = const.zero_padding("h3")
 
 
 def _h3_parent_groupby(
@@ -238,13 +201,13 @@ def h3(
         warp_mem_limit,
         resampling,
         overwrite,
+        compact,
     )
 
     common.initial_index(
         "h3",
-        _h3func,
-        _h3_parent_groupby,
-        _h3_compaction if compact else None,
+        _h3_parent_groupby, #TODO: Call from interface
+        _h3_compaction if compact else None, #TODO: call from interface
         raster_input,
         output_directory,
         int(resolution),

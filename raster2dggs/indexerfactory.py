@@ -1,13 +1,22 @@
-from interfaces import RasterIndexer
-from indexers import *
+"""
+@author: ndemaio
+"""
+
+from raster2dggs.interfaces import RasterIndexer
+
+import raster2dggs.indexers.h3rasterindexer as h3rasterindexer
+import raster2dggs.indexers.rhprasterindexer as rhprasterindexer
+import raster2dggs.indexers.geohashrasterindexer as geohashrasterindexer
+import raster2dggs.indexers.maidenheadrasterindexer as maidenheadrasterindexer
+import raster2dggs.indexers.s2rasterindexer as s2rasterindexer
 
 # Match DGGS name to indexer class name
 indexer_lookup = {
-    "h3": H3RasterIndexer,
-    "rhp": RHPRasterIndexer,
-    "geohash": GeohashRasterIndexer,
-    "maidenhead": MaidenheadRasterIndexer,
-    "s2": S2RasterIndexer,
+    "h3": h3rasterindexer.H3RasterIndexer,
+    "rhp": rhprasterindexer.RHPRasterIndexer,
+    "geohash": geohashrasterindexer.GeohashRasterIndexer,
+    "maidenhead": maidenheadrasterindexer.MaidenheadRasterIndexer,
+    "s2": s2rasterindexer.S2RasterIndexer,
     }
 
 def indexer_instance(dggs: str) -> RasterIndexer:
@@ -21,4 +30,4 @@ def indexer_instance(dggs: str) -> RasterIndexer:
         )
         
     indexer = indexer_lookup[dggs]
-    return indexer()
+    return indexer(dggs)

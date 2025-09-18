@@ -1,11 +1,22 @@
-# -*- coding: utf-8 -*-
+"""
+@author: ndemaio
+"""
+
+from numbers import Number
+from typing import Callable, Tuple, Union
+
 import pandas as pd
 import pyarrow as pa
+import xarray as xr
+import numpy as np
 
 class RasterIndexer:
     '''
     Interface description here
     '''
+    def __init__(self, dggs: str):
+        self.dggs = dggs
+    
     def index_func(
             self,
             sdf: xr.DataArray,
@@ -23,6 +34,13 @@ class RasterIndexer:
             aggfunc: Union[str, Callable],
             decimals: int
             ) -> pd.DataFrame:
+        raise NotImplementedError()
+        
+    def cell_to_children_size(
+            self,
+            cell,
+            desired_resolution: int
+            ) -> int:
         raise NotImplementedError()
         
     def compaction(

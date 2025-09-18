@@ -27,6 +27,7 @@ from urllib.parse import urlparse
 from rasterio.warp import calculate_default_transform
 
 import raster2dggs.constants as const
+import raster2dggs.indexerfactory as idxfactory
 
 LOGGER = logging.getLogger(__name__)
 click_log.basic_config(LOGGER)
@@ -93,6 +94,7 @@ def assemble_kwargs(
     warp_mem_limit: int,
     resampling: str,
     overwrite: bool,
+    compact: bool,
 ) -> dict:
     kwargs = {
         "upscale": upscale,
@@ -103,23 +105,10 @@ def assemble_kwargs(
         "warp_mem_limit": warp_mem_limit,
         "resampling": resampling,
         "overwrite": overwrite,
+        "compact": compact
     }
 
     return kwargs
-
-
-def zero_padding(dggs: str) -> int:
-    max_res_lookup = {
-        "h3": const.MAX_H3,
-        "rhp": const.MAX_RHP,
-        "geohash": const.MAX_GEOHASH,
-        "maidenhead": const.MAX_MAIDENHEAD,
-        "s2": const.MAX_S2,
-    }
-    max_res = max_res_lookup.get(dggs)
-    if max_res is None:
-        raise ValueError(f"Unknown DGGS type: {dggs}")
-    return len(str(max_res))
 
 
 def get_parent_res(dggs: str, parent_res: Union[None, int], resolution: int) -> int:
@@ -144,9 +133,9 @@ def get_parent_res(dggs: str, parent_res: Union[None, int], resolution: int) -> 
 
 
 def address_boundary_issues(
-    dggs: str,
-    parent_groupby: Callable,
-    compaction: Callable,
+    dggs: str, #TODO: pass in indexer instance instead
+    parent_groupby: Callable, #TODO: call from interface
+    compaction: Callable, #TODO: call from interface
     pq_input: tempfile.TemporaryDirectory,
     output: Path,
     resolution: int,
@@ -171,7 +160,7 @@ def address_boundary_issues(
     )
     with TqdmCallback(desc="Reading window partitions"):
         # Set index as parent cell
-        pad_width = zero_padding(dggs)
+        pad_width = const.zero_padding(dggs)
         index_col = f"{dggs}_{parent_res:0{pad_width}d}"
         ddf = dd.read_parquet(pq_input).set_index(index_col)
 
@@ -215,9 +204,8 @@ def address_boundary_issues(
 
 def initial_index(
     dggs: str,
-    dggsfunc: Callable,
-    parent_groupby: Callable,
-    compaction: Union[None, Callable],
+    parent_groupby: Callable, #TODO: call from interface
+    compaction: Union[None, Callable], #TODO: call from interface
     raster_input: Union[Path, str],
     output: Path,
     resolution: int,
@@ -236,6 +224,7 @@ def initial_index(
     This function passes a path to a temporary directory (which contains the output of this "stage 1" processing) to
         a secondary function that addresses issues at the boundaries of raster windows.
     """
+    indexer = idxfactory.indexer_instance(dggs)
     parent_res = get_parent_res(dggs, parent_res, resolution)
     LOGGER.info(
         "Indexing %s at %s resolution %d, parent resolution %d",
@@ -296,7 +285,7 @@ def initial_index(
                     def process(window):
                         sdf = da.rio.isel_window(window)
 
-                        result = dggsfunc(
+                        result = indexer.index_func(
                             sdf,
                             resolution,
                             parent_res,
