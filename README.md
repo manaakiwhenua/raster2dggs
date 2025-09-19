@@ -204,7 +204,7 @@ def s2id_to_polygon(s2_id_hex):
     return Polygon(vertices)
 
 o['geometry'] = o.index.map(s2id_to_polygon)
-gpd.GeoDataFrame(o, geometry='geometry', crs='EPSG:4326').to_parquet('./tests/data/output/7/sample_tif_s2_geoparquet.parquet')
+gpd.GeoDataFrame(o, geometry='geometry', crs='EPSG:4326').to_file('./tests/data/output/7/sample_tif_s2.gpkg')
 ```
 </details>
 
