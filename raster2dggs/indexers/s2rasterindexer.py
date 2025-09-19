@@ -18,7 +18,7 @@ from raster2dggs.interfaces import RasterIndexer
 
 class S2RasterIndexer(RasterIndexer):
     '''
-    Class description here
+    Provides integration for Google's S2 DGGS.
     '''
     
     def index_func(

@@ -18,7 +18,7 @@ from raster2dggs.interfaces import RasterIndexer
 
 class MaidenheadRasterIndexer(RasterIndexer):
     '''
-    Class description here
+    Provides integration for Maidenhead Locator System geocodes.
     '''
     
     def index_func(    

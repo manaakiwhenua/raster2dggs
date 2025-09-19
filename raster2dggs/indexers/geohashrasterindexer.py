@@ -18,7 +18,7 @@ from raster2dggs.interfaces import RasterIndexer
 
 class GeohashRasterIndexer(RasterIndexer):
     '''
-    Class description here
+    Provides integration for the Geohash geocode system.
     '''
     
     def index_func(    

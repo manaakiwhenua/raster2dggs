@@ -20,7 +20,7 @@ from raster2dggs.interfaces import RasterIndexer
 
 class RHPRasterIndexer(RasterIndexer):
     '''
-    Class description here
+    Provides integration for MWLR's rHEALPix DGGS.
     '''
     
     def index_func(    

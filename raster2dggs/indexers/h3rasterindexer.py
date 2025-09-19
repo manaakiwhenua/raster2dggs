@@ -20,7 +20,7 @@ from raster2dggs.interfaces import RasterIndexer
 
 class H3RasterIndexer(RasterIndexer):
     '''
-    Class description here
+    Provides integration for Uber's H3 DGGS.
     '''
     
     def index_func(    
