@@ -17,18 +17,18 @@ from raster2dggs.interfaces import RasterIndexer
 
 
 class S2RasterIndexer(RasterIndexer):
-    '''
+    """
     Provides integration for Google's S2 DGGS.
-    '''
-    
+    """
+
     def index_func(
-            self,
-            sdf: xr.DataArray,
-            resolution: int,
-            parent_res: int,
-            nodata: Number = np.nan,
-            band_labels: Tuple[str] = None,
-            ) -> pa.Table:
+        self,
+        sdf: xr.DataArray,
+        resolution: int,
+        parent_res: int,
+        nodata: Number = np.nan,
+        band_labels: Tuple[str] = None,
+    ) -> pa.Table:
         """
         Index a raster window to S2.
         Subsequent steps are necessary to resolve issues at the boundaries of windows.
@@ -38,8 +38,10 @@ class S2RasterIndexer(RasterIndexer):
         Implementation of interface function.
         """
         PAD_WIDTH = const.zero_padding("s2")
-        
-        sdf: pd.DataFrame = sdf.to_dataframe().drop(columns=["spatial_ref"]).reset_index()
+
+        sdf: pd.DataFrame = (
+            sdf.to_dataframe().drop(columns=["spatial_ref"]).reset_index()
+        )
         subset: pd.DataFrame = sdf.dropna()
         subset = subset[subset.value != nodata]
         subset = pd.pivot_table(
@@ -54,7 +56,9 @@ class S2RasterIndexer(RasterIndexer):
         s2_parent = [cell.parent(parent_res).to_token() for cell in cells]
         subset = subset.drop(columns=["x", "y"])
         subset[f"s2_{resolution:0{PAD_WIDTH}d}"] = pd.Series(s2, index=subset.index)
-        subset[f"s2_{parent_res:0{PAD_WIDTH}d}"] = pd.Series(s2_parent, index=subset.index)
+        subset[f"s2_{parent_res:0{PAD_WIDTH}d}"] = pd.Series(
+            s2_parent, index=subset.index
+        )
         # Renaming columns to actual band labels
         bands = sdf["band"].unique()
         band_names = dict(zip(bands, map(lambda i: band_labels[i - 1], bands)))
@@ -66,14 +70,9 @@ class S2RasterIndexer(RasterIndexer):
         subset = subset.rename(columns=band_names)
         return pa.Table.from_pandas(subset)
 
-        
     def parent_groupby(
-            self,
-            df,
-            resolution: int,
-            aggfunc: Union[str, Callable],
-            decimals: int
-            ) -> pd.DataFrame:
+        self, df, resolution: int, aggfunc: Union[str, Callable], decimals: int
+    ) -> pd.DataFrame:
         """
         Function for aggregating the S2 resolution values per parent partition. Each partition will be run through with a
         pandas .groupby function. This step is to ensure there are no duplicate S2 values, which will happen when indexing a
@@ -84,7 +83,11 @@ class S2RasterIndexer(RasterIndexer):
         PAD_WIDTH = const.zero_padding("s2")
 
         if decimals > 0:
-            return df.groupby(f"s2_{resolution:0{PAD_WIDTH}d}").agg(aggfunc).round(decimals)
+            return (
+                df.groupby(f"s2_{resolution:0{PAD_WIDTH}d}")
+                .agg(aggfunc)
+                .round(decimals)
+            )
         else:
             return (
                 df.groupby(f"s2_{resolution:0{PAD_WIDTH}d}")
@@ -93,12 +96,7 @@ class S2RasterIndexer(RasterIndexer):
                 .astype("Int64")
             )
 
-
-    def cell_to_children_size(
-            self,
-            cell,
-            desired_resolution: int
-            ) -> int:
+    def cell_to_children_size(self, cell, desired_resolution: int) -> int:
         """
         Determine total number of children at some offset resolution
 
@@ -112,14 +110,10 @@ class S2RasterIndexer(RasterIndexer):
             return 6 * (4 ** (desired_resolution - 1))
         # For levels greater than 0, the cell divides into 4^(n-m) children
         return 4 ** (desired_resolution - cell_level)
-        
-    
+
     def compaction(
-            self,
-            df: pd.DataFrame,
-            resolution: int,
-            parent_res: int
-            ) -> pd.DataFrame:
+        self, df: pd.DataFrame, resolution: int, parent_res: int
+    ) -> pd.DataFrame:
         """
         Returns a compacted version of the input dataframe.
         Compaction only occurs if all values (i.e. bands) of the input share common values across all sibling cells.
@@ -148,7 +142,9 @@ class S2RasterIndexer(RasterIndexer):
                 lambda token: CellId.from_token(token).parent(r).to_token(),
                 unprocessed_indices,
             )
-            parent_groups = df.loc[list(unprocessed_indices)].groupby(list(parent_cells))
+            parent_groups = df.loc[list(unprocessed_indices)].groupby(
+                list(parent_cells)
+            )
             for parent, group in parent_groups:
                 if parent in compaction_map:
                     continue

@@ -10,6 +10,7 @@ import raster2dggs.constants as const
 import raster2dggs.common as common
 from raster2dggs import __version__
 
+
 @click.command(context_settings={"show_default": True})
 @click_log.simple_verbosity_option(common.LOGGER)
 @click.argument("raster_input", type=click.Path(), nargs=1)

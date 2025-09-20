@@ -107,7 +107,7 @@ def assemble_kwargs(
         "warp_mem_limit": warp_mem_limit,
         "resampling": resampling,
         "overwrite": overwrite,
-        "compact": compact
+        "compact": compact,
     }
 
     return kwargs

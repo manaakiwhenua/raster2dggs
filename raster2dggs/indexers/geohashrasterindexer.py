@@ -17,18 +17,18 @@ from raster2dggs.interfaces import RasterIndexer
 
 
 class GeohashRasterIndexer(RasterIndexer):
-    '''
+    """
     Provides integration for the Geohash geocode system.
-    '''
-    
-    def index_func(    
-            self,
-            sdf: xr.DataArray,
-            precision: int,
-            parent_precision: int,
-            nodata: Number = np.nan,
-            band_labels: Tuple[str] = None,
-            ) -> pa.Table:
+    """
+
+    def index_func(
+        self,
+        sdf: xr.DataArray,
+        precision: int,
+        parent_precision: int,
+        nodata: Number = np.nan,
+        band_labels: Tuple[str] = None,
+    ) -> pa.Table:
         """
         Index a raster window to Geohash.
         Subsequent steps are necessary to resolve issues at the boundaries of windows.
@@ -38,8 +38,10 @@ class GeohashRasterIndexer(RasterIndexer):
         Implementation of interface function.
         """
         PAD_WIDTH = const.zero_padding("geohash")
-        
-        sdf: pd.DataFrame = sdf.to_dataframe().drop(columns=["spatial_ref"]).reset_index()
+
+        sdf: pd.DataFrame = (
+            sdf.to_dataframe().drop(columns=["spatial_ref"]).reset_index()
+        )
         subset: pd.DataFrame = sdf.dropna()
         subset = subset[subset.value != nodata]
         subset = pd.pivot_table(
@@ -70,14 +72,9 @@ class GeohashRasterIndexer(RasterIndexer):
         subset = subset.rename(columns=band_names)
         return pa.Table.from_pandas(subset)
 
-        
     def parent_groupby(
-            self,
-            df,
-            precision: int,
-            aggfunc: Union[str, Callable],
-            decimals: int
-            ) -> pd.DataFrame:
+        self, df, precision: int, aggfunc: Union[str, Callable], decimals: int
+    ) -> pd.DataFrame:
         """
         Function for aggregating the Geohash values per parent partition. Each partition will be run through with a
         pandas .groupby function. This step is to ensure there are no duplicate Geohashes, which will happen when indexing a
@@ -100,13 +97,8 @@ class GeohashRasterIndexer(RasterIndexer):
                 .round(decimals)
                 .astype("Int64")
             )
-        
-        
-    def cell_to_children_size(
-            self,
-            cell,
-            desired_level: int
-            ) -> int:
+
+    def cell_to_children_size(self, cell, desired_level: int) -> int:
         """
         Determine total number of children at some offset resolution
 
@@ -116,14 +108,10 @@ class GeohashRasterIndexer(RasterIndexer):
         if desired_level < level:
             return 0
         return 32 ** (desired_level - level)
-        
-    
+
     def compaction(
-            self,
-            df: pd.DataFrame,
-            precision: int,
-            parent_precision: int
-            ) -> pd.DataFrame:
+        self, df: pd.DataFrame, precision: int, parent_precision: int
+    ) -> pd.DataFrame:
         """
         Returns a compacted version of the input dataframe.
         Compaction only occurs if all values (i.e. bands) of the input share common values across all sibling cells.
@@ -140,7 +128,9 @@ class GeohashRasterIndexer(RasterIndexer):
             parent_cells = list(
                 map(lambda gh: self.to_parent(gh, p), unprocessed_indices)
             )
-            parent_groups = df.loc[list(unprocessed_indices)].groupby(list(parent_cells))
+            parent_groups = df.loc[list(unprocessed_indices)].groupby(
+                list(parent_cells)
+            )
             for parent, group in parent_groups:
                 if parent in compaction_map:
                     continue
@@ -155,12 +145,11 @@ class GeohashRasterIndexer(RasterIndexer):
         result_df = pd.concat([compacted_df, remaining_df])
         result_df = result_df.rename_axis(df.index.name)
         return result_df
-    
-    
+
     def to_parent(self, cell: str, desired_precision: int) -> str:
         """
         Returns cell parent at some offset level.
-        
+
         Not a part of the RasterIndexer interface
         """
         return cell[:desired_precision]

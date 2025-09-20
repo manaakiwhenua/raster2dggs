@@ -17,18 +17,18 @@ from raster2dggs.interfaces import RasterIndexer
 
 
 class MaidenheadRasterIndexer(RasterIndexer):
-    '''
+    """
     Provides integration for Maidenhead Locator System geocodes.
-    '''
-    
-    def index_func(    
-            self,
-            sdf: xr.DataArray,
-            precision: int,
-            parent_precision: int,
-            nodata: Number = np.nan,
-            band_labels: Tuple[str] = None,
-            ) -> pa.Table:
+    """
+
+    def index_func(
+        self,
+        sdf: xr.DataArray,
+        precision: int,
+        parent_precision: int,
+        nodata: Number = np.nan,
+        band_labels: Tuple[str] = None,
+    ) -> pa.Table:
         """
         Index a raster window to Maidenhead.
         Subsequent steps are necessary to resolve issues at the boundaries of windows.
@@ -38,8 +38,10 @@ class MaidenheadRasterIndexer(RasterIndexer):
         Implementation of interface function.
         """
         PAD_WIDTH = const.zero_padding("maidenhead")
-        
-        sdf: pd.DataFrame = sdf.to_dataframe().drop(columns=["spatial_ref"]).reset_index()
+
+        sdf: pd.DataFrame = (
+            sdf.to_dataframe().drop(columns=["spatial_ref"]).reset_index()
+        )
         subset: pd.DataFrame = sdf.dropna()
         subset = subset[subset.value != nodata]
         subset = pd.pivot_table(
@@ -47,7 +49,8 @@ class MaidenheadRasterIndexer(RasterIndexer):
         ).reset_index()
         # Primary Maidenhead index
         maidenhead = [
-            mh.to_maiden(lat, lon, precision) for lat, lon in zip(subset["y"], subset["x"])
+            mh.to_maiden(lat, lon, precision)
+            for lat, lon in zip(subset["y"], subset["x"])
         ]  # Vectorised
         # Secondary (parent) Maidenhead index, used later for partitioning
         maidenhead_parent = [
@@ -70,15 +73,10 @@ class MaidenheadRasterIndexer(RasterIndexer):
                 band_names = band_names
         subset = subset.rename(columns=band_names)
         return pa.Table.from_pandas(subset)
-        
-    
+
     def parent_groupby(
-            self,
-            df,
-            precision: int,
-            aggfunc: Union[str, Callable],
-            decimals: int
-            ) -> pd.DataFrame:
+        self, df, precision: int, aggfunc: Union[str, Callable], decimals: int
+    ) -> pd.DataFrame:
         """
         Function for aggregating the Maidenhead values per parent partition. Each partition will be run through with a
         pandas .groupby function. This step is to ensure there are no duplicate Maidenhead indices, which will certainly happen when indexing most raster datasets as Maidenhead has low precision.
@@ -86,7 +84,7 @@ class MaidenheadRasterIndexer(RasterIndexer):
         Implementation of interface function.
         """
         PAD_WIDTH = const.zero_padding("maidenhead")
-        
+
         if decimals > 0:
             return (
                 df.groupby(f"maidenhead_{precision:0{PAD_WIDTH}d}")
@@ -100,13 +98,8 @@ class MaidenheadRasterIndexer(RasterIndexer):
                 .round(decimals)
                 .astype("Int64")
             )
-        
-        
-    def cell_to_children_size(
-            self,
-            cell,
-            desired_level: int
-            ) -> int:
+
+    def cell_to_children_size(self, cell, desired_level: int) -> int:
         """
         Determine total number of children at some offset level.
 
@@ -116,14 +109,10 @@ class MaidenheadRasterIndexer(RasterIndexer):
         if desired_level < level:
             return 0
         return 100 ** (desired_level - level)
-        
-    
+
     def compaction(
-            self,
-            df: pd.DataFrame,
-            level: int,
-            parent_level: int
-            ) -> pd.DataFrame:
+        self, df: pd.DataFrame, level: int, parent_level: int
+    ) -> pd.DataFrame:
         """
         Returns a compacted version of the input dataframe.
         Compaction only occurs if all values (i.e. bands) of the input share common values across all sibling cells.
@@ -142,7 +131,9 @@ class MaidenheadRasterIndexer(RasterIndexer):
             parent_cells = list(
                 map(lambda x: self.cell_to_parent(x, l), unprocessed_indices)
             )
-            parent_groups = df.loc[list(unprocessed_indices)].groupby(list(parent_cells))
+            parent_groups = df.loc[list(unprocessed_indices)].groupby(
+                list(parent_cells)
+            )
             for parent, group in parent_groups:
                 if parent in compaction_map:
                     continue
@@ -157,12 +148,11 @@ class MaidenheadRasterIndexer(RasterIndexer):
         result_df = pd.concat([compacted_df, remaining_df])
         result_df = result_df.rename_axis(df.index.name)
         return result_df
-    
-    
+
     def cell_to_parent(self, cell: str, parent_level: int) -> str:
         """
         Returns cell parent at some offset level.
-        
+
         Not a part of the RasterIndexer interface.
         """
         return cell[: parent_level * 2]
