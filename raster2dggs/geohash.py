@@ -1,142 +1,14 @@
-from numbers import Number
-import numpy as np
-from pathlib import Path
-import tempfile
-from typing import Callable, Tuple, Union
-
 import click
 import click_log
-import pandas as pd
-import pyarrow as pa
+import tempfile
+
+from pathlib import Path
+from typing import Union
 from rasterio.enums import Resampling
-import xarray as xr
-import geohash as gh
 
 import raster2dggs.constants as const
 import raster2dggs.common as common
 from raster2dggs import __version__
-
-
-PAD_WIDTH = common.zero_padding("geohash")
-
-
-def _geohashfunc(
-    sdf: xr.DataArray,
-    precision: int,
-    parent_precision: int,
-    nodata: Number = np.nan,
-    band_labels: Tuple[str] = None,
-) -> pa.Table:
-    """
-    Index a raster window to Geohash.
-    Subsequent steps are necessary to resolve issues at the boundaries of windows.
-    If windows are very small, or in strips rather than blocks, processing may be slower
-    than necessary and the recommendation is to write different windows in the source raster.
-    """
-    sdf: pd.DataFrame = sdf.to_dataframe().drop(columns=["spatial_ref"]).reset_index()
-    subset: pd.DataFrame = sdf.dropna()
-    subset = subset[subset.value != nodata]
-    subset = pd.pivot_table(
-        subset, values=const.DEFAULT_NAME, index=["x", "y"], columns=["band"]
-    ).reset_index()
-    # Primary Geohash index
-    geohash = [
-        gh.encode(lat, lon, precision=precision)
-        for lat, lon in zip(subset["y"], subset["x"])
-    ]  # Vectorised
-    # Secondary (parent) Geohash index, used later for partitioning
-    geohash_parent = [gh[:parent_precision] for gh in geohash]
-    subset = subset.drop(columns=["x", "y"])
-    subset[f"geohash_{precision:0{PAD_WIDTH}d}"] = pd.Series(
-        geohash, index=subset.index
-    )
-    subset[f"geohash_{parent_precision:0{PAD_WIDTH}d}"] = pd.Series(
-        geohash_parent, index=subset.index
-    )
-    # Rename bands
-    bands = sdf["band"].unique()
-    band_names = dict(zip(bands, map(lambda i: band_labels[i - 1], bands)))
-    for k, v in band_names.items():
-        if band_names[k] is None:
-            band_names[k] = str(bands[k - 1])
-        else:
-            band_names = band_names
-    subset = subset.rename(columns=band_names)
-    return pa.Table.from_pandas(subset)
-
-
-def _geohash_parent_groupby(
-    df, precision: int, aggfunc: Union[str, Callable], decimals: int
-):
-    """
-    Function for aggregating the Geohash values per parent partition. Each partition will be run through with a
-    pandas .groupby function. This step is to ensure there are no duplicate Geohashes, which will happen when indexing a
-    high resolution raster at a coarse Geohash precision.
-    """
-    if decimals > 0:
-        return (
-            df.groupby(f"geohash_{precision:0{PAD_WIDTH}d}")
-            .agg(aggfunc)
-            .round(decimals)
-        )
-    else:
-        return (
-            df.groupby(f"geohash_{precision:0{PAD_WIDTH}d}")
-            .agg(aggfunc)
-            .round(decimals)
-            .astype("Int64")
-        )
-
-
-def geohash_to_parent(cell: str, desired_precision: int) -> str:
-    """
-    Returns cell parent at some offset level.
-    """
-    return cell[:desired_precision]
-
-
-def geohash_to_children_size(cell: str, desired_level: int) -> int:
-    """
-    Determine total number of children at some offset resolution
-    """
-    level = len(cell)
-    if desired_level < level:
-        return 0
-    return 32 ** (desired_level - level)
-
-
-def _geohash_compaction(
-    df: pd.DataFrame, precision: int, parent_precision: int
-) -> pd.DataFrame:
-    """
-    Returns a compacted version of the input dataframe.
-    Compaction only occurs if all values (i.e. bands) of the input share common values across all sibling cells.
-    Compaction will not be performed beyond parent_level or level.
-    It assumes and requires that the input has unique DGGS cell values as the index.
-    """
-    unprocessed_indices = set(filter(lambda c: not pd.isna(c), set(df.index)))
-    if not unprocessed_indices:
-        return df
-    compaction_map = {}
-    for p in range(parent_precision, precision):
-        parent_cells = list(
-            map(lambda gh: geohash_to_parent(gh, p), unprocessed_indices)
-        )
-        parent_groups = df.loc[list(unprocessed_indices)].groupby(list(parent_cells))
-        for parent, group in parent_groups:
-            if parent in compaction_map:
-                continue
-            expected_count = geohash_to_children_size(parent, precision)
-            if len(group) == expected_count and all(group.nunique() == 1):
-                compact_row = group.iloc[0]
-                compact_row.name = parent  # Rename the index to the parent cell
-                compaction_map[parent] = compact_row
-                unprocessed_indices -= set(group.index)
-    compacted_df = pd.DataFrame(list(compaction_map.values()))
-    remaining_df = df.loc[list(unprocessed_indices)]
-    result_df = pd.concat([compacted_df, remaining_df])
-    result_df = result_df.rename_axis(df.index.name)
-    return result_df
 
 
 @click.command(context_settings={"show_default": True})
@@ -257,13 +129,11 @@ def geohash(
         warp_mem_limit,
         resampling,
         overwrite,
+        compact,
     )
 
     common.initial_index(
         "geohash",
-        _geohashfunc,
-        _geohash_parent_groupby,
-        _geohash_compaction if compact else None,
         raster_input,
         output_directory,
         int(resolution),
