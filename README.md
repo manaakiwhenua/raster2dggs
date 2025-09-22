@@ -257,8 +257,7 @@ gpd.GeoDataFrame(o, geometry="geometry", crs="EPSG:4326").to_file('tests/data/ou
 <details>
 <summary>For Maidenhead output...</summary>
 
-For <summary>For Maidenhead output...</summary>
- output, you can use [`maidenhead`](https://https://github.com/space-physics/maidenhead) or other similar Maidenhead library. Example:
+For Maidenhead output, you can use [`maidenhead`](https://https://github.com/space-physics/maidenhead) or other similar Maidenhead library. Example:
 
 ```python
 import pandas as pd
