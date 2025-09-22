@@ -254,6 +254,43 @@ gpd.GeoDataFrame(o, geometry="geometry", crs="EPSG:4326").to_file('tests/data/ou
 ```
 </details>
 
+<details>
+<summary>For Maidenhead output...</summary>
+
+For <summary>For Maidenhead output...</summary>
+ output, you can use [`maidenhead`](https://https://github.com/space-physics/maidenhead) or other similar Maidenhead library. Example:
+
+```python
+import pandas as pd
+import maidenhead
+from shapely.geometry import shape
+import geopandas as gpd
+o = pd.read_parquet('./tests/data/output/5/sample_maidenhead.pq')
+
+o['geometry'] = o.index.map(lambda mh: shape(maidenhead.to_geoJSONObject(mh, center=True)['features'][1]['geometry']))
+
+'''
+band          1  2  3                                           geometry
+maidenhead_5                                                            
+JO22de80UB    0  0  0  POLYGON ((4.323611111111111 52.16684027777778,...
+JO22de80UC    0  0  0  POLYGON ((4.323611111111111 52.16701388888889,...
+JO22de80UD    0  0  0  POLYGON ((4.323611111111111 52.1671875, 4.3239...
+JO22de80UE    0  0  0  POLYGON ((4.323611111111111 52.16736111111111,...
+JO22de80UF    0  0  0  POLYGON ((4.323611111111111 52.16753472222222,...
+...          .. .. ..                                                ...
+JO22fg62PB    0  0  0  POLYGON ((4.471875 52.25850694444444, 4.472222...
+JO22fg62QA    0  0  0  POLYGON ((4.472222222222222 52.25833333333333,...
+JO22fg62QB    0  0  0  POLYGON ((4.472222222222222 52.25850694444444,...
+JO22fg62RA    0  0  0  POLYGON ((4.472569444444445 52.25833333333333,...
+JO22fg62RB    0  0  0  POLYGON ((4.472569444444445 52.25850694444444,...
+
+[227470 rows x 4 columns]
+'''
+
+gpd.GeoDataFrame(o, geometry="geometry", crs="EPSG:4326").to_file('tests/data/output/5/sample_maidenhead.gpkg')
+```
+</details>
+
 ## Installation
 
 PyPi:
@@ -299,14 +336,25 @@ If you run `poetry install`, the CLI tool will be aliased so you can simply use 
 
 Please run `black .` before committing.
 
-#### Testing
+#### Tests
+
+Tests are included. To run them, set up a poetry environment, then follow these instructons:
+
+```bash
+cd tests
+python ./test_rater2dggs.py
+```
+
+Test data are included at `tests/data/`.
+
+#### Experimenting
 
 Two sample files have been uploaded to an S3 bucket with `s3:GetObject` public permission.
 
 - `s3://raster2dggs-test-data/Sen2_Test.tif` (sample Sentinel 2 imagery, 10 bands, rectangular, Int16, LZW compression, ~10x10m pixels, 68.6 MB)
 - `s3://raster2dggs-test-data/TestDEM.tif` (sample LiDAR-derived DEM, 1 band, irregular shape with null data, Float32, uncompressed, 10x10m pixels, 183.5 MB)
 
-You may use these for testing. However you can also test with local files too, which will be faster. A good, small (5 MB) sample image is available [here](https://github.com/mommermi/geotiff_sample).
+You may use these for experimentation. However you can also use local files too, which will be faster. A good, small (5 MB) sample image is available [here](https://github.com/mommermi/geotiff_sample).
 
 ## Example commands
 
