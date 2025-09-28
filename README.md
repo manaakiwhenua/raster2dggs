@@ -341,7 +341,7 @@ Tests are included. To run them, set up a poetry environment, then follow these 
 
 ```bash
 cd tests
-python ./test_rater2dggs.py
+python ./test_raster2dggs.py
 ```
 
 Test data are included at `tests/data/`.
