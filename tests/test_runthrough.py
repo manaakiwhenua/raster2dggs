@@ -32,6 +32,7 @@ class TestRunthrough(TestCase):
         for child in folder.iterdir():
             if child.is_dir():
                 self.clearOutFolder(child)
+                child.rmdir()
             else:
                 child.unlink()
 
