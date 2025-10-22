@@ -6,10 +6,6 @@ from numbers import Number
 from typing import Callable, Tuple, Union
 from math import floor
 
-import h3pandas  # Necessary import despite lack of explicit use
-
-import h3 as h3py
-
 import a5 as a5py
 import pandas as pd
 import pyarrow as pa
