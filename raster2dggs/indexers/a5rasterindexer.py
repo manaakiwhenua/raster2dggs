@@ -4,7 +4,6 @@
 
 from numbers import Number
 from typing import Callable, Tuple, Union
-from math import floor
 
 import a5 as a5py
 import pandas as pd
