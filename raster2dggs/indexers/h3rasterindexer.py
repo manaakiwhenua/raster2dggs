@@ -68,9 +68,9 @@ class H3RasterIndexer(RasterIndexer):
         self, df, resolution: int, aggfunc: Union[str, Callable], decimals: int
     ) -> pd.DataFrame:
         """
-        Function for aggregating the h3 resolution values per parent partition. Each partition will be run through with a
-        pandas .groupby function. This step is to ensure there are no duplicate h3 values, which will happen when indexing a
-        high resolution raster at a coarser h3 resolution.
+        Function for aggregating the H3 resolution values per parent partition. Each partition will be run through with a
+        pandas .groupby function. This step is to ensure there are no duplicate H3 values, which will happen when indexing a
+        high resolution raster at a coarser H3 resolution.
 
         Implementation of interface function.
         """
@@ -126,6 +126,8 @@ class H3RasterIndexer(RasterIndexer):
                 list(parent_cells)
             )
             for parent, group in parent_groups:
+                if isinstance(parent, tuple) and len(parent) == 1:
+                    parent = parent[0]
                 if parent in compaction_map:
                     continue
                 expected_count = self.cell_to_children_size(parent, resolution)

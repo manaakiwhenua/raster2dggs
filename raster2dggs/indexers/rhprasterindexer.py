@@ -123,6 +123,8 @@ class RHPRasterIndexer(RasterIndexer):
                 list(parent_cells)
             )
             for parent, group in parent_groups:
+                if isinstance(parent, tuple) and len(parent) == 1:
+                    parent = parent[0]
                 if parent in compaction_map:
                     continue
                 expected_count = self.cell_to_children_size(parent, resolution)
