@@ -209,6 +209,25 @@ gpd.GeoDataFrame(o, geometry='geometry', crs='EPSG:4326').to_file('./tests/data/
 </details>
 
 <details>
+<summary>For A5 output...</summary>
+
+For A5 output, use [`a5`](https://pypi.org/project/pya5/):
+
+```python
+import pandas as pd
+import geopandas as gpd
+import a5
+from shapely.geometry import Polygon
+
+o = pd.read_parquet('./tests/data/output/7/sample_tif_s2')
+o['geometry'] = o.index.map(lambda a: Polygon(a5.cell_to_boundary(a5.hex_to_u64(a))))
+
+gpd.GeoDataFrame(o, geometry="geometry", crs="EPSG:4326").to_file('tests/data/output/7/sample_tif_a5.gpkg')
+```
+
+</details>
+
+<details>
 <summary>For Geohash output...</summary>
 
 For Geohash output, you can use [`python-geohash`](https://github.com/hkwi/python-geohash) or other similar Geohash library. Example:
