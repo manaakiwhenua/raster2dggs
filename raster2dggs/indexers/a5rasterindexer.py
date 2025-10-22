@@ -55,7 +55,7 @@ class A5RasterIndexer(RasterIndexer):
         cells = [
             a5py.lonlat_to_cell((lon, lat), resolution)
             for lon, lat in zip(subset["x"], subset["y"])
-        ]
+        ]  # NB a5py.lonlat_to_cell is quite slow
         # Secondary (parent) A5 index, used later for partitioning
         a5_parent = [a5py.cell_to_parent(cell, parent_res) for cell in cells]
         subset = subset.drop(columns=["x", "y"])
