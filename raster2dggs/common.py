@@ -2,6 +2,7 @@ import os
 import errno
 import tempfile
 import logging
+import numpy as np
 import threading
 import rioxarray
 import dask
@@ -11,7 +12,7 @@ import rasterio as rio
 import pandas as pd
 import pyarrow.parquet as pq
 
-from typing import Union, Callable
+from typing import Union, Optional, Sequence
 from pathlib import Path
 from rasterio import crs
 from rasterio.vrt import WarpedVRT
@@ -76,13 +77,17 @@ def assemble_warp_args(resampling: str, warp_mem_limit: int) -> dict:
 
     return warp_args
 
+def first_mode(x):
+    m = pd.Series.mode(x, dropna=False)
+    # Result is empty if all x is nan
+    return m.iloc[0] if not m.empty else np.nan
 
 def create_aggfunc(aggfunc: str) -> str:
     if aggfunc == "mode":
         logging.warning(
             "Mode aggregation: arbitrary behaviour: if there is more than one mode when aggregating, only the first value will be recorded."
         )
-        aggfunc = lambda x: pd.Series.mode(x)[0]
+        aggfunc = first_mode
 
     return aggfunc
 
@@ -209,6 +214,7 @@ def initial_index(
     resolution: int,
     parent_res: Union[None, int],
     warp_args: dict,
+    bands: Optional[Sequence[Union[int, str]]] = None,
     **kwargs,
 ) -> Path:
     """
@@ -237,10 +243,33 @@ def initial_index(
 
         # https://rasterio.readthedocs.io/en/latest/api/rasterio.warp.html#rasterio.warp.calculate_default_transform
         with rio.Env(CHECK_WITH_INVERT_PROJ=True):
-            with rio.open(raster_input) as src:
+            with rio.open(raster_input, mode='r', sharing=False) as src:
                 LOGGER.debug("Source CRS: %s", src.crs)
                 # VRT used to avoid additional disk use given the potential for reprojection to 4326 prior to DGGS indexing
-                band_names = src.descriptions
+                band_names = tuple(src.descriptions) if src.descriptions else tuple()
+                count = src.count # Bands
+                labels_by_index = {
+                    i: (band_names[i-1] if i-1 < len(band_names) and band_names[i-1] else f"band_{i}")
+                    for i in range(1, count + 1)
+                }
+                if not bands: # Covers None or empty tuple
+                    selected_indices = list(range(1, count + 1))
+                else:
+                    if all(b.isdigit() for b in bands):
+                        selected_indices = list(map(int, bands))
+                    else:
+                        name_to_index = {v: k for k, v in labels_by_index.items()}
+                        try:
+                            selected_indices = [name_to_index[str(b)] for b in bands]
+                        except KeyError as e:
+                            raise ValueError(f"Requested band name not found: {e.args[0]}")
+                    # Validate
+                    for i in selected_indices:
+                        if i < 1 or i > count:
+                            raise ValueError(f"Band index out of range: {i} (1..{count})")
+                    # De-duplicate, preserving order
+                    seen = set()
+                    selected_indices = [i for i in selected_indices if not (i in seen or seen.add(i))]
 
                 upscale_factor = kwargs["upscale"]
                 if upscale_factor > 1:
@@ -262,7 +291,7 @@ def initial_index(
                     upsample_args = dict({})
 
                 with WarpedVRT(
-                    src, src_crs=src.crs, **warp_args, **upsample_args
+                    src, src_crs=src.crs, **warp_args, **upsample_args,
                 ) as vrt:
                     LOGGER.debug("VRT CRS: %s", vrt.crs)
                     da: xr.Dataset = rioxarray.open_rasterio(
@@ -272,11 +301,20 @@ def initial_index(
                         default_name=const.DEFAULT_NAME,
                     ).chunk(**{"y": "auto", "x": "auto"})
 
+                    # Band selection
+                    if "band" in da.dims and (len(selected_indices) != count):
+                        if "band" in da.coords: # rioxarray commonly exposes 1..N as band coords
+                            da = da.sel(band=selected_indices)
+                        else:
+                            da = da.isel(band=[i - 1 for i in selected_indices])
+
                     windows = [window for _, window in vrt.block_windows()]
                     LOGGER.debug(
                         "%d windows (the same number of partitions will be created)",
                         len(windows),
                     )
+
+                    selected_labels = [labels_by_index[i] for i in selected_indices]
 
                     write_lock = threading.Lock()
 
@@ -288,7 +326,7 @@ def initial_index(
                             resolution,
                             parent_res,
                             vrt.nodata,
-                            band_labels=band_names,
+                            band_labels=tuple(selected_labels),
                         )
 
                         with write_lock:

@@ -3,7 +3,7 @@ import click_log
 import tempfile
 
 from pathlib import Path
-from typing import Callable, Tuple, Union
+from typing import Optional, Sequence, Union
 from rasterio.enums import Resampling
 
 import raster2dggs.constants as const
@@ -22,75 +22,82 @@ from raster2dggs import __version__
     "--resolution",
     required=True,
     type=click.Choice(list(map(str, range(const.MIN_RHP, const.MAX_RHP + 1)))),
-    help="rHEALPix resolution to index",
+    help=const.OPTION_HELP['resolution']('rHEALPix'),
 )
 @click.option(
     "-pr",
     "--parent_res",
     required=False,
     type=click.Choice(list(map(str, range(const.MIN_RHP, const.MAX_RHP + 1)))),
-    help="rHEALPix parent resolution to index and aggregate to. Defaults to resolution - 6",
+    help=const.OPTION_HELP['parent_res']('rHEALPix', 'resolution - 6'),
+)
+@click.option(
+    "-b",
+    "--band",
+    required=False,
+    multiple=True,
+    help=const.OPTION_HELP['band'],
 )
 @click.option(
     "-u",
     "--upscale",
     default=const.DEFAULTS["upscale"],
     type=int,
-    help="Upscaling factor, used to upsample input data on the fly; useful when the raster resolution is lower than the target DGGS resolution. Default (1) applies no upscaling. The resampling method controls interpolation.",
+    help=const.OPTION_HELP['upscale'],
 )
 @click.option(
     "-c",
     "--compression",
     default=const.DEFAULTS["compression"],
     type=str,
-    help="Compression method to use for the output Parquet files. Options include 'snappy', 'gzip', 'brotli', 'lz4', 'zstd', etc. Use 'none' for no compression.",
+    help=const.OPTION_HELP['compression'],
 )
 @click.option(
     "-t",
     "--threads",
     default=const.DEFAULTS["threads"],
-    help="Number of threads to use when running in parallel. The default is determined based dynamically as the total number of available cores, minus one.",
+    help=const.OPTION_HELP['threads'],
 )
 @click.option(
     "-a",
     "--aggfunc",
     default=const.DEFAULTS["aggfunc"],
     type=click.Choice(
-        ["count", "mean", "sum", "prod", "std", "var", "min", "max", "median", "mode"]
+        const.AGGFUNC_OPTIONS
     ),
-    help="Numpy aggregate function to apply when aggregating cell values after DGGS indexing, in case of multiple pixels mapping to the same DGGS cell.",
+    help=const.OPTION_HELP['aggfunc'],
 )
 @click.option(
     "-d",
     "--decimals",
     default=const.DEFAULTS["decimals"],
     type=int,
-    help="Number of decimal places to round values when aggregating. Use 0 for integer output.",
+    help=const.OPTION_HELP['decimals'],
 )
 @click.option("-o", "--overwrite", is_flag=True)
 @click.option(
     "--warp_mem_limit",
     default=const.DEFAULTS["warp_mem_limit"],
     type=int,
-    help="Input raster may be warped to EPSG:4326 if it is not already in this CRS. This setting specifies the warp operation's memory limit in MB.",
+    help=const.OPTION_HELP['warp_mem_limit'],
 )
 @click.option(
     "--resampling",
     default=const.DEFAULTS["resampling"],
     type=click.Choice(Resampling._member_names_),
-    help="Input raster may be warped to EPSG:4326 if it is not already in this CRS. Or, if the upscale parameter is greater than 1, there is a need to resample. This setting specifies this resampling algorithm.",
+    help=const.OPTION_HELP['resampling'],
 )
 @click.option(
     "-co",
     "--compact",
     is_flag=True,
-    help="Compact the cells up to the parent resolution. Compaction is not applied for cells without identical values across all bands.",
+    help=const.OPTION_HELP['compact'],
 )
 @click.option(
     "--tempdir",
     default=const.DEFAULTS["tempdir"],
     type=click.Path(),
-    help="Temporary data is created during the execution of this program. This parameter allows you to control where this data will be written.",
+    help=const.OPTION_HELP['tempdir'],
 )
 @click.version_option(version=__version__)
 def rhp(
@@ -98,6 +105,7 @@ def rhp(
     output_directory: Union[str, Path],
     resolution: str,
     parent_res: str,
+    band: Optional[Sequence[Union[int, str]]],
     upscale: int,
     compression: str,
     threads: int,
@@ -141,5 +149,6 @@ def rhp(
         int(resolution),
         parent_res,
         warp_args,
+        band,
         **kwargs,
     )
