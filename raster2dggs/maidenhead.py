@@ -34,6 +34,13 @@ from raster2dggs import __version__
     help=const.OPTION_HELP['parent_res']('Maidenhead', 'level 1'),
 )
 @click.option(
+    "-b",
+    "--band",
+    required=False,
+    multiple=True,
+    help=const.OPTION_HELP['band'],
+)
+@click.option(
     "-u",
     "--upscale",
     default=const.DEFAULTS["upscale"],
