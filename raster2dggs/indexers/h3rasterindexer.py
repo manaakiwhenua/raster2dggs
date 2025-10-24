@@ -71,7 +71,6 @@ class H3RasterIndexer(RasterIndexer):
         """
         PAD_WIDTH = const.zero_padding("h3")
 
-        print(df)
         if decimals > 0:
             return (
                 df.groupby(f"h3_{resolution:0{PAD_WIDTH}d}")
