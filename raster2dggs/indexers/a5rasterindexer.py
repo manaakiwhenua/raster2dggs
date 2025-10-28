@@ -16,6 +16,17 @@ import raster2dggs.constants as const
 from raster2dggs.interfaces import RasterIndexer
 
 
+def is_valid_a5_cell(cell: str, min_resolution: int, max_resolution: int):
+    cell = a5py.hex_to_u64(cell)
+    try:
+        c: a5py.A5Cell = a5py.core.serialization.deserialize(cell)
+    except TypeError:
+        return False
+    if not (min_resolution <= c["resolution"] <= max_resolution):
+        return False
+    return True
+
+
 class A5RasterIndexer(RasterIndexer):
     """
     Provides integration for the A5 DGGS.
@@ -106,15 +117,6 @@ class A5RasterIndexer(RasterIndexer):
         cell_level = a5py.get_resolution(cell)
         return 4 ** (desired_resolution - cell_level)
 
-    def is_valid_cell(self, cell: str, min_resolution: int, max_resolution: int):
-        cell = a5py.hex_to_u64(cell)
-        try:
-            c: a5py.A5Cell = a5py.core.serialization.deserialize(cell)
-        except TypeError:
-            return False
-        if not (min_resolution <= c["resolution"] <= max_resolution):
-            return False
-        return True
 
     def compaction(
         self, df: pd.DataFrame, resolution: int, parent_res: int
@@ -130,7 +132,7 @@ class A5RasterIndexer(RasterIndexer):
         unprocessed_indices = set(
             filter(
                 lambda c: (not pd.isna(c))
-                and self.is_valid_cell(c, parent_res, resolution),
+                and is_valid_a5_cell(c, parent_res, resolution),
                 set(df.index),
             ),
         )

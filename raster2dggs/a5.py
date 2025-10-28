@@ -27,7 +27,7 @@ from raster2dggs import __version__
     "--parent_res",
     required=False,
     type=click.Choice(list(map(str, range(const.MIN_A5, const.MAX_A5 + 1)))),
-    help="A3 parent resolution to index and aggregate to. Defaults to resolution - 6",
+    help="A5 parent resolution to index and aggregate to. Defaults to resolution - 6",
 )
 @click.option(
     "-u",

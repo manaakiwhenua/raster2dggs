@@ -219,7 +219,7 @@ import geopandas as gpd
 import a5
 from shapely.geometry import Polygon
 
-o = pd.read_parquet('./tests/data/output/7/sample_tif_s2')
+o = pd.read_parquet('./tests/data/output/7/sample_tif_a5')
 o['geometry'] = o.index.map(lambda a: Polygon(a5.cell_to_boundary(a5.hex_to_u64(a))))
 
 gpd.GeoDataFrame(o, geometry="geometry", crs="EPSG:4326").to_file('tests/data/output/7/sample_tif_a5.gpkg')
