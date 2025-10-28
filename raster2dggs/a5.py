@@ -19,15 +19,15 @@ from raster2dggs import __version__
     "-r",
     "--resolution",
     required=True,
-    type=click.Choice(list(map(str, range(const.MIN_H3, const.MAX_H3 + 1)))),
-    help="H3 resolution to index",
+    type=click.Choice(list(map(str, range(const.MIN_A5, const.MAX_A5 + 1)))),
+    help="A5 resolution to index",
 )
 @click.option(
     "-pr",
     "--parent_res",
     required=False,
-    type=click.Choice(list(map(str, range(const.MIN_H3, const.MAX_H3 + 1)))),
-    help="H3 parent resolution to index and aggregate to. Defaults to resolution - 6",
+    type=click.Choice(list(map(str, range(const.MIN_A5, const.MAX_A5 + 1)))),
+    help="A5 parent resolution to index and aggregate to. Defaults to resolution - 6",
 )
 @click.option(
     "-u",
@@ -91,7 +91,7 @@ from raster2dggs import __version__
     help="Temporary data is created during the execution of this program. This parameter allows you to control where this data will be written.",
 )
 @click.version_option(version=__version__)
-def h3(
+def a5(
     raster_input: Union[str, Path],
     output_directory: Union[str, Path],
     resolution: str,
@@ -108,7 +108,7 @@ def h3(
     tempdir: Union[str, Path],
 ):
     """
-    Ingest a raster image and index it to the H3 DGGS.
+    Ingest a raster image and index it to the A5 DGGS.
 
     RASTER_INPUT is the path to input raster data; prepend with protocol like s3:// or hdfs:// for remote data.
     OUTPUT_DIRECTORY should be a directory, not a file, as it will be the write location for an Apache Parquet data store, with partitions equivalent to parent cells of target cells at a fixed offset. However, this can also be remote (use the appropriate prefix, e.g. s3://).
@@ -133,7 +133,7 @@ def h3(
     )
 
     common.initial_index(
-        "h3",
+        "a5",
         raster_input,
         output_directory,
         int(resolution),

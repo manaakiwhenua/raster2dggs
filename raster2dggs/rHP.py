@@ -29,7 +29,7 @@ from raster2dggs import __version__
     "--parent_res",
     required=False,
     type=click.Choice(list(map(str, range(const.MIN_RHP, const.MAX_RHP + 1)))),
-    help="rHEALPix Parent resolution to index and aggregate to. Defaults to resolution - 6",
+    help="rHEALPix parent resolution to index and aggregate to. Defaults to resolution - 6",
 )
 @click.option(
     "-u",

@@ -5,9 +5,7 @@
 from numbers import Number
 from typing import Callable, Tuple, Union
 
-import h3pandas  # Necessary import despite lack of explicit use
-
-import h3 as h3py
+import a5 as a5py
 import pandas as pd
 import pyarrow as pa
 import xarray as xr
@@ -18,9 +16,20 @@ import raster2dggs.constants as const
 from raster2dggs.interfaces import RasterIndexer
 
 
-class H3RasterIndexer(RasterIndexer):
+def is_valid_a5_cell(cell: str, min_resolution: int, max_resolution: int):
+    cell = a5py.hex_to_u64(cell)
+    try:
+        c: a5py.A5Cell = a5py.core.serialization.deserialize(cell)
+    except TypeError:
+        return False
+    if not (min_resolution <= c["resolution"] <= max_resolution):
+        return False
+    return True
+
+
+class A5RasterIndexer(RasterIndexer):
     """
-    Provides integration for Uber's H3 DGGS.
+    Provides integration for the A5 DGGS.
     """
 
     def index_func(
@@ -32,13 +41,15 @@ class H3RasterIndexer(RasterIndexer):
         band_labels: Tuple[str] = None,
     ) -> pa.Table:
         """
-        Index a raster window to H3.
+        Index a raster window to A5.
         Subsequent steps are necessary to resolve issues at the boundaries of windows.
         If windows are very small, or in strips rather than blocks, processing may be slower
         than necessary and the recommendation is to write different windows in the source raster.
 
         Implementation of interface function.
         """
+        PAD_WIDTH = const.zero_padding("a5")
+
         sdf: pd.DataFrame = (
             sdf.to_dataframe().drop(columns=["spatial_ref"]).reset_index()
         )
@@ -47,12 +58,19 @@ class H3RasterIndexer(RasterIndexer):
         subset = pd.pivot_table(
             subset, values=const.DEFAULT_NAME, index=["x", "y"], columns=["band"]
         ).reset_index()
-        # Primary H3 index
-        h3index = subset.h3.geo_to_h3(resolution, lat_col="y", lng_col="x").drop(
-            columns=["x", "y"]
+        cells = [
+            a5py.lonlat_to_cell((lon, lat), resolution)
+            for lon, lat in zip(subset["x"], subset["y"])
+        ]  # NB a5py.lonlat_to_cell is quite slow
+        # Secondary (parent) A5 index, used later for partitioning
+        a5_parent = [a5py.cell_to_parent(cell, parent_res) for cell in cells]
+        subset = subset.drop(columns=["x", "y"])
+        subset[f"a5_{resolution:0{PAD_WIDTH}d}"] = pd.Series(
+            map(a5py.u64_to_hex, cells), index=subset.index
         )
-        # Secondary (parent) H3 index, used later for partitioning
-        h3index = h3index.h3.h3_to_parent(parent_res).reset_index()
+        subset[f"a5_{parent_res:0{PAD_WIDTH}d}"] = pd.Series(
+            map(a5py.u64_to_hex, a5_parent), index=subset.index
+        )
         # Renaming columns to actual band labels
         bands = sdf["band"].unique()
         band_names = dict(zip(bands, map(lambda i: band_labels[i - 1], bands)))
@@ -61,47 +79,44 @@ class H3RasterIndexer(RasterIndexer):
                 band_names[k] = str(bands[k - 1])
             else:
                 band_names = band_names
-        h3index = h3index.rename(columns=band_names)
-        return pa.Table.from_pandas(h3index)
+        subset = subset.rename(columns=band_names)
+        return pa.Table.from_pandas(subset)
 
     def parent_groupby(
         self, df, resolution: int, aggfunc: Union[str, Callable], decimals: int
     ) -> pd.DataFrame:
         """
-        Function for aggregating the H3 resolution values per parent partition. Each partition will be run through with a
-        pandas .groupby function. This step is to ensure there are no duplicate H3 values, which will happen when indexing a
-        high resolution raster at a coarser H3 resolution.
+        Function for aggregating the A5 resolution values per parent partition. Each partition will be run through with a
+        pandas .groupby function. This step is to ensure there are no duplicate A5 values, which will happen when indexing a
+        high resolution raster at a coarser A5 resolution.
 
         Implementation of interface function.
         """
-        PAD_WIDTH = const.zero_padding("h3")
+        PAD_WIDTH = const.zero_padding("a5")
 
         if decimals > 0:
             return (
-                df.groupby(f"h3_{resolution:0{PAD_WIDTH}d}")
+                df.groupby(f"a5_{resolution:0{PAD_WIDTH}d}")
                 .agg(aggfunc)
                 .round(decimals)
             )
         else:
             return (
-                df.groupby(f"h3_{resolution:0{PAD_WIDTH}d}")
+                df.groupby(f"a5_{resolution:0{PAD_WIDTH}d}")
                 .agg(aggfunc)
                 .round(decimals)
                 .astype("Int64")
             )
 
-    def cell_to_children_size(self, cell, desired_resolution: int) -> int:
+    def cell_to_children_size(self, cell: int, desired_resolution: int) -> int:
         """
         Determine total number of children at some offset resolution
 
         Implementation of interface function.
         """
-        current_resolution = h3py.get_resolution(cell)
-        n = desired_resolution - current_resolution
-        if h3py.is_pentagon(cell):
-            return 1 + 5 * (7**n - 1) // 6
-        else:
-            return 7**n
+        cell_level = a5py.get_resolution(cell)
+        return 4 ** (desired_resolution - cell_level)
+
 
     def compaction(
         self, df: pd.DataFrame, resolution: int, parent_res: int
@@ -115,13 +130,23 @@ class H3RasterIndexer(RasterIndexer):
         Implementation of interface function.
         """
         unprocessed_indices = set(
-            filter(lambda c: (not pd.isna(c)) and h3py.is_valid_cell(c), set(df.index))
+            filter(
+                lambda c: (not pd.isna(c))
+                and is_valid_a5_cell(c, parent_res, resolution),
+                set(df.index),
+            ),
         )
         if not unprocessed_indices:
             return df
         compaction_map = {}
         for r in range(parent_res, resolution):
-            parent_cells = map(lambda x: h3py.cell_to_parent(x, r), unprocessed_indices)
+            parent_cells = map(
+                a5py.u64_to_hex,
+                map(
+                    lambda x: a5py.cell_to_parent(x, r),
+                    map(a5py.hex_to_u64, unprocessed_indices),
+                ),
+            )
             parent_groups = df.loc[list(unprocessed_indices)].groupby(
                 list(parent_cells)
             )
@@ -130,7 +155,9 @@ class H3RasterIndexer(RasterIndexer):
                     parent = parent[0]
                 if parent in compaction_map:
                     continue
-                expected_count = self.cell_to_children_size(parent, resolution)
+                expected_count = self.cell_to_children_size(
+                    a5py.hex_to_u64(parent), resolution
+                )
                 if len(group) == expected_count and all(group.nunique() == 1):
                     compact_row = group.iloc[0]
                     compact_row.name = parent  # Rename the index to the parent cell

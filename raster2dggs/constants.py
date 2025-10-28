@@ -6,6 +6,7 @@ MIN_RHP, MAX_RHP = 0, 15
 MIN_GEOHASH, MAX_GEOHASH = 1, 12
 MIN_MAIDENHEAD, MAX_MAIDENHEAD = 1, 6
 MIN_S2, MAX_S2 = 0, 30
+MIN_A5, MAX_A5 = 0, 30
 
 DEFAULT_NAME: str = "value"
 
@@ -30,6 +31,7 @@ DEFAULT_DGGS_PARENT_RES = {
     ),
     "maidenhead": lambda resolution: MIN_MAIDENHEAD,
     "s2": lambda resolution: max(MIN_S2, (resolution - DEFAULT_PARENT_OFFSET)),
+    "a5": lambda resolution: max(MIN_A5, (resolution - DEFAULT_PARENT_OFFSET)),
 }
 
 
@@ -40,6 +42,7 @@ def zero_padding(dggs: str) -> int:
         "geohash": MAX_GEOHASH,
         "maidenhead": MAX_MAIDENHEAD,
         "s2": MAX_S2,
+        "a5": MAX_A5,
     }
     max_res = max_res_lookup.get(dggs)
     if max_res is None:
