@@ -12,7 +12,7 @@ import rasterio as rio
 import pandas as pd
 import pyarrow.parquet as pq
 
-from typing import Union, Optional, Sequence
+from typing import Union, Optional, Sequence, Callable
 from pathlib import Path
 from rasterio import crs
 from rasterio.vrt import WarpedVRT
@@ -68,7 +68,7 @@ def resolve_input_path(raster_input: Union[str, Path]) -> Union[str, Path]:
 
 def assemble_warp_args(resampling: str, warp_mem_limit: int) -> dict:
     warp_args: dict = {
-        "resampling": Resampling._member_map_[resampling],
+        "resampling": Resampling[resampling],
         "crs": crs.CRS.from_epsg(
             4326
         ),  # Input raster must be converted to WGS84 (4326) for DGGS indexing
@@ -96,7 +96,7 @@ def assemble_kwargs(
     upscale: int,
     compression: str,
     threads: int,
-    aggfunc: str,
+    aggfunc: Union[str, Callable],
     decimals: int,
     warp_mem_limit: int,
     resampling: str,
@@ -163,13 +163,12 @@ def address_boundary_issues(
     LOGGER.debug(
         f"Reading Stage 1 output ({pq_input}) and setting index for parent-based partitioning"
     )
-    with TqdmCallback(desc="Reading window partitions"):
-        # Set index as parent cell
-        pad_width = const.zero_padding(indexer.dggs)
-        index_col = f"{indexer.dggs}_{parent_res:0{pad_width}d}"
-        ddf = dd.read_parquet(pq_input).set_index(index_col)
+    # Set index as parent cell
+    pad_width = const.zero_padding(indexer.dggs)
+    index_col = f"{indexer.dggs}_{parent_res:0{pad_width}d}"
+    ddf = dd.read_parquet(pq_input).set_index(index_col)
 
-    with TqdmCallback(desc="Counting parents"):
+    with TqdmCallback(desc="Reading window partitions and counting parents"):
         # Count parents, to get target number of partitions
         uniqueparents = sorted(list(ddf.index.unique().compute()))
 
@@ -255,7 +254,7 @@ def initial_index(
                 if not bands: # Covers None or empty tuple
                     selected_indices = list(range(1, count + 1))
                 else:
-                    if all(b.isdigit() for b in bands):
+                    if all(isinstance(b, int) or str(b).isdigit() for b in bands):
                         selected_indices = list(map(int, bands))
                     else:
                         name_to_index = {v: k for k, v in labels_by_index.items()}
@@ -314,9 +313,8 @@ def initial_index(
                         len(windows),
                     )
 
-                    selected_labels = [labels_by_index[i] for i in selected_indices]
-
-                    write_lock = threading.Lock()
+                    selected_labels = tuple([labels_by_index[i] for i in selected_indices])
+                    compression = kwargs["compression"]
 
                     def process(window):
                         sdf = da.rio.isel_window(window)
@@ -326,28 +324,22 @@ def initial_index(
                             resolution,
                             parent_res,
                             vrt.nodata,
-                            band_labels=tuple(selected_labels),
+                            band_labels=selected_labels,
                         )
 
-                        with write_lock:
-                            pq.write_to_dataset(
-                                result,
-                                root_path=tmpdir,
-                                compression=kwargs["compression"],
-                            )
+                        pq.write_to_dataset(
+                            result,
+                            root_path=tmpdir,
+                            compression=compression,
+                        )
 
                         return None
 
-                    with tqdm(total=len(windows), desc="Raster windows") as pbar:
-                        with ThreadPoolExecutor(
+                    with ThreadPoolExecutor(
                             max_workers=kwargs["threads"]
-                        ) as executor:
-                            futures = [
-                                executor.submit(process, window) for window in windows
-                            ]
-                            for future in as_completed(futures):
-                                result = future.result()
-                                pbar.update(1)
+                        ) as executor, tqdm(total=len(windows), desc="Raster windows") as pbar:
+                        for _ in executor.map(process, windows, chunksize=1):
+                            pbar.update(1)
 
             LOGGER.debug("Stage 1 (primary indexing) complete")
             return address_boundary_issues(
