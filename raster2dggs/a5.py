@@ -87,7 +87,7 @@ from raster2dggs import __version__
     "-co",
     "--compact",
     is_flag=True,
-    help=const.OPTION_HELP['tempdir'],
+    help=const.OPTION_HELP['compact'],
 )
 @click.option(
     "--tempdir",
