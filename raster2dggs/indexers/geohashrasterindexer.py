@@ -63,13 +63,8 @@ class GeohashRasterIndexer(RasterIndexer):
         )
         # Rename bands
         bands = sdf["band"].unique()
-        band_names = dict(zip(bands, map(lambda i: band_labels[i - 1], bands)))
-        for k, v in band_names.items():
-            if band_names[k] is None:
-                band_names[k] = str(bands[k - 1])
-            else:
-                band_names = band_names
-        subset = subset.rename(columns=band_names)
+        columns = dict(zip(bands, band_labels))
+        subset = subset.rename(columns=columns)
         return pa.Table.from_pandas(subset)
 
     def parent_groupby(

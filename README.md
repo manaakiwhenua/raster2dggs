@@ -64,8 +64,17 @@ Options:
   -r, --resolution [0|1|2|3|4|5|6|7|8|9|10|11|12|13|14|15]
                                   H3 resolution to index  [required]
   -pr, --parent_res [0|1|2|3|4|5|6|7|8|9|10|11|12|13|14|15]
-                                  H3 Parent resolution to index and aggregate
+                                  H3 parent resolution to index and aggregate
                                   to. Defaults to resolution - 6
+  -b, --band TEXT                 Band(s) to include in the output. Can
+                                  specify multiple, e.g. `-b 1 -b 2 -b 4` for
+                                  bands 1, 2, and 4 (all unspecified bands are
+                                  ignored). If unused, all bands are included
+                                  in the output (this is the default
+                                  behaviour). Bands can be specified as
+                                  numeric indices (1-based indexing) or string
+                                  band labels (if present in the input), e.g.
+                                  -b B02 -b B07 -b B12.
   -u, --upscale INTEGER           Upscaling factor, used to upsample input
                                   data on the fly; useful when the raster
                                   resolution is lower than the target DGGS
@@ -101,7 +110,7 @@ Options:
                                   is a need to resample. This setting
                                   specifies this resampling algorithm.
                                   [default: average]
-  -co, --compact                  Compact the H3 cells up to the parent
+  -co, --compact                  Compact the cells up to the parent
                                   resolution. Compaction is not applied for
                                   cells without identical values across all
                                   bands.
