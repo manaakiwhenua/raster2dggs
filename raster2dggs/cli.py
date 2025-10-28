@@ -8,6 +8,7 @@ from raster2dggs.maidenhead import maidenhead
 from raster2dggs.s2 import s2
 from raster2dggs.a5 import a5
 
+
 @click.group()
 @click.version_option(version=__version__)
 def cli():

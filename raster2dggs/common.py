@@ -77,10 +77,12 @@ def assemble_warp_args(resampling: str, warp_mem_limit: int) -> dict:
 
     return warp_args
 
+
 def first_mode(x):
     m = pd.Series.mode(x, dropna=False)
     # Result is empty if all x is nan
     return m.iloc[0] if not m.empty else np.nan
+
 
 def create_aggfunc(aggfunc: str) -> str:
     if aggfunc == "mode":
@@ -242,16 +244,20 @@ def initial_index(
 
         # https://rasterio.readthedocs.io/en/latest/api/rasterio.warp.html#rasterio.warp.calculate_default_transform
         with rio.Env(CHECK_WITH_INVERT_PROJ=True):
-            with rio.open(raster_input, mode='r', sharing=False) as src:
+            with rio.open(raster_input, mode="r", sharing=False) as src:
                 LOGGER.debug("Source CRS: %s", src.crs)
                 # VRT used to avoid additional disk use given the potential for reprojection to 4326 prior to DGGS indexing
                 band_names = tuple(src.descriptions) if src.descriptions else tuple()
-                count = src.count # Bands
+                count = src.count  # Bands
                 labels_by_index = {
-                    i: (band_names[i-1] if i-1 < len(band_names) and band_names[i-1] else f"band_{i}")
+                    i: (
+                        band_names[i - 1]
+                        if i - 1 < len(band_names) and band_names[i - 1]
+                        else f"band_{i}"
+                    )
                     for i in range(1, count + 1)
                 }
-                if not bands: # Covers None or empty tuple
+                if not bands:  # Covers None or empty tuple
                     selected_indices = list(range(1, count + 1))
                 else:
                     if all(isinstance(b, int) or str(b).isdigit() for b in bands):
@@ -261,14 +267,20 @@ def initial_index(
                         try:
                             selected_indices = [name_to_index[str(b)] for b in bands]
                         except KeyError as e:
-                            raise ValueError(f"Requested band name not found: {e.args[0]}")
+                            raise ValueError(
+                                f"Requested band name not found: {e.args[0]}"
+                            )
                     # Validate
                     for i in selected_indices:
                         if i < 1 or i > count:
-                            raise ValueError(f"Band index out of range: {i} (1..{count})")
+                            raise ValueError(
+                                f"Band index out of range: {i} (1..{count})"
+                            )
                     # De-duplicate, preserving order
                     seen = set()
-                    selected_indices = [i for i in selected_indices if not (i in seen or seen.add(i))]
+                    selected_indices = [
+                        i for i in selected_indices if not (i in seen or seen.add(i))
+                    ]
 
                 upscale_factor = kwargs["upscale"]
                 if upscale_factor > 1:
@@ -290,7 +302,10 @@ def initial_index(
                     upsample_args = dict({})
 
                 with WarpedVRT(
-                    src, src_crs=src.crs, **warp_args, **upsample_args,
+                    src,
+                    src_crs=src.crs,
+                    **warp_args,
+                    **upsample_args,
                 ) as vrt:
                     LOGGER.debug("VRT CRS: %s", vrt.crs)
                     da: xr.Dataset = rioxarray.open_rasterio(
@@ -302,7 +317,9 @@ def initial_index(
 
                     # Band selection
                     if "band" in da.dims and (len(selected_indices) != count):
-                        if "band" in da.coords: # rioxarray commonly exposes 1..N as band coords
+                        if (
+                            "band" in da.coords
+                        ):  # rioxarray commonly exposes 1..N as band coords
                             da = da.sel(band=selected_indices)
                         else:
                             da = da.isel(band=[i - 1 for i in selected_indices])
@@ -313,7 +330,9 @@ def initial_index(
                         len(windows),
                     )
 
-                    selected_labels = tuple([labels_by_index[i] for i in selected_indices])
+                    selected_labels = tuple(
+                        [labels_by_index[i] for i in selected_indices]
+                    )
                     compression = kwargs["compression"]
 
                     def process(window):
@@ -336,8 +355,10 @@ def initial_index(
                         return None
 
                     with ThreadPoolExecutor(
-                            max_workers=kwargs["threads"]
-                        ) as executor, tqdm(total=len(windows), desc="Raster windows") as pbar:
+                        max_workers=kwargs["threads"]
+                    ) as executor, tqdm(
+                        total=len(windows), desc="Raster windows"
+                    ) as pbar:
                         for _ in executor.map(process, windows, chunksize=1):
                             pbar.update(1)
 

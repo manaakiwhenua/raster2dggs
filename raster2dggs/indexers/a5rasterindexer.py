@@ -112,7 +112,6 @@ class A5RasterIndexer(RasterIndexer):
         cell_level = a5py.get_resolution(cell)
         return 4 ** (desired_resolution - cell_level)
 
-
     def compaction(
         self, df: pd.DataFrame, resolution: int, parent_res: int
     ) -> pd.DataFrame:

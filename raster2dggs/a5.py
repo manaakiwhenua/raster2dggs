@@ -20,80 +20,80 @@ from raster2dggs import __version__
     "--resolution",
     required=True,
     type=click.Choice(list(map(str, range(const.MIN_A5, const.MAX_A5 + 1)))),
-    help=const.OPTION_HELP['resolution']('A5'),
+    help=const.OPTION_HELP["resolution"]("A5"),
 )
 @click.option(
     "-pr",
     "--parent_res",
     required=False,
     type=click.Choice(list(map(str, range(const.MIN_A5, const.MAX_A5 + 1)))),
-    help=const.OPTION_HELP['parent_res']('A5', 'resolution - 6'),
+    help=const.OPTION_HELP["parent_res"]("A5", "resolution - 6"),
 )
 @click.option(
     "-b",
     "--band",
     required=False,
     multiple=True,
-    help=const.OPTION_HELP['band'],
+    help=const.OPTION_HELP["band"],
 )
 @click.option(
     "-u",
     "--upscale",
     default=const.DEFAULTS["upscale"],
     type=int,
-    help=const.OPTION_HELP['upscale'],
+    help=const.OPTION_HELP["upscale"],
 )
 @click.option(
     "-c",
     "--compression",
     default=const.DEFAULTS["compression"],
     type=str,
-    help=const.OPTION_HELP['compression'],)
+    help=const.OPTION_HELP["compression"],
+)
 @click.option(
     "-t",
     "--threads",
     default=const.DEFAULTS["threads"],
-    help=const.OPTION_HELP['threads'],
+    help=const.OPTION_HELP["threads"],
 )
 @click.option(
     "-a",
     "--aggfunc",
     default=const.DEFAULTS["aggfunc"],
-    type=click.Choice(
-        const.AGGFUNC_OPTIONS
-    ),
-    help=const.OPTION_HELP['aggfunc'],
+    type=click.Choice(const.AGGFUNC_OPTIONS),
+    help=const.OPTION_HELP["aggfunc"],
 )
 @click.option(
     "-d",
     "--decimals",
     default=const.DEFAULTS["decimals"],
     type=int,
-    help=const.OPTION_HELP['decimals'],)
+    help=const.OPTION_HELP["decimals"],
+)
 @click.option("-o", "--overwrite", is_flag=True)
 @click.option(
     "--warp_mem_limit",
     default=const.DEFAULTS["warp_mem_limit"],
     type=int,
-    help=const.OPTION_HELP['warp_mem_limit'],
+    help=const.OPTION_HELP["warp_mem_limit"],
 )
 @click.option(
     "--resampling",
     default=const.DEFAULTS["resampling"],
     type=click.Choice(Resampling._member_names_),
-    help=const.OPTION_HELP['resampling'],
+    help=const.OPTION_HELP["resampling"],
 )
 @click.option(
     "-co",
     "--compact",
     is_flag=True,
-    help=const.OPTION_HELP['compact'],
+    help=const.OPTION_HELP["compact"],
 )
 @click.option(
     "--tempdir",
     default=const.DEFAULTS["tempdir"],
     type=click.Path(),
-    help=const.OPTION_HELP['tempdir'],
+    help=const.OPTION_HELP["tempdir"],
 )
 @click.version_option(version=__version__)
 def a5(
