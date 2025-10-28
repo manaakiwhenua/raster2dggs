@@ -55,13 +55,8 @@ class H3RasterIndexer(RasterIndexer):
         h3index = h3index.h3.h3_to_parent(parent_res).reset_index()
         # Renaming columns to actual band labels
         bands = sdf["band"].unique()
-        band_names = dict(zip(bands, map(lambda i: band_labels[i - 1], bands)))
-        for k, v in band_names.items():
-            if band_names[k] is None:
-                band_names[k] = str(bands[k - 1])
-            else:
-                band_names = band_names
-        h3index = h3index.rename(columns=band_names)
+        columns = dict(zip(bands, band_labels))
+        h3index = h3index.rename(columns=columns)
         return pa.Table.from_pandas(h3index)
 
     def parent_groupby(
@@ -76,6 +71,7 @@ class H3RasterIndexer(RasterIndexer):
         """
         PAD_WIDTH = const.zero_padding("h3")
 
+        print(df)
         if decimals > 0:
             return (
                 df.groupby(f"h3_{resolution:0{PAD_WIDTH}d}")
