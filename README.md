@@ -11,6 +11,7 @@ Currently this supports the following DGGSs:
 - [H3](https://h3geo.org/)
 - [rHEALPix](https://datastore.landcareresearch.co.nz/dataset/rhealpix-discrete-global-grid-system)
 - [S2](http://s2geometry.io/)
+- [A5](https://a5geo.org/)
 
 And these geocode systems:
 
@@ -37,6 +38,7 @@ Options:
   --help     Show this message and exit.
 
 Commands:
+  a5          Ingest a raster image and index it to the A5 DGGS.
   geohash     Ingest a raster image and index it using the Geohash...
   h3          Ingest a raster image and index it to the H3 DGGS.
   maidenhead  Ingest a raster image and index it using the Maidenhead...
