@@ -59,45 +59,8 @@ class RHPRasterIndexer(RasterIndexer):
         rhpindex = rhpindex.rename(columns=columns)
         return pa.Table.from_pandas(rhpindex)
 
-    def parent_groupby(
-        self,
-        df,
-        resolution: int,
-        parent_res: int,
-        aggfunc: Union[str, Callable],
-        decimals: int,
-    ) -> pd.DataFrame:
-        """
-        Function for aggregating the rHEALPix resolution values per parent partition. Each partition will be run through with a
-        pandas .groupby function. This step is to ensure there are no duplicate rHEALPix values, which will happen when indexing a
-        high resolution raster at a coarser resolution.
-
-        Implementation of interface function.
-        """
-        PAD_WIDTH = const.zero_padding("rhp")
-        index_col = f"rhp_{resolution:0{PAD_WIDTH}d}"
-        partition_col = f"rhp_{parent_res:0{PAD_WIDTH}d}"
-        df = df.set_index(index_col)
-        if decimals > 0:
-            gb = (
-                df.groupby([partition_col, index_col], sort=False, observed=True)
-                .agg(aggfunc)
-                .round(decimals)
-            )
-        else:
-            gb = (
-                df.groupby([partition_col, index_col], sort=False, observed=True)
-                .agg(aggfunc)
-                .round(decimals)
-                .astype("Int64")
-            )
-        # Move parent out to a column; keep child as the index
-        # MultiIndex levels are [partition_col, index_col] in that order
-        gb = gb.reset_index(level=0)  # parent -> column
-        gb.index.name = index_col  # child remains index
-        return gb
-
-    def cell_to_children_size(self, cell, desired_resolution: int) -> int:
+    @staticmethod
+    def cell_to_children_size(cell, desired_resolution: int) -> int:
         """
         Determine total number of children at some offset resolution
 
@@ -109,39 +72,22 @@ class RHPRasterIndexer(RasterIndexer):
             return 6 * (9 ** (desired_resolution - 1))
         return 9 ** (desired_resolution - len(cell) + 1)
 
-    def compaction(
-        self, df: pd.DataFrame, resolution: int, parent_res: int
-    ) -> pd.DataFrame:
+    @staticmethod
+    def valid_set(cells: set) -> set[str]:
         """
-        Returns a compacted version of the input dataframe.
-        Compaction only occurs if all values (i.e. bands) of the input share common values across all sibling cells.
-        Compaction will not be performed beyond parent_res or resolution.
-        It assumes and requires that the input has unique DGGS cell values as the index.
-
         Implementation of interface function.
         """
-        unprocessed_indices = set(filter(lambda c: not pd.isna(c), set(df.index)))
-        if not unprocessed_indices:
-            return df
-        compaction_map = {}
-        for r in range(parent_res, resolution):
-            parent_cells = map(lambda x: rhpw.rhp_to_parent(x, r), unprocessed_indices)
-            parent_groups = df.loc[list(unprocessed_indices)].groupby(
-                list(parent_cells)
-            )
-            for parent, group in parent_groups:
-                if isinstance(parent, tuple) and len(parent) == 1:
-                    parent = parent[0]
-                if parent in compaction_map:
-                    continue
-                expected_count = self.cell_to_children_size(parent, resolution)
-                if len(group) == expected_count and all(group.nunique() == 1):
-                    compact_row = group.iloc[0]
-                    compact_row.name = parent  # Rename the index to the parent cell
-                    compaction_map[parent] = compact_row
-                    unprocessed_indices -= set(group.index)
-        compacted_df = pd.DataFrame(list(compaction_map.values()))
-        remaining_df = df.loc[list(unprocessed_indices)]
-        result_df = pd.concat([compacted_df, remaining_df])
-        result_df = result_df.rename_axis(df.index.name)
-        return result_df
+        return set(filter(lambda c: not pd.isna(c), cells))
+
+    @staticmethod
+    def parent_cells(cells: set, resolution) -> map:
+        """
+        Implementation of interface function.
+        """
+        return map(lambda x: rhpw.rhp_to_parent(x, resolution), cells)
+
+    def expected_count(self, parent: str, resolution: int):
+        """
+        Implementation of interface function.
+        """
+        return self.cell_to_children_size(parent, resolution)

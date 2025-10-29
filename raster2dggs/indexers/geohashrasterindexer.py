@@ -37,8 +37,6 @@ class GeohashRasterIndexer(RasterIndexer):
 
         Implementation of interface function.
         """
-        PAD_WIDTH = const.zero_padding("geohash")
-
         sdf: pd.DataFrame = (
             sdf.to_dataframe().drop(columns=["spatial_ref"]).reset_index()
         )
@@ -55,57 +53,18 @@ class GeohashRasterIndexer(RasterIndexer):
         # Secondary (parent) Geohash index, used later for partitioning
         geohash_parent = [gh[:parent_precision] for gh in geohash]
         subset = subset.drop(columns=["x", "y"])
-        subset[f"geohash_{precision:0{PAD_WIDTH}d}"] = pd.Series(
-            geohash, index=subset.index
-        )
-        subset[f"geohash_{parent_precision:0{PAD_WIDTH}d}"] = pd.Series(
-            geohash_parent, index=subset.index
-        )
+        index_col = self.index_col(precision)
+        subset[index_col] = pd.Series(geohash, index=subset.index)
+        partition_col = self.partition_col(parent_precision)
+        subset[partition_col] = pd.Series(geohash_parent, index=subset.index)
         # Rename bands
         bands = sdf["band"].unique()
         columns = dict(zip(bands, band_labels))
         subset = subset.rename(columns=columns)
         return pa.Table.from_pandas(subset)
 
-    def parent_groupby(
-        self,
-        df,
-        precision: int,
-        parent_precision: int,
-        aggfunc: Union[str, Callable],
-        decimals: int,
-    ) -> pd.DataFrame:
-        """
-        Function for aggregating the Geohash values per parent partition. Each partition will be run through with a
-        pandas .groupby function. This step is to ensure there are no duplicate Geohashes, which will happen when indexing a
-        high resolution raster at a coarse Geohash precision.
-
-        Implementation of interface function.
-        """
-        PAD_WIDTH = const.zero_padding("s2geohash")
-        index_col = f"geohash_{precision:0{PAD_WIDTH}d}"
-        partition_col = f"geohash_{parent_precision:0{PAD_WIDTH}d}"
-        df = df.set_index(index_col)
-        if decimals > 0:
-            gb = (
-                df.groupby([partition_col, index_col], sort=False, observed=True)
-                .agg(aggfunc)
-                .round(decimals)
-            )
-        else:
-            gb = (
-                df.groupby([partition_col, index_col], sort=False, observed=True)
-                .agg(aggfunc)
-                .round(decimals)
-                .astype("Int64")
-            )
-        # Move parent out to a column; keep child as the index
-        # MultiIndex levels are [partition_col, index_col] in that order
-        gb = gb.reset_index(level=0)  # parent -> column
-        gb.index.name = index_col  # child remains index
-        return gb
-
-    def cell_to_children_size(self, cell, desired_level: int) -> int:
+    @staticmethod
+    def cell_to_children_size(cell, desired_level: int) -> int:
         """
         Determine total number of children at some offset resolution
 
@@ -116,46 +75,27 @@ class GeohashRasterIndexer(RasterIndexer):
             return 0
         return 32 ** (desired_level - level)
 
-    def compaction(
-        self, df: pd.DataFrame, precision: int, parent_precision: int
-    ) -> pd.DataFrame:
+    @staticmethod
+    def valid_set(cells: set) -> set[str]:
         """
-        Returns a compacted version of the input dataframe.
-        Compaction only occurs if all values (i.e. bands) of the input share common values across all sibling cells.
-        Compaction will not be performed beyond parent_level or level.
-        It assumes and requires that the input has unique DGGS cell values as the index.
-
         Implementation of interface function.
         """
-        unprocessed_indices = set(filter(lambda c: not pd.isna(c), set(df.index)))
-        if not unprocessed_indices:
-            return df
-        compaction_map = {}
-        for p in range(parent_precision, precision):
-            parent_cells = list(
-                map(lambda gh: self.to_parent(gh, p), unprocessed_indices)
-            )
-            parent_groups = df.loc[list(unprocessed_indices)].groupby(
-                list(parent_cells)
-            )
-            for parent, group in parent_groups:
-                if isinstance(parent, tuple) and len(parent) == 1:
-                    parent = parent[0]
-                if parent in compaction_map:
-                    continue
-                expected_count = self.cell_to_children_size(parent, precision)
-                if len(group) == expected_count and all(group.nunique() == 1):
-                    compact_row = group.iloc[0]
-                    compact_row.name = parent  # Rename the index to the parent cell
-                    compaction_map[parent] = compact_row
-                    unprocessed_indices -= set(group.index)
-        compacted_df = pd.DataFrame(list(compaction_map.values()))
-        remaining_df = df.loc[list(unprocessed_indices)]
-        result_df = pd.concat([compacted_df, remaining_df])
-        result_df = result_df.rename_axis(df.index.name)
-        return result_df
+        return set(filter(lambda c: not pd.isna(c), cells))
 
-    def to_parent(self, cell: str, desired_precision: int) -> str:
+    def parent_cells(self, cells: set, precision) -> map:
+        """
+        Implementation of interface function.
+        """
+        return map(lambda gh: self.to_parent(gh, precision), cells)
+
+    def expected_count(self, parent: str, precision: int):
+        """
+        Implementation of interface function.
+        """
+        return self.cell_to_children_size(parent, precision)
+
+    @staticmethod
+    def to_parent(cell: str, desired_precision: int) -> str:
         """
         Returns cell parent at some offset level.
 
