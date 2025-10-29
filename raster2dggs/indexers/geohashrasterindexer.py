@@ -68,7 +68,12 @@ class GeohashRasterIndexer(RasterIndexer):
         return pa.Table.from_pandas(subset)
 
     def parent_groupby(
-        self, df, precision: int, aggfunc: Union[str, Callable], decimals: int
+        self,
+        df,
+        precision: int,
+        parent_precision: int,
+        aggfunc: Union[str, Callable],
+        decimals: int,
     ) -> pd.DataFrame:
         """
         Function for aggregating the Geohash values per parent partition. Each partition will be run through with a
@@ -77,21 +82,28 @@ class GeohashRasterIndexer(RasterIndexer):
 
         Implementation of interface function.
         """
-        PAD_WIDTH = const.zero_padding("geohash")
-
+        PAD_WIDTH = const.zero_padding("s2geohash")
+        index_col = f"geohash_{precision:0{PAD_WIDTH}d}"
+        partition_col = f"geohash_{parent_precision:0{PAD_WIDTH}d}"
+        df = df.set_index(index_col)
         if decimals > 0:
-            return (
-                df.groupby(f"geohash_{precision:0{PAD_WIDTH}d}")
+            gb = (
+                df.groupby([partition_col, index_col], sort=False, observed=True)
                 .agg(aggfunc)
                 .round(decimals)
             )
         else:
-            return (
-                df.groupby(f"geohash_{precision:0{PAD_WIDTH}d}")
+            gb = (
+                df.groupby([partition_col, index_col], sort=False, observed=True)
                 .agg(aggfunc)
                 .round(decimals)
                 .astype("Int64")
             )
+        # Move parent out to a column; keep child as the index
+        # MultiIndex levels are [partition_col, index_col] in that order
+        gb = gb.reset_index(level=0)  # parent -> column
+        gb.index.name = index_col  # child remains index
+        return gb
 
     def cell_to_children_size(self, cell, desired_level: int) -> int:
         """

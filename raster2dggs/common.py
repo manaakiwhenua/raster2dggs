@@ -165,39 +165,48 @@ def address_boundary_issues(
     LOGGER.debug(
         f"Reading Stage 1 output ({pq_input}) and setting index for parent-based partitioning"
     )
-    # Set index as parent cell
     pad_width = const.zero_padding(indexer.dggs)
-    index_col = f"{indexer.dggs}_{parent_res:0{pad_width}d}"
-    ddf = dd.read_parquet(pq_input).set_index(index_col)
+    index_col = f"{indexer.dggs}_{resolution:0{pad_width}d}"
+    partition_col = f"{indexer.dggs}_{parent_res:0{pad_width}d}"
 
-    with TqdmCallback(desc="Reading window partitions and counting parents"):
-        # Count parents, to get target number of partitions
-        uniqueparents = sorted(list(ddf.index.unique().compute()))
+    # Keep hive partitions; coalese files per partition
+    ddf = dd.read_parquet(pq_input, engine="pyarrow", aggregate_files=True)
+    # Cols to aggregate (bands only)
+    band_cols = [c for c in ddf.columns if not c.startswith(f"{indexer.dggs}_")]
 
-    LOGGER.debug(
-        "Repartitioning into %d partitions, based on parent cells",
-        len(uniqueparents) + 1,
+    # parent_dtype = ddf[partition_col].dtype
+    out_meta = pd.DataFrame(
+        {
+            # partition_col: np.array([], dtype=parent_dtype,
+            partition_col: np.array([], dtype="object"),
+            **{c: np.array([], dtype=ddf[c].dtype) for c in band_cols},
+        }
     )
+    out_meta.index = pd.Index([], name=index_col, dtype="object")
+
     LOGGER.debug("Aggregating cell values where conflicts exist")
 
     with TqdmCallback(
         desc=f"Repartitioning/aggregating{'/compacting' if kwargs['compact'] else ''}"
     ):
-        ddf = ddf.repartition(  # See "notes" on why divisions expects repetition of the last item https://docs.dask.org/en/stable/generated/dask.dataframe.DataFrame.repartition.html
-            divisions=(uniqueparents + [uniqueparents[-1]])
-        ).map_partitions(
-            indexer.parent_groupby, resolution, kwargs["aggfunc"], kwargs["decimals"]
+        ddf = ddf.map_partitions(
+            indexer.parent_groupby,
+            resolution,
+            parent_res,
+            kwargs["aggfunc"],
+            kwargs["decimals"],
+            meta=out_meta,
         )
         if kwargs["compact"]:
             ddf = ddf.map_partitions(indexer.compaction, resolution, parent_res)
 
-        ddf.map_partitions(lambda df: df.sort_index()).to_parquet(
+        ddf.to_parquet(
             output,
-            overwrite=kwargs["overwrite"],
             engine="pyarrow",
+            partition_on=[partition_col],
+            overwrite=kwargs["overwrite"],
             write_index=True,
             append=False,
-            name_function=lambda i: f"{uniqueparents[i]}.parquet",
             compression=kwargs["compression"],
         )
 
@@ -326,7 +335,7 @@ def initial_index(
 
                     windows = [window for _, window in vrt.block_windows()]
                     LOGGER.debug(
-                        "%d windows (the same number of partitions will be created)",
+                        "%d windows",
                         len(windows),
                     )
 
@@ -346,9 +355,18 @@ def initial_index(
                             band_labels=selected_labels,
                         )
 
+                        pad_width = const.zero_padding(indexer.dggs)
+                        partition_col = f"{indexer.dggs}_{parent_res:0{pad_width}d}"
                         pq.write_to_dataset(
                             result,
                             root_path=tmpdir,
+                            partition_cols=[partition_col],
+                            basename_template=str(window.col_off)
+                            + "_"
+                            + str(window.row_off)
+                            + "_guid-{i}.parquet",
+                            use_threads=False,  # Already threading indexing and reading
+                            existing_data_behavior="overwrite_or_ignore",  # Overwrite files with the same name; other existing files are ignored. Allows for an append workflow
                             compression=compression,
                         )
 

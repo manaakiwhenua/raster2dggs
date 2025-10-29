@@ -66,7 +66,12 @@ class S2RasterIndexer(RasterIndexer):
         return pa.Table.from_pandas(subset)
 
     def parent_groupby(
-        self, df, resolution: int, aggfunc: Union[str, Callable], decimals: int
+        self,
+        df: pd.DataFrame,
+        resolution: int,
+        parent_res: int,
+        aggfunc: Union[str, Callable],
+        decimals: int,
     ) -> pd.DataFrame:
         """
         Function for aggregating the S2 resolution values per parent partition. Each partition will be run through with a
@@ -76,20 +81,27 @@ class S2RasterIndexer(RasterIndexer):
         Implementation of interface function.
         """
         PAD_WIDTH = const.zero_padding("s2")
-
+        index_col = f"s2_{resolution:0{PAD_WIDTH}d}"
+        partition_col = f"s2_{parent_res:0{PAD_WIDTH}d}"
+        df = df.set_index(index_col)
         if decimals > 0:
-            return (
-                df.groupby(f"s2_{resolution:0{PAD_WIDTH}d}")
+            gb = (
+                df.groupby([partition_col, index_col], sort=False, observed=True)
                 .agg(aggfunc)
                 .round(decimals)
             )
         else:
-            return (
-                df.groupby(f"s2_{resolution:0{PAD_WIDTH}d}")
+            gb = (
+                df.groupby([partition_col, index_col], sort=False, observed=True)
                 .agg(aggfunc)
                 .round(decimals)
                 .astype("Int64")
             )
+        # Move parent out to a column; keep child as the index
+        # MultiIndex levels are [partition_col, index_col] in that order
+        gb = gb.reset_index(level=0)  # parent -> column
+        gb.index.name = index_col  # child remains index
+        return gb
 
     def cell_to_children_size(self, cell, desired_resolution: int) -> int:
         """

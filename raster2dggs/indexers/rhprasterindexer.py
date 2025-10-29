@@ -60,30 +60,42 @@ class RHPRasterIndexer(RasterIndexer):
         return pa.Table.from_pandas(rhpindex)
 
     def parent_groupby(
-        self, df, resolution: int, aggfunc: Union[str, Callable], decimals: int
+        self,
+        df,
+        resolution: int,
+        parent_res: int,
+        aggfunc: Union[str, Callable],
+        decimals: int,
     ) -> pd.DataFrame:
         """
-        Function for aggregating the h3 resolution values per parent partition. Each partition will be run through with a
+        Function for aggregating the rHEALPix resolution values per parent partition. Each partition will be run through with a
         pandas .groupby function. This step is to ensure there are no duplicate rHEALPix values, which will happen when indexing a
         high resolution raster at a coarser resolution.
 
         Implementation of interface function.
         """
         PAD_WIDTH = const.zero_padding("rhp")
-
+        index_col = f"rhp_{resolution:0{PAD_WIDTH}d}"
+        partition_col = f"rhp_{parent_res:0{PAD_WIDTH}d}"
+        df = df.set_index(index_col)
         if decimals > 0:
-            return (
-                df.groupby(f"rhp_{resolution:0{PAD_WIDTH}d}")
+            gb = (
+                df.groupby([partition_col, index_col], sort=False, observed=True)
                 .agg(aggfunc)
                 .round(decimals)
             )
         else:
-            return (
-                df.groupby(f"rhp_{resolution:0{PAD_WIDTH}d}")
+            gb = (
+                df.groupby([partition_col, index_col], sort=False, observed=True)
                 .agg(aggfunc)
                 .round(decimals)
                 .astype("Int64")
             )
+        # Move parent out to a column; keep child as the index
+        # MultiIndex levels are [partition_col, index_col] in that order
+        gb = gb.reset_index(level=0)  # parent -> column
+        gb.index.name = index_col  # child remains index
+        return gb
 
     def cell_to_children_size(self, cell, desired_resolution: int) -> int:
         """
