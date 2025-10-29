@@ -126,7 +126,17 @@ Options:
 
 ## Visualising output
 
-Output is in the Apache Parquet format, a directory with one file per partition. Partitions are based on parent cell IDs, with the parent resolution determined as an offset from the target DGGS resolution.
+Output is in the Apache Parquet format, hive partitioned with the parent resolution as partition key. The example below is with `-pr 3` with the H3 DGGS.
+
+```bash
+tree /home/user/example.pq
+
+/home/user/example.pq
+├── h3_03=83bb09fffffffff
+│   └── part.0.parquet
+└── h3_03=83bb0dfffffffff
+    └── part.0.parquet
+```
 
 For a quick view of your output, you can read Apache Parquet with pandas, and then use h3-pandas and geopandas to convert this into a GeoPackage for visualisation in a desktop GIS, such as QGIS. The Apache Parquet output is indexed by the DGGS column, so it should be ready for association with other data prepared in the same DGGS.
 
@@ -200,18 +210,14 @@ from shapely.geometry import Polygon
 o = pd.read_parquet('./tests/data/output/7/sample_tif_s2')
 
 def s2id_to_polygon(s2_id_hex):
-    # Parse the S2CellId
     cell_id = s2sphere.CellId.from_token(s2_id_hex)
     cell = s2sphere.Cell(cell_id)
-
-    # Get the 4 vertices of the S2 cell
     vertices = []
     for i in range(4):
         vertex = cell.get_vertex(i)
         # Convert to lat/lon degrees
         lat_lng = s2sphere.LatLng.from_point(vertex)
         vertices.append((lat_lng.lng().degrees, lat_lng.lat().degrees))  # (lon, lat)
-    
     return Polygon(vertices)
 
 o['geometry'] = o.index.map(s2id_to_polygon)
