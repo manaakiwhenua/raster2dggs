@@ -18,3 +18,23 @@ class TestGeohash(TestRunthrough):
 
         except Exception:
             self.fail(f"TestGeohash.test_geohash_run: Geohash runthrough failed.")
+    
+    def test_geohash_run_geo_point(self):
+        try:
+            geohash(
+                [TEST_FILE_PATH, str(TEST_OUTPUT_PATH), "-r", "6", "-g", "point"],
+                standalone_mode=False,
+            )
+
+        except Exception:
+            self.fail(f"TestGeohash.test_geohash_run_geo_point: Geohash runthrough failed.")
+
+    def test_geohash_run_geo_polygon(self):
+        try:
+            geohash(
+                [TEST_FILE_PATH, str(TEST_OUTPUT_PATH), "-r", "6", "-g", "polygon"],
+                standalone_mode=False,
+            )
+
+        except Exception:
+            self.fail(f"TestGeohash.test_geohash_run_geo_polygon: Geohash runthrough failed.")
