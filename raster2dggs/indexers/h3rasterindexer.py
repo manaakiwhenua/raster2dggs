@@ -3,7 +3,7 @@
 """
 
 from numbers import Number
-from typing import Callable, Tuple, Union
+from typing import Tuple
 
 import h3pandas  # Necessary import despite lack of explicit use
 
@@ -12,6 +12,7 @@ import pandas as pd
 import pyarrow as pa
 import xarray as xr
 import numpy as np
+import shapely
 
 import raster2dggs.constants as const
 
@@ -92,3 +93,13 @@ class H3RasterIndexer(RasterIndexer):
         Implementation of interface function.
         """
         return self.cell_to_children_size(parent, resolution)
+
+    @staticmethod
+    def cell_to_point(cell: str) -> shapely.geometry.Point:
+        return shapely.Point(h3py.cell_to_latlng(cell)[::-1])
+
+    @staticmethod
+    def cell_to_polygon(cell: str) -> shapely.geometry.Polygon:
+        return shapely.Polygon(
+            tuple(coord[::-1] for coord in h3py.cell_to_boundary(cell))
+        )

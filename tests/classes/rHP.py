@@ -18,3 +18,23 @@ class TestRHP(TestRunthrough):
 
         except Exception:
             self.fail(f"TestRHP.test_rhp_run: rHP runthrough failed.")
+
+    def test_rhp_run_geo_point(self):
+        try:
+            rhp(
+                [TEST_FILE_PATH, str(TEST_OUTPUT_PATH), "-r", "6", "-g", "point"],
+                standalone_mode=False,
+            )
+
+        except Exception:
+            self.fail(f"TestRHP.test_rhp_run_geo_point: rHP runthrough failed.")
+
+    def test_rhp_run_geo_polygon(self):
+        try:
+            rhp(
+                [TEST_FILE_PATH, str(TEST_OUTPUT_PATH), "-r", "6", "-g", "polygon"],
+                standalone_mode=False,
+            )
+
+        except Exception:
+            self.fail(f"TestRHP.test_rhp_run_geo_polygon: rHP runthrough failed.")

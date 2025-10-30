@@ -18,6 +18,7 @@ DEFAULTS = {
     "decimals": 1,
     "warp_mem_limit": 12000,
     "resampling": "average",
+    "geo": "none",
     "tempdir": tempfile.tempdir,
 }
 
@@ -62,6 +63,7 @@ OPTION_HELP = {
     "warp_mem_limit": "Input raster may be warped to EPSG:4326 if it is not already in this CRS. This setting specifies the warp operation's memory limit in MB.",
     "resampling": "Input raster may be warped to EPSG:4326 if it is not already in this CRS. Or, if the upscale parameter is greater than 1, there is a need to resample. This setting specifies this resampling algorithm.",
     "compact": "Compact the cells up to the parent resolution. Compaction is not applied for cells without identical values across all bands.",
+    "geo": "Write output as a GeoParquet (v1.1.0) with either point or polygon geometry.",
     "tempdir": "Temporary data is created during the execution of this program. This parameter allows you to control where this data will be written.",
 }
 
@@ -77,3 +79,5 @@ AGGFUNC_OPTIONS = [
     "median",
     "mode",
 ]
+
+GEOM_TYPES = ["point", "polygon", "none"]

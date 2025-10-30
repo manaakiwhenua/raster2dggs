@@ -3,13 +3,14 @@
 """
 
 from numbers import Number
-from typing import Callable, Tuple, Union
+from typing import Tuple
 
 import maidenhead as mh
 import pandas as pd
 import pyarrow as pa
 import xarray as xr
 import numpy as np
+import shapely
 
 import raster2dggs.constants as const
 
@@ -104,3 +105,22 @@ class MaidenheadRasterIndexer(RasterIndexer):
         Not a part of the RasterIndexer interface.
         """
         return cell[: parent_level * 2]
+
+    @staticmethod
+    def cell_to_point(cell: str) -> shapely.geometry.Point:
+        return shapely.Point(mh.to_location(cell, center=True)[::-1])
+
+    @staticmethod
+    def cell_to_polygon(cell: str) -> shapely.geometry.Polygon:
+        loc1, loc2, _ = mh.to_location_rect(cell)
+        return shapely.Polygon(
+            *[
+                [
+                    (loc1[1], loc1[0]),
+                    (loc2[1], loc1[0]),
+                    (loc2[1], loc2[0]),
+                    (loc1[1], loc2[0]),
+                    (loc1[1], loc1[0]),
+                ]
+            ]
+        )

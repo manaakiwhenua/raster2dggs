@@ -3,13 +3,14 @@
 """
 
 from numbers import Number
-from typing import Callable, Tuple, Union
+from typing import Tuple
 
 import geohash as gh
 import pandas as pd
 import pyarrow as pa
 import xarray as xr
 import numpy as np
+import shapely
 
 import raster2dggs.constants as const
 
@@ -102,3 +103,15 @@ class GeohashRasterIndexer(RasterIndexer):
         Not a part of the RasterIndexer interface
         """
         return cell[:desired_precision]
+
+    @staticmethod
+    def cell_to_point(cell: str) -> shapely.geometry.Point:
+        lat, lon, lat_err, lon_err = gh.decode_exactly(cell)
+        return shapely.Point(lon, lat)
+
+    @staticmethod
+    def cell_to_polygon(cell: str) -> shapely.geometry.Polygon:
+        lat, lon, lat_err, lon_err = gh.decode_exactly(cell)
+        return shapely.geometry.box(
+            lon - lon_err, lat - lat_err, lon + lon_err, lat + lat_err
+        )

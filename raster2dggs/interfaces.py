@@ -9,6 +9,7 @@ import pandas as pd
 import pyarrow as pa
 import xarray as xr
 import numpy as np
+import shapely
 
 from . import constants as const
 
@@ -113,6 +114,20 @@ class RasterIndexer:
 
     @staticmethod
     def cell_to_children_size(cell, desired_resolution: int) -> int:
+        """
+        Needs to be implemented by child class
+        """
+        raise NotImplementedError()
+
+    @staticmethod
+    def cell_to_point(cell: str) -> shapely.geometry.Point:
+        """
+        Needs to be implemented by child class
+        """
+        raise NotImplementedError()
+
+    @staticmethod
+    def cell_to_polygon(cell: str) -> shapely.geometry.Polygon:
         """
         Needs to be implemented by child class
         """
