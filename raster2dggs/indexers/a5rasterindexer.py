@@ -3,13 +3,14 @@
 """
 
 from numbers import Number
-from typing import Callable, Tuple, Union
+from typing import Tuple
 
 import a5 as a5py
 import pandas as pd
 import pyarrow as pa
 import xarray as xr
 import numpy as np
+import shapely
 
 import raster2dggs.constants as const
 
@@ -122,3 +123,13 @@ class A5RasterIndexer(RasterIndexer):
         except TypeError:
             return False
         return True
+
+    @staticmethod
+    def cell_to_point(cell: str) -> shapely.geometry.Point:
+        cell = a5py.hex_to_u64(cell)
+        return shapely.Point(a5py.cell_to_lonlat(cell))
+
+    @staticmethod
+    def cell_to_polygon(cell: str) -> shapely.geometry.Polygon:
+        cell = a5py.hex_to_u64(cell)
+        return shapely.Polygon(tuple(a5py.cell_to_boundary(cell)))
