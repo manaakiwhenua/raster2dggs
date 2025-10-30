@@ -138,193 +138,97 @@ tree /home/user/example.pq
     └── part.0.parquet
 ```
 
-For a quick view of your output, you can read Apache Parquet with pandas, and then use h3-pandas and geopandas to convert this into a GeoPackage for visualisation in a desktop GIS, such as QGIS. The Apache Parquet output is indexed by the DGGS column, so it should be ready for association with other data prepared in the same DGGS.
+Output can also be written to GeoParquet (v1.1.0) by including the `-g/--geo` parameter, which accepts:
+- `polygon` for cells represented as boundary polygons
+- `point` for cells represented as centre points
+- `none` for standard Parquet output (not GeoParquet) ← this is the default if `-g/--geo` is not used
 
-<details>
-<summary>For H3 output...</summary>
+GeoParquet output is useful if you want to use the spatial representations of the DGGS cells in traditional spatial analysis, or if you merely want to visualise the output.
 
-```python
->>> import pandas as pd
->>> import h3pandas
->>> o = pd.read_parquet('./tests/data/output/9/Sen2_Test')
->>> o
-band             B02  B03  B04  B05  B06  B07  B08  B8A  B11  B12
-h3_09                                                            
-89bb0981003ffff    9   27   16   62  175  197  228  247  102   36
-89bb0981007ffff   10   30   17   66  185  212  238  261  113   40
-89bb098100bffff   10   26   15   60  169  190  228  241  103   37
-89bb098100fffff   11   29   17   66  181  203  243  257  109   39
-89bb0981013ffff    8   26   16   58  172  199  220  244   98   34
-...              ...  ...  ...  ...  ...  ...  ...  ...  ...  ...
-89bb0d6eea7ffff   10   18   15   41  106  120  140  146  102   47
-89bb0d6eeabffff   12   19   15   39   95  107  125  131   84   39
-89bb0d6eeafffff   12   21   17   43  101  115  134  141  111   51
-89bb0d6eeb7ffff   10   20   14   45  120  137  160  165  111   48
-89bb0d6eebbffff   15   28   20   56  146  166  198  202  108   47
+Below are some ways to read and visualise it.
 
-[5656 rows x 10 columns]
->>> o.h3.h3_to_geo_boundary().to_file('~/Downloads/Sen2_Test_h3-9.gpkg', driver='GPKG')
-```
-</details>
+### DuckDB
 
-<details>
-<summary>For rHEALPix output...</summary>
-
-For rHEALPix DGGS output, you can use [`rHP-Pandas`](https://github.com/manaakiwhenua/rHP-Pandas):
-
-```python
->>> import pandas as pd
->>> import rhppandas
->>> o = pd.read_parquet('./tests/data/output/11/Sen2_Test_rhp')
->>> o
-band          B02  B03  B04  B05  B06  B07  B08  B8A  B11  B12
-rhp_11                                                        
-R88723652267   11   31   16   65  191  217  263  274   99   36
-R88723652268   11   30   15   66  190  214  258  269   96   34
-R88723652276   11   27   17   66  179  203  240  255   98   36
-R88723652277   13   30   19   68  179  204  246  260  108   41
-R88723652278   12   29   20   66  176  199  243  255  110   43
-...           ...  ...  ...  ...  ...  ...  ...  ...  ...  ...
-R88727068804   22   39   41   81  151  167  182  203  166   84
-R88727068805   22   40   42   81  150  166  185  203  167   85
-R88727068806   23   41   43   83  156  175  188  211  164   83
-R88727068807   23   41   42   82  154  171  186  207  164   83
-R88727068808   22   39   43   80  146  163  177  198  165   83
-
-[223104 rows x 10 columns]
->>> o.rhp.rhp_to_geo_boundary().to_file('~/Downloads/Sen2_Test_rhp-11.gpkg', driver='GPKG')
-```
-</details>
-
-<details>
-<summary>For S2 output...</summary>
-
-For S2 output, use [`s2sphere`](https://pypi.org/project/s2sphere/):
-
-```python
-import pandas as pd
-import geopandas as gpd
-import s2sphere
-from shapely.geometry import Polygon
-
-o = pd.read_parquet('./tests/data/output/7/sample_tif_s2')
-
-def s2id_to_polygon(s2_id_hex):
-    cell_id = s2sphere.CellId.from_token(s2_id_hex)
-    cell = s2sphere.Cell(cell_id)
-    vertices = []
-    for i in range(4):
-        vertex = cell.get_vertex(i)
-        # Convert to lat/lon degrees
-        lat_lng = s2sphere.LatLng.from_point(vertex)
-        vertices.append((lat_lng.lng().degrees, lat_lng.lat().degrees))  # (lon, lat)
-    return Polygon(vertices)
-
-o['geometry'] = o.index.map(s2id_to_polygon)
-gpd.GeoDataFrame(o, geometry='geometry', crs='EPSG:4326').to_file('./tests/data/output/7/sample_tif_s2.gpkg')
-```
-</details>
-
-<details>
-<summary>For A5 output...</summary>
-
-For A5 output, use [`a5`](https://pypi.org/project/pya5/):
-
-```python
-import pandas as pd
-import geopandas as gpd
-import a5
-from shapely.geometry import Polygon
-
-o = pd.read_parquet('./tests/data/output/7/sample_tif_a5')
-o['geometry'] = o.index.map(lambda a: Polygon(a5.cell_to_boundary(a5.hex_to_u64(a))))
-
-gpd.GeoDataFrame(o, geometry="geometry", crs="EPSG:4326").to_file('tests/data/output/7/sample_tif_a5.gpkg')
+```bash
+$ duckdb
+DuckDB v1.4.1 (Andium) b390a7c376
+Enter ".help" for usage hints.
+Connected to a transient in-memory database.
+Use ".open FILENAME" to reopen on a persistent database.
+D INSTALL spatial;
+D LOAD spatial;
+D SELECT * FROM read_parquet('se_island.pq') LIMIT 7;
+┌┌────────┬────────┬────────┬────────────────────────────────────────────────────────────────────────────────┬─────────────┬─────────┐
+│ band_1 │ band_2 │ band_3 │                                    geometry                                    │    s2_19    │  s2_08  │
+│ float  │ float  │ float  │                                    geometry                                    │   varchar   │ varchar │
+├────────┼────────┼────────┼────────────────────────────────────────────────────────────────────────────────┼─────────────┼─────────┤
+│    0.0 │    0.0 │    0.0 │ POLYGON ((-176.17946725380486 -44.33542073938414, -176.17946725380486 -44.33…  │ 72b47e01e24 │ 72b47   │
+│    0.0 │    0.0 │    0.0 │ POLYGON ((-176.18439390505398 -44.33543749229784, -176.18439390505398 -44.33…  │ 72b47e02a14 │ 72b47   │
+│    0.0 │    0.1 │    0.1 │ POLYGON ((-176.18550630891403 -44.33547457195554, -176.18550630891403 -44.33…  │ 72b47e1d54c │ 72b47   │
+│    0.0 │    0.0 │    0.0 │ POLYGON ((-176.17819578278952 -44.33537828938332, -176.17819578278952 -44.33…  │ 72b47e01d64 │ 72b47   │
+│    0.1 │    0.1 │    0.3 │ POLYGON ((-176.18344039674218 -44.335553297533835, -176.18344039674218 -44.3…  │ 72b47e0282c │ 72b47   │
+│    0.0 │    0.0 │    0.0 │ POLYGON ((-176.17899045588274 -44.335404822417665, -176.17899045588274 -44.3…  │ 72b47e01dfc │ 72b47   │
+│    0.1 │    0.1 │    0.3 │ POLYGON ((-176.1832814769592 -44.33554799806149, -176.1832814769592 -44.3356…  │ 72b47e02824 │ 72b47   │
+└────────┴────────┴────────┴────────────────────────────────────────────────────────────────────────────────┴─────────────┴─────────┘
 ```
 
-</details>
+### GDAL
 
-<details>
-<summary>For Geohash output...</summary>
+```bash
+ogrinfo -so -al ./se_island.pq
+INFO: Open of `se_island.pq'
+      using driver `Parquet' successful.
 
-For Geohash output, you can use [`python-geohash`](https://github.com/hkwi/python-geohash) or other similar Geohash library. Example:
-
-```python
-import pandas as pd
-import geohash
-from shapely.geometry import Point, box
-import geopandas as gpd
-o = pd.read_parquet('./tests/data/output/8/sample_geohash')
-
-
-def geohash_to_geometry(gh, mode="polygon"):
-    lat, lon, lat_err, lon_err = geohash.decode_exactly(gh)
-    
-    if mode == "point":
-        return Point(lon, lat)
-    elif mode == "polygon":
-        return box(lon - lon_err, lat - lat_err, lon + lon_err, lat + lat_err)
-    else:
-        raise ValueError("mode must be 'point' or 'polygon'")
-
-o["geometry"] = o.index.map(lambda gh: geohash_to_geometry(gh, mode="polygon"))
-
-'''
-band   geohash_08  1  2  3                                           geometry
-0        u170f2sq  0  0  0  POLYGON ((4.3238067626953125 52.16686248779297...
-1        u170f2sr  0  0  0  POLYGON ((4.3238067626953125 52.16703414916992...
-2        u170f2sw  0  0  0  POLYGON ((4.324150085449219 52.16686248779297,...
-3        u170f2sx  0  0  0  POLYGON ((4.324150085449219 52.16703414916992,...
-4        u170f2sy  0  0  0  POLYGON ((4.324493408203125 52.16686248779297,...
-...           ... .. .. ..                                                ...
-232720   u171mc2g  0  0  0  POLYGON ((4.472808837890625 52.258358001708984...
-232721   u171mc2h  0  0  0  POLYGON ((4.471778869628906 52.25852966308594,...
-232722   u171mc2k  0  0  0  POLYGON ((4.4721221923828125 52.25852966308594...
-232723   u171mc2s  0  0  0  POLYGON ((4.472465515136719 52.25852966308594,...
-232724   u171mc2u  0  0  0  POLYGON ((4.472808837890625 52.25852966308594,...
-
-[232725 rows x 5 columns]
-'''
-
-gpd.GeoDataFrame(o, geometry="geometry", crs="EPSG:4326").to_file('tests/data/output/8/sample_geohash.gpkg')
+Layer name: se_island
+Geometry: Polygon
+Feature Count: 18390
+Extent: (-176.185824, -44.356933) - (-176.159915, -44.335364)
+Layer SRS WKT:
+GEOGCRS["WGS 84",
+    ENSEMBLE["World Geodetic System 1984 ensemble",
+        MEMBER["World Geodetic System 1984 (Transit)"],
+        MEMBER["World Geodetic System 1984 (G730)"],
+        MEMBER["World Geodetic System 1984 (G873)"],
+        MEMBER["World Geodetic System 1984 (G1150)"],
+        MEMBER["World Geodetic System 1984 (G1674)"],
+        MEMBER["World Geodetic System 1984 (G1762)"],
+        MEMBER["World Geodetic System 1984 (G2139)"],
+        MEMBER["World Geodetic System 1984 (G2296)"],
+        ELLIPSOID["WGS 84",6378137,298.257223563,
+            LENGTHUNIT["metre",1]],
+        ENSEMBLEACCURACY[2.0]],
+    PRIMEM["Greenwich",0,
+        ANGLEUNIT["degree",0.0174532925199433]],
+    CS[ellipsoidal,2],
+        AXIS["geodetic latitude (Lat)",north,
+            ORDER[1],
+            ANGLEUNIT["degree",0.0174532925199433]],
+        AXIS["geodetic longitude (Lon)",east,
+            ORDER[2],
+            ANGLEUNIT["degree",0.0174532925199433]],
+    USAGE[
+        SCOPE["Horizontal component of 3D system."],
+        AREA["World."],
+        BBOX[-90,-180,90,180]],
+    ID["EPSG",4326]]
+Data axis to CRS axis mapping: 2,1
+Geometry Column = geometry
+band_1: Real(Float32) (0.0)
+band_2: Real(Float32) (0.0)
+band_3: Real(Float32) (0.0)
+s2_19: String (0.0)
+s2_08: String (0.0)
 ```
-</details>
 
-<details>
-<summary>For Maidenhead output...</summary>
+### QGIS
 
-For Maidenhead output, you can use [`maidenhead`](https://https://github.com/space-physics/maidenhead) or other similar Maidenhead library. Example:
-
-```python
-import pandas as pd
-import maidenhead
-from shapely.geometry import shape
-import geopandas as gpd
-o = pd.read_parquet('./tests/data/output/5/sample_maidenhead.pq')
-
-o['geometry'] = o.index.map(lambda mh: shape(maidenhead.to_geoJSONObject(mh, center=True)['features'][1]['geometry']))
-
-'''
-band          1  2  3                                           geometry
-maidenhead_5                                                            
-JO22de80UB    0  0  0  POLYGON ((4.323611111111111 52.16684027777778,...
-JO22de80UC    0  0  0  POLYGON ((4.323611111111111 52.16701388888889,...
-JO22de80UD    0  0  0  POLYGON ((4.323611111111111 52.1671875, 4.3239...
-JO22de80UE    0  0  0  POLYGON ((4.323611111111111 52.16736111111111,...
-JO22de80UF    0  0  0  POLYGON ((4.323611111111111 52.16753472222222,...
-...          .. .. ..                                                ...
-JO22fg62PB    0  0  0  POLYGON ((4.471875 52.25850694444444, 4.472222...
-JO22fg62QA    0  0  0  POLYGON ((4.472222222222222 52.25833333333333,...
-JO22fg62QB    0  0  0  POLYGON ((4.472222222222222 52.25850694444444,...
-JO22fg62RA    0  0  0  POLYGON ((4.472569444444445 52.25833333333333,...
-JO22fg62RB    0  0  0  POLYGON ((4.472569444444445 52.25850694444444,...
-
-[227470 rows x 4 columns]
-'''
-
-gpd.GeoDataFrame(o, geometry="geometry", crs="EPSG:4326").to_file('tests/data/output/5/sample_maidenhead.gpkg')
+```bash
+qgis sample.pq
 ```
-</details>
+
+With some styling applied:
+
+![Example output shown in QGIS](image.png)
 
 ## Installation
 
@@ -391,6 +295,8 @@ Two sample files have been uploaded to an S3 bucket with `s3:GetObject` public p
 
 You may use these for experimentation. However you can also use local files too, which will be faster. A good, small (5 MB) sample image is available [here](https://github.com/mommermi/geotiff_sample).
 
+A small test file is also available at [`tests/data/se-island.tif`] (tests/data/se-island.tif).
+
 ## Example commands
 
 ```bash
@@ -402,7 +308,7 @@ raster2dggs rhp --resolution 11 -d 0 s3://raster2dggs-test-data/Sen2_Test.tif ./
 ```
 
 ```bash
-raster2dggs h3 --resolution 13 --compression zstd --resampling nearest -a median -d 1 -u 2 s3://raster2dggs-test-data/TestDEM.tif ./tests/data/output/13/TestDEM
+raster2dggs h3 --resolution 13 --compression zstd --resampling nearest -a median -d 1 -u 2 --geo polygon s3://raster2dggs-test-data/TestDEM.tif ./tests/data/output/13/TestDEM
 ```
 
 ## Citation
