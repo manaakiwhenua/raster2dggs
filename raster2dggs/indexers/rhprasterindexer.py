@@ -3,7 +3,7 @@
 """
 
 from numbers import Number
-from typing import Callable, Tuple, Union
+from typing import Tuple
 
 import rhppandas  # Necessary import despite lack of explicit use
 
@@ -12,6 +12,8 @@ import pandas as pd
 import pyarrow as pa
 import xarray as xr
 import numpy as np
+import shapely
+from rhealpixdggs.dggs import WGS84_003
 
 import raster2dggs.constants as const
 
@@ -91,3 +93,13 @@ class RHPRasterIndexer(RasterIndexer):
         Implementation of interface function.
         """
         return self.cell_to_children_size(parent, resolution)
+
+    @staticmethod
+    def cell_to_point(cell: str) -> shapely.geometry.Point:
+        return shapely.Point(rhpw.rhp_to_geo(cell, plane=False, dggs=WGS84_003))
+
+    @staticmethod
+    def cell_to_polygon(cell: str) -> shapely.geometry.Polygon:
+        return shapely.Polygon(
+            tuple(coord for coord in rhpw.rhp_to_geo_boundary(cell, plane=False, dggs=WGS84_003))
+        )

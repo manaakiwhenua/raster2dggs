@@ -20,3 +20,23 @@ class TestMaidenhead(TestRunthrough):
             self.fail(
                 f"TestMaidenhead.test_maidenhead_run: Maidenhead runthrough failed."
             )
+
+    def test_maidenhead_run_geo_point(self):
+        try:
+            maidenhead(
+                [TEST_FILE_PATH, str(TEST_OUTPUT_PATH), "-r", "6", "-g", "point"],
+                standalone_mode=False,
+            )
+
+        except Exception:
+            self.fail(f"TestMaidenhead.test_maidenhead_run_geo_point: Maidenhead runthrough failed.")
+
+    def test_maidenhead_run_geo_polygon(self):
+        try:
+            maidenhead(
+                [TEST_FILE_PATH, str(TEST_OUTPUT_PATH), "-r", "6", "-g", "polygon"],
+                standalone_mode=False,
+            )
+
+        except Exception:
+            self.fail(f"TestMaidenhead.test_maidenhead_run_geo_polygon: Maidenhead runthrough failed.")

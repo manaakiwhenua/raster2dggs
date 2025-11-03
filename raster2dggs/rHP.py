@@ -92,6 +92,12 @@ from raster2dggs import __version__
     help=const.OPTION_HELP["compact"],
 )
 @click.option(
+    "-g",
+    "--geo",
+    default=const.DEFAULTS["geo"],
+    type=click.Choice(const.GEOM_TYPES),
+)
+@click.option(
     "--tempdir",
     default=const.DEFAULTS["tempdir"],
     type=click.Path(),
@@ -113,6 +119,7 @@ def rhp(
     warp_mem_limit: int,
     resampling: str,
     compact: bool,
+    geo: str,
     tempdir: Union[str, Path],
 ):
     """
@@ -138,6 +145,7 @@ def rhp(
         resampling,
         overwrite,
         compact,
+        geo,
     )
 
     common.initial_index(

@@ -3,16 +3,19 @@ import errno
 import tempfile
 import logging
 import numpy as np
-import threading
 import rioxarray
 import dask
 import click_log
+import shutil
 
 import rasterio as rio
 import pandas as pd
 import pyarrow as pa
 import pyarrow.parquet as pq
 import pyarrow.dataset as ds
+import json
+import shapely
+import pyproj
 
 from typing import Union, Optional, Sequence, Callable
 from pathlib import Path
@@ -24,7 +27,7 @@ from tqdm.dask import TqdmCallback
 import dask.dataframe as dd
 import xarray as xr
 
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import ThreadPoolExecutor
 
 from urllib.parse import urlparse
 from rasterio.warp import calculate_default_transform
@@ -106,6 +109,7 @@ def assemble_kwargs(
     resampling: str,
     overwrite: bool,
     compact: bool,
+    geo: str,
 ) -> dict:
     kwargs = {
         "upscale": upscale,
@@ -117,6 +121,7 @@ def assemble_kwargs(
         "resampling": resampling,
         "overwrite": overwrite,
         "compact": compact,
+        "geo": geo if geo != "none" else None,
     }
 
     return kwargs
@@ -143,6 +148,72 @@ def get_parent_res(dggs: str, parent_res: Union[None, int], resolution: int) -> 
     )
 
 
+def write_partition_as_geoparquet(
+    pdf: pd.DataFrame,
+    geom_func,
+    base_dir: Union[str, Path],
+    partition_col_name: str,
+    compression: str,
+) -> None:
+    # Build shapely geometries for this partition
+    geoms = pdf.index.map(geom_func)
+
+    # Compute GeoParquet 1.1.0 extras
+    valid = [g for g in geoms if (g is not None and not g.is_empty)]
+    if len(valid):
+        arr = np.asarray(shapely.bounds(geoms))  # Shapely 2.x vectorized
+        m = ~np.isnan(arr).any(axis=1)
+        bbox_vals = arr[m]
+        bbox = [
+            float(np.min(bbox_vals[:, 0])),
+            float(np.min(bbox_vals[:, 1])),
+            float(np.max(bbox_vals[:, 2])),
+            float(np.max(bbox_vals[:, 3])),
+        ]
+        geometry_types = sorted({g.geom_type for g in valid})
+    else:
+        bbox = None
+        geometry_types = []
+
+    # Convert to WKB bytes (canonical encoding)
+    pdf["geometry"] = shapely.to_wkb(geoms, hex=False)
+
+    table = pa.Table.from_pandas(pdf, preserve_index=True)
+
+    # Ensure geometry is Binary
+    geom_idx = table.schema.get_field_index("geometry")
+    if not pa.types.is_binary(table.field(geom_idx).type):
+        geom_array = pa.array(table.column(geom_idx).to_pylist(), type=pa.binary())
+        table = table.set_column(geom_idx, "geometry", geom_array)
+
+    # GeoParquet 1.1.0 metadata
+    crs_meta = pyproj.CRS.from_epsg(4326).to_json_dict()
+    col_meta = {"encoding": "WKB", "crs": crs_meta}
+    if geometry_types:
+        col_meta["geometry_types"] = geometry_types
+    if bbox is not None:
+        col_meta["bbox"] = bbox
+
+    geo_meta = {
+        "version": "1.1.0",
+        "primary_column": "geometry",
+        "columns": {"geometry": col_meta},
+    }
+    existing_meta = table.schema.metadata or {}
+    new_meta = {**existing_meta, b"geo": json.dumps(geo_meta).encode("utf-8")}
+    table = table.replace_schema_metadata(new_meta)
+
+    pq.write_to_dataset(
+        table,
+        root_path=str(base_dir),
+        partition_cols=[partition_col_name],
+        compression=compression,
+        basename_template="part.{i}.parquet",
+        existing_data_behavior="delete_matching",
+        use_threads=True,
+    )
+
+
 def address_boundary_issues(
     indexer: IRasterIndexer,
     pq_input: tempfile.TemporaryDirectory,
@@ -163,6 +234,9 @@ def address_boundary_issues(
         IDs being present in different windows of the original image
         windows.
     """
+    if kwargs.get("overwrite", False) and Path(output).exists():
+        shutil.rmtree(output)
+
     LOGGER.debug(f"Reading Stage 1 output ({pq_input})")
     index_col = indexer.index_col(resolution)
     partition_col = indexer.partition_col(parent_res)
@@ -202,15 +276,39 @@ def address_boundary_issues(
                 indexer.compaction, resolution, parent_res, meta=out_meta
             )
 
-        ddf.to_parquet(
-            output,
-            engine="pyarrow",
-            partition_on=[partition_col],
-            overwrite=kwargs["overwrite"],
-            write_index=True,
-            append=False,
-            compression=kwargs["compression"],
-        )
+        if kwargs["geo"]:
+
+            # Create one delayed write task per Dask partition
+            delayed_parts = ddf.to_delayed()
+
+            geo_serialisation_method = (
+                indexer.cell_to_polygon
+                if kwargs["geo"] == "polygon"
+                else indexer.cell_to_point
+            )
+
+            write_tasks = [
+                dask.delayed(write_partition_as_geoparquet)(
+                    part, geo_serialisation_method, output, partition_col, kwargs["compression"]
+                )
+                for part in delayed_parts
+            ]
+
+            # Execute writes with progress
+            with TqdmCallback(desc="Writing GeoParquet"):
+                dask.compute(*write_tasks)
+
+        else:
+
+            ddf.to_parquet(
+                output,
+                engine="pyarrow",
+                partition_on=[partition_col],
+                overwrite=kwargs["overwrite"],
+                write_index=True,
+                append=False,
+                compression=kwargs["compression"],
+            )
 
     LOGGER.debug("Stage 2 (aggregation) complete")
 
@@ -364,9 +462,9 @@ def initial_index(
                             root_path=tmpdir,
                             partition_cols=[partition_col],
                             basename_template=str(window.col_off)
-                            + "_"
+                            + "."
                             + str(window.row_off)
-                            + "_guid-{i}.parquet",
+                            + ".{i}.parquet",
                             use_threads=False,  # Already threading indexing and reading
                             existing_data_behavior="overwrite_or_ignore",  # Overwrite files with the same name; other existing files are ignored. Allows for an append workflow
                             compression=compression,

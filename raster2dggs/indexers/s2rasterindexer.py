@@ -3,13 +3,14 @@
 """
 
 from numbers import Number
-from typing import Callable, Tuple, Union
-from s2sphere import LatLng, CellId
+from typing import Tuple
 
+import s2sphere
 import pandas as pd
 import pyarrow as pa
 import xarray as xr
 import numpy as np
+import shapely
 
 import raster2dggs.constants as const
 
@@ -48,7 +49,7 @@ class S2RasterIndexer(RasterIndexer):
         ).reset_index()
         # S2 index
         cells = [
-            CellId.from_lat_lng(LatLng.from_degrees(lat, lon))
+            s2sphere.CellId.from_lat_lng(s2sphere.LatLng.from_degrees(lat, lon))
             for lat, lon in zip(subset["y"], subset["x"])
         ]
         s2 = [cell.parent(resolution).to_token() for cell in cells]
@@ -91,7 +92,7 @@ class S2RasterIndexer(RasterIndexer):
                 filter(
                     lambda c: c.is_valid(),
                     map(
-                        lambda c: CellId.from_token(c),
+                        lambda c: s2sphere.CellId.from_token(c),
                         filter(lambda c: not pd.isna(c), cells),
                     ),
                 ),
@@ -104,7 +105,7 @@ class S2RasterIndexer(RasterIndexer):
         Implementation of interface function.
         """
         return map(
-            lambda token: CellId.from_token(token).parent(resolution).to_token(),
+            lambda token: s2sphere.CellId.from_token(token).parent(resolution).to_token(),
             cells,
         )
 
@@ -112,4 +113,20 @@ class S2RasterIndexer(RasterIndexer):
         """
         Implementation of interface function.
         """
-        return self.cell_to_children_size(CellId.from_token(parent), resolution)
+        return self.cell_to_children_size(s2sphere.CellId.from_token(parent), resolution)
+
+    @staticmethod
+    def cell_to_point(cell: str) -> shapely.geometry.Point:
+        latLng = s2sphere.LatLng.from_point(s2sphere.CellId.from_token(cell).to_point())
+        return shapely.Point(latLng.lng().degrees, latLng.lat().degrees)
+
+    @staticmethod
+    def cell_to_polygon(cell: str) -> shapely.geometry.Polygon:
+        cell_id = s2sphere.CellId.from_token(cell)
+        cell = s2sphere.Cell(cell_id)
+        vertices = []
+        for i in range(4):
+            vertex = cell.get_vertex(i)
+            lat_lng = s2sphere.LatLng.from_point(vertex)
+            vertices.append((lat_lng.lng().degrees, lat_lng.lat().degrees))
+        return shapely.Polygon(vertices)

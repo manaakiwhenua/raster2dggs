@@ -18,3 +18,24 @@ class TestH3(TestRunthrough):
 
         except Exception:
             self.fail(f"TestH3.test_h3_run: H3 runthrough failed.")
+
+
+    def test_h3_run_geo_point(self):
+        try:
+            h3(
+                [TEST_FILE_PATH, str(TEST_OUTPUT_PATH), "-r", "6", "-g", "point"],
+                standalone_mode=False,
+            )
+
+        except Exception:
+            self.fail(f"TestH3.test_h3_run_geo_point: H3 runthrough failed.")
+
+    def test_h3_run_geo_polygon(self):
+        try:
+            h3(
+                [TEST_FILE_PATH, str(TEST_OUTPUT_PATH), "-r", "6", "-g", "polygon"],
+                standalone_mode=False,
+            )
+
+        except Exception:
+            self.fail(f"TestH3.test_h3_run_geo_polygon: H3 runthrough failed.")
