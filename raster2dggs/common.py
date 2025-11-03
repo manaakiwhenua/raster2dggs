@@ -10,7 +10,9 @@ import click_log
 
 import rasterio as rio
 import pandas as pd
+import pyarrow as pa
 import pyarrow.parquet as pq
+import pyarrow.dataset as ds
 
 from typing import Union, Optional, Sequence, Callable
 from pathlib import Path
@@ -30,7 +32,7 @@ from rasterio.warp import calculate_default_transform
 import raster2dggs.constants as const
 import raster2dggs.indexerfactory as idxfactory
 
-from raster2dggs.interfaces import RasterIndexer
+from raster2dggs.interfaces import IRasterIndexer
 
 LOGGER = logging.getLogger(__name__)
 click_log.basic_config(LOGGER)
@@ -142,7 +144,7 @@ def get_parent_res(dggs: str, parent_res: Union[None, int], resolution: int) -> 
 
 
 def address_boundary_issues(
-    indexer: RasterIndexer,
+    indexer: IRasterIndexer,
     pq_input: tempfile.TemporaryDirectory,
     output: Path,
     resolution: int,
@@ -150,60 +152,67 @@ def address_boundary_issues(
     **kwargs,
 ) -> Path:
     """
-    After "stage 1" processing, there is a DGGS cell and band value/s for each pixel in the input image. Partitions are based
-    on raster windows.
+    After "stage 1" processing, there is a DGGS cell and band value/s for
+        each pixel in the input image. Partitions are hive-based, organised
+        by parent cells at the given parent_res.
 
-    This function will re-partition based on parent cell IDs at a fixed offset from the target resolution.
+    Values are aggregated at the target resolution, to account for multiple
+        pixels mapping to the same cell.
 
-    Once re-partitioned on this basis, values are aggregated at the target resolution, to account for multiple pixels mapping
-        to the same cell.
-
-    This re-partitioning is necessary to address the issue of the same cell IDs being present in different partitions
-        of the original (i.e. window-based) partitioning. Using the nested structure of the DGGS is an useful property
-        to address this problem.
+    This re-partitioning is necessary to address the issue of the same cell
+        IDs being present in different windows of the original image
+        windows.
     """
-    LOGGER.debug(
-        f"Reading Stage 1 output ({pq_input}) and setting index for parent-based partitioning"
+    LOGGER.debug(f"Reading Stage 1 output ({pq_input})")
+    index_col = indexer.index_col(resolution)
+    partition_col = indexer.partition_col(parent_res)
+
+    part_schema = pa.schema(
+        [(partition_col, pa.string())]
+    )  # Don't let this be inferred; e.g. geohash levels can be inferred variously as int or string
+    # Keep hive partitions; coalese files per partition
+    ddf = dd.read_parquet(
+        pq_input,
+        engine="pyarrow",
+        aggregate_files=True,
+        dataset={"partitioning": ds.partitioning(part_schema, flavor="hive")},
     )
-    # Set index as parent cell
-    pad_width = const.zero_padding(indexer.dggs)
-    index_col = f"{indexer.dggs}_{parent_res:0{pad_width}d}"
-    ddf = dd.read_parquet(pq_input).set_index(index_col)
+    # Cols to aggregate (bands only)
+    band_cols = [c for c in ddf.columns if not c.startswith(f"{indexer.dggs}_")]
 
-    with TqdmCallback(desc="Reading window partitions and counting parents"):
-        # Count parents, to get target number of partitions
-        uniqueparents = sorted(list(ddf.index.unique().compute()))
-
-    LOGGER.debug(
-        "Repartitioning into %d partitions, based on parent cells",
-        len(uniqueparents) + 1,
+    out_meta = pd.DataFrame(
+        {
+            partition_col: pd.Series([], dtype="string"),
+            **{c: pd.Series([], dtype=ddf[c].dtype) for c in band_cols},
+        }
     )
-    LOGGER.debug("Aggregating cell values where conflicts exist")
+    out_meta.index = pd.Index([], name=index_col, dtype="object")
 
-    with TqdmCallback(
-        desc=f"Repartitioning/aggregating{'/compacting' if kwargs['compact'] else ''}"
-    ):
-        ddf = ddf.repartition(  # See "notes" on why divisions expects repetition of the last item https://docs.dask.org/en/stable/generated/dask.dataframe.DataFrame.repartition.html
-            divisions=(uniqueparents + [uniqueparents[-1]])
-        ).map_partitions(
-            indexer.parent_groupby, resolution, kwargs["aggfunc"], kwargs["decimals"]
+    with TqdmCallback(desc=f"Aggregating{'/compacting' if kwargs['compact'] else ''}"):
+        ddf = ddf.map_partitions(
+            indexer.parent_groupby,
+            resolution,
+            parent_res,
+            kwargs["aggfunc"],
+            kwargs["decimals"],
+            meta=out_meta,
         )
         if kwargs["compact"]:
-            ddf = ddf.map_partitions(indexer.compaction, resolution, parent_res)
+            ddf = ddf.map_partitions(
+                indexer.compaction, resolution, parent_res, meta=out_meta
+            )
 
-        ddf.map_partitions(lambda df: df.sort_index()).to_parquet(
+        ddf.to_parquet(
             output,
-            overwrite=kwargs["overwrite"],
             engine="pyarrow",
+            partition_on=[partition_col],
+            overwrite=kwargs["overwrite"],
             write_index=True,
             append=False,
-            name_function=lambda i: f"{uniqueparents[i]}.parquet",
             compression=kwargs["compression"],
         )
 
-    LOGGER.debug(
-        "Stage 2 (parent cell repartitioning) and Stage 3 (aggregation) complete"
-    )
+    LOGGER.debug("Stage 2 (aggregation) complete")
 
     return output
 
@@ -219,15 +228,18 @@ def initial_index(
     **kwargs,
 ) -> Path:
     """
-    Responsible for opening the raster_input, and performing DGGS indexing per window of a WarpedVRT.
+    Responsible for opening the raster_input, and performing DGGS indexing
+        per window of a WarpedVRT.
 
-    A WarpedVRT is used to enforce reprojection to https://epsg.io/4326, which is used for all DGGS indexing.
+    A WarpedVRT is used to enforce reprojection to https://epsg.io/4326,
+        which is used for all DGGS indexing.
 
-    It also allows on-the-fly resampling of the input, which is useful if the target DGGS resolution exceeds the resolution
-        of the input.
+    It also allows on-the-fly resampling of the input, which is useful if
+        the target DGGS resolution exceeds the resolution of the input.
 
-    This function passes a path to a temporary directory (which contains the output of this "stage 1" processing) to
-        a secondary function that addresses issues at the boundaries of raster windows.
+    This function passes a path to a temporary directory (which contains
+        the output of this "stage 1" processing) to a secondary function
+        that addresses issues at the boundaries of raster windows.
     """
     indexer = idxfactory.indexer_instance(dggs)
     parent_res = get_parent_res(dggs, parent_res, resolution)
@@ -326,7 +338,7 @@ def initial_index(
 
                     windows = [window for _, window in vrt.block_windows()]
                     LOGGER.debug(
-                        "%d windows (the same number of partitions will be created)",
+                        "%d windows",
                         len(windows),
                     )
 
@@ -346,9 +358,17 @@ def initial_index(
                             band_labels=selected_labels,
                         )
 
+                        partition_col = indexer.partition_col(parent_res)
                         pq.write_to_dataset(
                             result,
                             root_path=tmpdir,
+                            partition_cols=[partition_col],
+                            basename_template=str(window.col_off)
+                            + "_"
+                            + str(window.row_off)
+                            + "_guid-{i}.parquet",
+                            use_threads=False,  # Already threading indexing and reading
+                            existing_data_behavior="overwrite_or_ignore",  # Overwrite files with the same name; other existing files are ignored. Allows for an append workflow
                             compression=compression,
                         )
 

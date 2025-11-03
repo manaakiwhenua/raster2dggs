@@ -2,7 +2,7 @@
 @author: ndemaio
 """
 
-from raster2dggs.interfaces import RasterIndexer
+from raster2dggs.interfaces import IRasterIndexer
 
 import raster2dggs.indexers.h3rasterindexer as h3rasterindexer
 import raster2dggs.indexers.rhprasterindexer as rhprasterindexer
@@ -30,7 +30,7 @@ as defined in the list of click commands
 """
 
 
-def indexer_instance(dggs: str) -> RasterIndexer:
+def indexer_instance(dggs: str) -> IRasterIndexer:
     # Create and return appropriate indexer instance
     indexer = indexer_lookup[dggs]
     return indexer(dggs)
