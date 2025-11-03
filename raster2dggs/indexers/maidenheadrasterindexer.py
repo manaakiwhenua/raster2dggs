@@ -13,7 +13,7 @@ import numpy as np
 
 import raster2dggs.constants as const
 
-from raster2dggs.interfaces import RasterIndexer
+from raster2dggs.indexers.rasterindexer import RasterIndexer
 
 
 class MaidenheadRasterIndexer(RasterIndexer):

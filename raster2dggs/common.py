@@ -32,7 +32,7 @@ from rasterio.warp import calculate_default_transform
 import raster2dggs.constants as const
 import raster2dggs.indexerfactory as idxfactory
 
-from raster2dggs.interfaces import RasterIndexer
+from raster2dggs.interfaces import IRasterIndexer
 
 LOGGER = logging.getLogger(__name__)
 click_log.basic_config(LOGGER)
@@ -144,7 +144,7 @@ def get_parent_res(dggs: str, parent_res: Union[None, int], resolution: int) -> 
 
 
 def address_boundary_issues(
-    indexer: RasterIndexer,
+    indexer: IRasterIndexer,
     pq_input: tempfile.TemporaryDirectory,
     output: Path,
     resolution: int,
