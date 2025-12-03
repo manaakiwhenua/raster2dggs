@@ -114,11 +114,18 @@ class DGGALRasterIndexer(RasterIndexer):
         Implementation of interface function.
         """
         # TODO appropriately handle potential for multiple parentage in dggal (e.g. ISEAH3)
-        child_resolution = self.dggrs.getZoneLevel(self.dggrs.getZoneFromTextID(next(iter(cells))))
+        child_resolution = self.dggrs.getZoneLevel(
+            self.dggrs.getZoneFromTextID(next(iter(cells)))
+        )
         return map(
-            lambda zone: self.dggrs.getZoneTextID(apply_n_reduce(
-                self.dggrs.getZoneParents, child_resolution - resolution, self.dggrs.getZoneFromTextID(zone)
-            )), cells
+            lambda zone: self.dggrs.getZoneTextID(
+                apply_n_reduce(
+                    self.dggrs.getZoneParents,
+                    child_resolution - resolution,
+                    self.dggrs.getZoneFromTextID(zone),
+                )
+            ),
+            cells,
         )
 
     def expected_count(self, parent: str, resolution: int):
@@ -128,16 +135,16 @@ class DGGALRasterIndexer(RasterIndexer):
         return self.cell_to_children_size(parent, resolution)
 
     def cell_to_point(self, cell: str) -> shapely.geometry.Point:
-        geo_point : dggal.GeoPoint = self.dggrs.getZoneWGS84Centroid(self.dggrs.getZoneFromTextID(cell))
-        return shapely.Point(
-            geo_point.lon, geo_point.lat
+        geo_point: dggal.GeoPoint = self.dggrs.getZoneWGS84Centroid(
+            self.dggrs.getZoneFromTextID(cell)
         )
+        return shapely.Point(geo_point.lon, geo_point.lat)
 
     def cell_to_polygon(self, cell: str) -> shapely.geometry.Polygon:
-        geo_points : List[dggal.GeoPoint] = self.dggrs.getZoneWGS84Vertices(self.dggrs.getZoneFromTextID(cell))
-        return shapely.Polygon(
-            tuple([(p.lon, p.lat) for p in geo_points])
+        geo_points: List[dggal.GeoPoint] = self.dggrs.getZoneWGS84Vertices(
+            self.dggrs.getZoneFromTextID(cell)
         )
+        return shapely.Polygon(tuple([(p.lon, p.lat) for p in geo_points]))
 
 
 # def ISEA7HRasterIndexer(DGGALRasterIndexer):
@@ -166,6 +173,7 @@ class ISEA9RRasterIndexer(DGGALRasterIndexer):
     @property
     def refinementRatio(self) -> int:
         return self._refinementRatio
+
 
 class ISEA7HRasterIndexer(DGGALRasterIndexer):
     """

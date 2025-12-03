@@ -14,7 +14,7 @@ MIN_ISEA9R, MAX_ISEA9R = (
 MIN_ISEA7H, MAX_ISEA7H = (
     0,
     18,
-) # NB correct?
+)  # NB correct?
 
 DEFAULT_NAME: str = "value"
 
@@ -44,9 +44,7 @@ DEFAULT_DGGS_PARENT_RES = {
     "isea9r": lambda resolution: max(
         MIN_ISEA9R, (resolution - 5)
     ),  # NB use 5 for IS/VEA9R, and 10 for IS/VEA3H, and 8 for GNOSIS --- corresponds to ~64K sub-zones
-    "isea7h": lambda resolution: max(
-        MIN_ISEA7H, (resolution - DEFAULT_PARENT_OFFSET)
-    )
+    "isea7h": lambda resolution: max(MIN_ISEA7H, (resolution - DEFAULT_PARENT_OFFSET)),
 }
 
 

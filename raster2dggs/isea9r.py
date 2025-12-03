@@ -27,7 +27,7 @@ from raster2dggs import __version__
     "--parent_res",
     required=False,
     type=click.Choice(list(map(str, range(const.MIN_ISEA9R, const.MAX_ISEA9R + 1)))),
-    help=const.OPTION_HELP["parent_res"]("ISEA9R", "resolution - 6"),
+    help=const.OPTION_HELP["parent_res"]("ISEA9R", "resolution - 5"),
 )
 @click.option(
     "-b",

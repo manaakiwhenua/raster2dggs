@@ -261,7 +261,6 @@ def address_boundary_issues(
         }
     )
     out_meta.index = pd.Index([], name=index_col, dtype="object")
-    print(ddf.compute(), band_cols, out_meta)
     with TqdmCallback(desc=f"Aggregating{'/compacting' if kwargs['compact'] else ''}"):
         ddf = ddf.map_partitions(
             indexer.parent_groupby,
