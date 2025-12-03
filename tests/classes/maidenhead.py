@@ -29,7 +29,9 @@ class TestMaidenhead(TestRunthrough):
             )
 
         except Exception:
-            self.fail(f"TestMaidenhead.test_maidenhead_run_geo_point: Maidenhead runthrough failed.")
+            self.fail(
+                f"TestMaidenhead.test_maidenhead_run_geo_point: Maidenhead runthrough failed."
+            )
 
     def test_maidenhead_run_geo_polygon(self):
         try:
@@ -39,4 +41,6 @@ class TestMaidenhead(TestRunthrough):
             )
 
         except Exception:
-            self.fail(f"TestMaidenhead.test_maidenhead_run_geo_polygon: Maidenhead runthrough failed.")
+            self.fail(
+                f"TestMaidenhead.test_maidenhead_run_geo_polygon: Maidenhead runthrough failed."
+            )

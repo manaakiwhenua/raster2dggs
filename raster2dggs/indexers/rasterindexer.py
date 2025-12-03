@@ -11,7 +11,7 @@ import xarray as xr
 import numpy as np
 
 from .. import constants as const
-from .. interfaces import IRasterIndexer
+from ..interfaces import IRasterIndexer
 
 
 class RasterIndexer(IRasterIndexer):
@@ -30,6 +30,12 @@ class RasterIndexer(IRasterIndexer):
         Value used across all child classes
         """
         self.dggs = dggs
+
+    def __dask_tokenize__(self):
+        """
+        Only include stable, immutable fields that define behaviour
+        """
+        return (type(self).__name__, self.dggs)
 
     def index_col(self, resolution):
         pad_width = const.zero_padding(self.dggs)
@@ -135,6 +141,7 @@ class RasterIndexer(IRasterIndexer):
             return df
         band_cols = self.band_cols(df)
         compaction_map = {}
+
         for r in range(parent_res, resolution):
             parent_cells = self.parent_cells(unprocessed_indices, r)
             parent_groups = df.loc[list(unprocessed_indices)].groupby(

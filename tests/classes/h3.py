@@ -19,7 +19,6 @@ class TestH3(TestRunthrough):
         except Exception:
             self.fail(f"TestH3.test_h3_run: H3 runthrough failed.")
 
-
     def test_h3_run_geo_point(self):
         try:
             h3(

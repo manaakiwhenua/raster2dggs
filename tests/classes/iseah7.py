@@ -1,44 +1,44 @@
 from classes.base import TestRunthrough
 from data.datapaths import *
 
-from raster2dggs.geohash import geohash
+from raster2dggs.isea7h import isea7h
 
 
-class TestGeohash(TestRunthrough):
+class TestISEA7H(TestRunthrough):
     """
-    Sends the test data file through Geohash indexing using default parameters.
+    Sends the test data file through ISEA7H indexing using default parameters.
     """
 
-    def test_geohash_run(self):
+    def test_isea7h_run(self):
         try:
-            geohash(
+            isea7h(
                 [TEST_FILE_PATH, str(TEST_OUTPUT_PATH), "-r", "6"],
                 standalone_mode=False,
             )
 
         except Exception:
-            self.fail(f"TestGeohash.test_geohash_run: Geohash runthrough failed.")
+            self.fail(f"TestISEA7H.test_isea7h_run: ISEA7H runthrough failed.")
 
-    def test_geohash_run_geo_point(self):
+    def test_isea7h_run_geo_point(self):
         try:
-            geohash(
+            isea7h(
                 [TEST_FILE_PATH, str(TEST_OUTPUT_PATH), "-r", "6", "-g", "point"],
                 standalone_mode=False,
             )
 
         except Exception:
             self.fail(
-                f"TestGeohash.test_geohash_run_geo_point: Geohash runthrough failed."
+                f"TestISEA7H.test_isea7h_run_geo_point: ISEA7H runthrough failed."
             )
 
-    def test_geohash_run_geo_polygon(self):
+    def test_isea7h_run_geo_polygon(self):
         try:
-            geohash(
+            isea7h(
                 [TEST_FILE_PATH, str(TEST_OUTPUT_PATH), "-r", "6", "-g", "polygon"],
                 standalone_mode=False,
             )
 
         except Exception:
             self.fail(
-                f"TestGeohash.test_geohash_run_geo_polygon: Geohash runthrough failed."
+                f"TestISEA7H.test_isea7h_run_geo_polygon: ISEA7H runthrough failed."
             )

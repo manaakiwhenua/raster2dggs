@@ -8,3 +8,5 @@ from classes.geohash import TestGeohash
 from classes.maidenhead import TestMaidenhead
 from classes.s2 import TestS2
 from classes.a5 import TestA5
+from classes.isea9r import TestISEA9R
+from classes.iseah7 import TestISEA7H
