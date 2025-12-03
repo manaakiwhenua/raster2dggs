@@ -17,7 +17,6 @@ import raster2dggs.constants as const
 from raster2dggs.indexers.rasterindexer import RasterIndexer
 
 
-
 class S2RasterIndexer(RasterIndexer):
     """
     Provides integration for Google's S2 DGGS.
@@ -105,7 +104,9 @@ class S2RasterIndexer(RasterIndexer):
         Implementation of interface function.
         """
         return map(
-            lambda token: s2sphere.CellId.from_token(token).parent(resolution).to_token(),
+            lambda token: s2sphere.CellId.from_token(token)
+            .parent(resolution)
+            .to_token(),
             cells,
         )
 
@@ -113,7 +114,9 @@ class S2RasterIndexer(RasterIndexer):
         """
         Implementation of interface function.
         """
-        return self.cell_to_children_size(s2sphere.CellId.from_token(parent), resolution)
+        return self.cell_to_children_size(
+            s2sphere.CellId.from_token(parent), resolution
+        )
 
     @staticmethod
     def cell_to_point(cell: str) -> shapely.geometry.Point:

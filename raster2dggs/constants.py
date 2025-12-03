@@ -7,6 +7,14 @@ MIN_GEOHASH, MAX_GEOHASH = 1, 12
 MIN_MAIDENHEAD, MAX_MAIDENHEAD = 1, 6
 MIN_S2, MAX_S2 = 0, 30
 MIN_A5, MAX_A5 = 0, 30
+MIN_ISEA9R, MAX_ISEA9R = (
+    0,
+    18,
+)  # NB correct for packing into 64 bit integer? see https://dggal.org/docs/html/dggal/Classes/DGGRS/Virtual%20Methods/getMaxDGGRSZoneLevel.html
+MIN_ISEA7H, MAX_ISEA7H = (
+    0,
+    18,
+) # NB correct?
 
 DEFAULT_NAME: str = "value"
 
@@ -33,6 +41,12 @@ DEFAULT_DGGS_PARENT_RES = {
     "maidenhead": lambda resolution: MIN_MAIDENHEAD,
     "s2": lambda resolution: max(MIN_S2, (resolution - DEFAULT_PARENT_OFFSET)),
     "a5": lambda resolution: max(MIN_A5, (resolution - DEFAULT_PARENT_OFFSET)),
+    "isea9r": lambda resolution: max(
+        MIN_ISEA9R, (resolution - 5)
+    ),  # NB use 5 for IS/VEA9R, and 10 for IS/VEA3H, and 8 for GNOSIS --- corresponds to ~64K sub-zones
+    "isea7h": lambda resolution: max(
+        MIN_ISEA7H, (resolution - DEFAULT_PARENT_OFFSET)
+    )
 }
 
 
@@ -44,6 +58,8 @@ def zero_padding(dggs: str) -> int:
         "maidenhead": MAX_MAIDENHEAD,
         "s2": MAX_S2,
         "a5": MAX_A5,
+        "isea9r": MAX_ISEA9R,
+        "isea7h": MAX_ISEA7H,
     }
     max_res = max_res_lookup.get(dggs)
     if max_res is None:

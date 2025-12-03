@@ -10,6 +10,7 @@ import raster2dggs.indexers.geohashrasterindexer as geohashrasterindexer
 import raster2dggs.indexers.maidenheadrasterindexer as maidenheadrasterindexer
 import raster2dggs.indexers.s2rasterindexer as s2rasterindexer
 import raster2dggs.indexers.a5rasterindexer as a5rasterindexer
+import raster2dggs.indexers.dggalrasterindexer as dggalrasterindexer
 
 """
 Match DGGS name to indexer class name
@@ -21,6 +22,8 @@ indexer_lookup = {
     "maidenhead": maidenheadrasterindexer.MaidenheadRasterIndexer,
     "s2": s2rasterindexer.S2RasterIndexer,
     "a5": a5rasterindexer.A5RasterIndexer,
+    "isea9r": dggalrasterindexer.ISEA9RRasterIndexer,
+    "isea7h": dggalrasterindexer.ISEA7HRasterIndexer,
 }
 
 

@@ -11,7 +11,7 @@ import xarray as xr
 import numpy as np
 
 from .. import constants as const
-from .. interfaces import IRasterIndexer
+from ..interfaces import IRasterIndexer
 
 
 class RasterIndexer(IRasterIndexer):
@@ -30,6 +30,12 @@ class RasterIndexer(IRasterIndexer):
         Value used across all child classes
         """
         self.dggs = dggs
+
+    def __dask_tokenize__(self):
+        """
+        Only include stable, immutable fields that define behaviour
+        """
+        return (type(self).__name__, self.dggs)
 
     def index_col(self, resolution):
         pad_width = const.zero_padding(self.dggs)
@@ -134,7 +140,21 @@ class RasterIndexer(IRasterIndexer):
         if not unprocessed_indices:
             return df
         band_cols = self.band_cols(df)
+        # partition_col = self.partition_col(parent_res)
         compaction_map = {}
+
+        # sub = df.loc[list(unprocessed_indices)]
+        # for parent, group in sub.groupby(partition_col, sort=False, observed=True):
+        #     if parent in compaction_map:
+        #         continue
+        #     expected = self.expected_count(parent, resolution)
+
+        #     # All band columns identical across the group?
+        #     if len(group) == expected and (group[band_cols].nunique() == 1).all():
+        #         compact_row = group.iloc[0].copy()
+        #         compact_row.name = parent  # parent becomes the new index
+        #         compaction_map[parent] = compact_row
+        #         unprocessed_indices -= set(group.index)
         for r in range(parent_res, resolution):
             parent_cells = self.parent_cells(unprocessed_indices, r)
             parent_groups = df.loc[list(unprocessed_indices)].groupby(

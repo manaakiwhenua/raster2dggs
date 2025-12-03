@@ -4,3 +4,4 @@ conda*
 .conda*
 .vscode/
 .spyproject/
+tests/data/input

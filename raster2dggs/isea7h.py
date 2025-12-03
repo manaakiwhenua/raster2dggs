@@ -3,7 +3,7 @@ import click_log
 import tempfile
 
 from pathlib import Path
-from typing import Optional, Sequence, Union
+from typing import Union
 from rasterio.enums import Resampling
 
 import raster2dggs.constants as const
@@ -19,19 +19,15 @@ from raster2dggs import __version__
     "-r",
     "--resolution",
     required=True,
-    type=click.Choice(
-        list(map(str, range(const.MIN_MAIDENHEAD, const.MAX_MAIDENHEAD + 1)))
-    ),
-    help=const.OPTION_HELP["resolution"]("Maidenhead"),
+    type=click.Choice(list(map(str, range(const.MIN_ISEA7H, const.MAX_ISEA7H + 1)))),
+    help=const.OPTION_HELP["resolution"]("ISEA7H"),
 )
 @click.option(
     "-pr",
     "--parent_res",
     required=False,
-    type=click.Choice(
-        list(map(str, range(const.MIN_MAIDENHEAD, const.MAX_MAIDENHEAD + 1)))
-    ),
-    help=const.OPTION_HELP["parent_res"]("Maidenhead", "level 1"),
+    type=click.Choice(list(map(str, range(const.MIN_ISEA7H, const.MAX_ISEA7H + 1)))),
+    help=const.OPTION_HELP["parent_res"]("ISEA7H", "resolution - 6"),
 )
 @click.option(
     "-b",
@@ -106,12 +102,12 @@ from raster2dggs import __version__
     help=const.OPTION_HELP["tempdir"],
 )
 @click.version_option(version=__version__)
-def maidenhead(
+def isea7h(
     raster_input: Union[str, Path],
     output_directory: Union[str, Path],
     resolution: str,
     parent_res: str,
-    band: Optional[Sequence[Union[int, str]]],
+    band,
     upscale: int,
     compression: str,
     threads: int,
@@ -125,7 +121,7 @@ def maidenhead(
     tempdir: Union[str, Path],
 ):
     """
-    Ingest a raster image and index it using the Maidenhead Locator System (also known as QTH Locator and IARU Locator).
+    Ingest a raster image and index it to the ISEA7H DGGRS.
 
     RASTER_INPUT is the path to input raster data; prepend with protocol like s3:// or hdfs:// for remote data.
     OUTPUT_DIRECTORY should be a directory, not a file, as it will be the write location for an Apache Parquet data store, with partitions equivalent to parent cells of target cells at a fixed offset. However, this can also be remote (use the appropriate prefix, e.g. s3://).
@@ -151,7 +147,7 @@ def maidenhead(
     )
 
     common.initial_index(
-        "maidenhead",
+        "isea7h",
         raster_input,
         output_directory,
         int(resolution),
