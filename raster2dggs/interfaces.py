@@ -11,8 +11,6 @@ import xarray as xr
 import numpy as np
 import shapely
 
-from . import constants as const
-
 
 class IRasterIndexer:
     """

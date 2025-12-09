@@ -1,7 +1,8 @@
 from classes.base import TestRunthrough
 from data.datapaths import *
+from raster2dggs.cli_factory import SPECS, make_command
 
-from raster2dggs.isea9r import isea9r
+isea9r = make_command(next(s for s in SPECS if s.name == "isea9r"))
 
 
 class TestISEA9R(TestRunthrough):

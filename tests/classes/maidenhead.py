@@ -1,7 +1,8 @@
 from classes.base import TestRunthrough
 from data.datapaths import *
+from raster2dggs.cli_factory import SPECS, make_command
 
-from raster2dggs.maidenhead import maidenhead
+maidenhead = make_command(next(s for s in SPECS if s.name == "maidenhead"))
 
 
 class TestMaidenhead(TestRunthrough):
