@@ -11,8 +11,6 @@ import xarray as xr
 import numpy as np
 import shapely
 
-from . import constants as const
-
 
 class IRasterIndexer:
     """
@@ -29,14 +27,14 @@ class IRasterIndexer:
         """
         self.dggs = dggs
 
-    def index_col(self, resolution : int) -> str:
+    def index_col(self, resolution: int) -> str:
         """
         Returns the primary DGGS index column name, with zero padding so that column
         names across a DGGS' full resolution space have the same length.
         """
         raise NotImplementedError()
 
-    def partition_col(self, parent_resolution : int) -> str:
+    def partition_col(self, parent_resolution: int) -> str:
         """
         Returns the partition DGGS index column name, with zero padding so that column
         names across a DGGS' full resolution space have the same length.
@@ -59,7 +57,7 @@ class IRasterIndexer:
     @staticmethod
     def parent_cells(cells: set, resolution: int) -> map:
         """
-        Given a set of DGGS cells, return an iterable of parent cells at given resolution 
+        Given a set of DGGS cells, return an iterable of parent cells at given resolution
         """
         raise NotImplementedError
 

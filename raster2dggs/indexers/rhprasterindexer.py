@@ -101,5 +101,8 @@ class RHPRasterIndexer(RasterIndexer):
     @staticmethod
     def cell_to_polygon(cell: str) -> shapely.geometry.Polygon:
         return shapely.Polygon(
-            tuple(coord for coord in rhpw.rhp_to_geo_boundary(cell, plane=False, dggs=WGS84_003))
+            tuple(
+                coord
+                for coord in rhpw.rhp_to_geo_boundary(cell, plane=False, dggs=WGS84_003)
+            )
         )

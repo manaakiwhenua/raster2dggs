@@ -38,12 +38,23 @@ Options:
   --help     Show this message and exit.
 
 Commands:
-  a5          Ingest a raster image and index it to the A5 DGGS.
-  geohash     Ingest a raster image and index it using the Geohash...
-  h3          Ingest a raster image and index it to the H3 DGGS.
-  maidenhead  Ingest a raster image and index it using the Maidenhead...
-  rhp         Ingest a raster image and index it to the rHEALPix DGGS.
-  s2          Ingest a raster image and index it to the S2 DGGS.
+  a5          Index raster data into the A5 DGGS
+  geohash     Index raster data into the Geohash DGGS
+  h3          Index raster data into the H3 DGGS
+  healpix     Index raster data into the HEALPix DGGS
+  isea4r      Index raster data into the ISEA4R DGGS
+  isea7h      Index raster data into the ISEA7H DGGS
+  isea9r      Index raster data into the ISEA9R DGGS
+  ivea4r      Index raster data into the IVEA4R DGGS
+  ivea7h      Index raster data into the IVEA7H DGGS
+  ivea9r      Index raster data into the IVEA9R DGGS
+  maidenhead  Index raster data into the Maidenhead DGGS
+  rhp         Index raster data into the rHEALPix DGGS
+  rtea4r      Index raster data into the RTEA9R DGGS
+  rtea7h      Index raster data into the RTEA7H DGGS
+  rtea9r      Index raster data into the RTEA9R DGGS
+  s2          Index raster data into the S2 DGGS
+
 ```
 
 ```
@@ -63,11 +74,11 @@ Usage: raster2dggs h3 [OPTIONS] RASTER_INPUT OUTPUT_DIRECTORY
 Options:
   -v, --verbosity LVL             Either CRITICAL, ERROR, WARNING, INFO or
                                   DEBUG  [default: INFO]
-  -r, --resolution [0|1|2|3|4|5|6|7|8|9|10|11|12|13|14|15]
-                                  H3 resolution to index  [required]
-  -pr, --parent_res [0|1|2|3|4|5|6|7|8|9|10|11|12|13|14|15]
+  -r, --resolution INTEGER RANGE  H3 resolution to index  [0<=x<=15; required]
+  -pr, --parent_res INTEGER RANGE
                                   H3 parent resolution to index and aggregate
-                                  to. Defaults to resolution - 6
+                                  to. Defaults to max(0, resolution - 6)
+                                  [0<=x<=15]
   -b, --band TEXT                 Band(s) to include in the output. Can
                                   specify multiple, e.g. `-b 1 -b 2 -b 4` for
                                   bands 1, 2, and 4 (all unspecified bands are
@@ -91,7 +102,7 @@ Options:
   -t, --threads INTEGER           Number of threads to use when running in
                                   parallel. The default is determined based
                                   dynamically as the total number of available
-                                  cores, minus one.  [default: 11]
+                                  cores, minus one.  [default: 19]
   -a, --aggfunc [count|mean|sum|prod|std|var|min|max|median|mode]
                                   Numpy aggregate function to apply when
                                   aggregating cell values after DGGS indexing,
@@ -116,6 +127,9 @@ Options:
                                   resolution. Compaction is not applied for
                                   cells without identical values across all
                                   bands.
+  -g, --geo [point|polygon|none]  Write output as a GeoParquet (v1.1.0) with
+                                  either point or polygon geometry.  [default:
+                                  none]
   --tempdir PATH                  Temporary data is created during the
                                   execution of this program. This parameter
                                   allows you to control where this data will
@@ -265,7 +279,7 @@ In brief, to get started:
     - If you're on Windows, `pip install gdal` may be necessary before running the subsequent commands.
     - On Linux, install GDAL 3.6+ according to your platform-specific instructions, including development headers, i.e. `libgdal-dev`.
 - Create the virtual environment with `poetry init`. This will install necessary dependencies.
-- Subsequently, the virtual environment can be re-activated with `poetry shell`.
+- Subsequently, the virtual environment can be re-activated with `poetry env activate`.
 
 If you run `poetry install`, the CLI tool will be aliased so you can simply use `raster2dggs` rather than `poetry run raster2dggs`, which is the alternative if you do not `poetry install`.
 
