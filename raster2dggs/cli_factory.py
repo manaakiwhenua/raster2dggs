@@ -17,29 +17,39 @@ class DGGS_Spec:
     pretty: str  # for help text
     min_res: int
     max_res: int
-    parent_help_default: str  # e.g. "resolution - 6"
+    default_parent_offset: int  # Chosen so as to be closest to containing 64K sub-zones
     help: Optional[str] = None
     short_help: Optional[str] = None
 
 
 SPECS: List[DGGS_Spec] = [
-    DGGS_Spec("h3", "H3", const.MIN_H3, const.MAX_H3, "resolution - 6"),
-    DGGS_Spec("rhp", "rHEALPix", const.MIN_RHP, const.MAX_RHP, "resolution - 6"),
-    DGGS_Spec(
-        "geohash", "Geohash", const.MIN_GEOHASH, const.MAX_GEOHASH, "resolution - 6"
-    ),
+    DGGS_Spec("h3", "H3", const.MIN_H3, const.MAX_H3, 6),
+    DGGS_Spec("rhp", "rHEALPix", const.MIN_RHP, const.MAX_RHP, 5),
+    DGGS_Spec("geohash", "Geohash", const.MIN_GEOHASH, const.MAX_GEOHASH, 4),
     DGGS_Spec(
         "maidenhead",
         "Maidenhead",
         const.MIN_MAIDENHEAD,
         const.MAX_MAIDENHEAD,
-        str(const.MIN_MAIDENHEAD),
+        3,
     ),
-    DGGS_Spec("s2", "S2", const.MIN_S2, const.MAX_S2, "resolution - 6"),
-    DGGS_Spec("a5", "A5", const.MIN_A5, const.MAX_A5, "resolution - 6"),
-    DGGS_Spec("isea9r", "ISEA9R", const.MIN_ISEA9R, const.MAX_ISEA9R, "resolution - 5"),
-    DGGS_Spec("isea7h", "ISEA7H", const.MIN_ISEA7H, const.MAX_ISEA7H, "resolution - 6"),
+    DGGS_Spec("s2", "S2", const.MIN_S2, const.MAX_S2, 8),
+    DGGS_Spec("a5", "A5", const.MIN_A5, const.MAX_A5, 8),
+    DGGS_Spec("isea4r", "ISEA4R", const.MIN_ISEA4R, const.MAX_ISEA4R, 8),
+    DGGS_Spec("isea9r", "ISEA9R", const.MIN_ISEA9R, const.MAX_ISEA9R, 5),
+    DGGS_Spec("isea7h", "ISEA7H", const.MIN_ISEA7H, const.MAX_ISEA7H, 6),
+    # DGGS_Spec("isea7h_z7", "ISEA7H_Z7", const.MIN_ISEA7H_Z7, const.MAX_ISEA7H_Z7, 6),
+    DGGS_Spec("ivea4r", "IVEA4R", const.MIN_IVEA4R, const.MAX_IVEA4R, 8),
+    DGGS_Spec("ivea9r", "IVEA9R", const.MIN_IVEA9R, const.MAX_IVEA9R, 5),
+    DGGS_Spec("ivea7h", "IVEA7H", const.MIN_IVEA7H, const.MAX_IVEA7H, 6),
+    # DGGS_Spec("ivea7h_z7", "IVEA7H_Z7", const.MIN_IVEA7H_Z7, const.MAX_IVEA7H_Z7, 6),
+    DGGS_Spec("rtea4r", "RTEA9R", const.MIN_RTEA4R, const.MAX_RTEA4R, 8),
+    DGGS_Spec("rtea9r", "RTEA9R", const.MIN_RTEA9R, const.MAX_RTEA9R, 5),
+    DGGS_Spec("rtea7h", "RTEA7H", const.MIN_RTEA7H, const.MAX_RTEA7H, 6),
+    DGGS_Spec("healpix", "HEALPix", const.MIN_HEALPIX, const.MAX_HEALPIX, 5),
+    # DGGS_Spec("rhealpix", "rHEALPix", const.MIN_RHEALPIX, const.MAX_RHEALPIX, 5), # Prefer rhp
 ]
+# NB use 5 for IS/VEA9R, and 10 for IS/VEA3H, and 8 for GNOSIS --- corresponds to ~64K sub-zones
 
 HELP_TEMPLATE = """
     Ingest a raster image and index it to the {pretty} DGGS.
@@ -54,7 +64,7 @@ def run_index(
     raster_input,
     output_directory,
     resolution: int,
-    parent_res,
+    parent_res: int,
     band,
     upscale: int,
     compression: str,
@@ -128,7 +138,7 @@ def make_command(spec: DGGS_Spec):
         "--parent_res",
         required=False,
         type=click.IntRange(spec.min_res, spec.max_res),
-        help=f"{spec.pretty} parent resolution to index and aggregate to. Defaults to {spec.parent_help_default}",
+        help=f"{spec.pretty} parent resolution to index and aggregate to. Defaults to max({spec.min_res}, resolution - {spec.default_parent_offset})",
     )
     @click.option(
         "-b",
@@ -222,6 +232,11 @@ def make_command(spec: DGGS_Spec):
         geo,
         tempdir,
     ):
+        parent_res: int = (
+            int(parent_res)
+            if parent_res is not None
+            else (max(spec.min_res, int(resolution) - spec.default_parent_offset))
+        )
         return run_index(
             spec.name,
             raster_input,

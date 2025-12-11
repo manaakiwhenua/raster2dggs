@@ -127,27 +127,6 @@ def assemble_kwargs(
     return kwargs
 
 
-def get_parent_res(dggs: str, parent_res: Union[None, int], resolution: int) -> int:
-    """
-    Uses a parent resolution,
-    OR,
-    Given a target resolution, returns our recommended parent resolution.
-
-    Used for intermediate re-partioning.
-    """
-    if not dggs in const.DEFAULT_DGGS_PARENT_RES.keys():
-        raise RuntimeError(
-            "Unknown dggs {dggs}) -  must be one of [ {options} ]".format(
-                dggs=dggs, options=", ".join(const.DEFAULT_DGGS_PARENT_RES.keys())
-            )
-        )
-    return (
-        int(parent_res)
-        if parent_res is not None
-        else const.DEFAULT_DGGS_PARENT_RES[dggs](resolution)
-    )
-
-
 def write_partition_as_geoparquet(
     pdf: pd.DataFrame,
     geom_func,
@@ -343,7 +322,6 @@ def initial_index(
         that addresses issues at the boundaries of raster windows.
     """
     indexer = idxfactory.indexer_instance(dggs)
-    parent_res = get_parent_res(dggs, parent_res, resolution)
     LOGGER.info(
         "Indexing %s at %s resolution %d, parent resolution %d",
         raster_input,

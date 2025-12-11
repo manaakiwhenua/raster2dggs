@@ -5,7 +5,7 @@
 from abc import abstractmethod
 from functools import reduce
 from numbers import Number
-from typing import Tuple
+from typing import List, Tuple
 
 import h3pandas  # Necessary import despite lack of explicit use
 
@@ -155,9 +155,49 @@ class DGGALRasterIndexer(RasterIndexer):
 # NB  All zones of GNOSIS Global Grid and ISEA9R have single parents, whereas ISEA3H zones have one parent if they are a centroid child, and three parents otherwise if they are a vertex child.  See dggrs.getMaxParents()
 
 
+class ISEA4RRasterIndexer(DGGALRasterIndexer):
+    """
+    A raster indexer for the ISEA4R DGGS, an equal area rhombic grid with a refinement ratio of 4 defined in the ISEA projection transformed into a 5x6 Cartesian space resulting in axis-aligned square zones.
+    """
+
+    def __init__(self, dggs: str):
+        super().__init__(dggs)
+        dggal.pydggal_setup(dggal.Application(appGlobals=globals()))
+        self._dggrs = dggal.ISEA4R()
+        self._refinementRatio = self.dggrs.getRefinementRatio()
+
+    @property
+    def dggrs(self) -> dggal.DGGRS:
+        return self._dggrs
+
+    @property
+    def refinementRatio(self) -> int:
+        return self._refinementRatio
+
+
+class IVEA4RRasterIndexer(DGGALRasterIndexer):
+    """
+    A raster indexer for the IVEA4R DGGS, an equal area rhombic grid with a refinement ratio of 4 defined in the IVEA projection transformed into a 5x6 Cartesian space resulting in axis-aligned square zones, using the same global indexing and sub-zone ordering as for ISEA4R.
+    """
+
+    def __init__(self, dggs: str):
+        super().__init__(dggs)
+        dggal.pydggal_setup(dggal.Application(appGlobals=globals()))
+        self._dggrs = dggal.IVEA4R()
+        self._refinementRatio = self.dggrs.getRefinementRatio()
+
+    @property
+    def dggrs(self) -> dggal.DGGRS:
+        return self._dggrs
+
+    @property
+    def refinementRatio(self) -> int:
+        return self._refinementRatio
+
+
 class ISEA9RRasterIndexer(DGGALRasterIndexer):
     """
-    A raster indexer for the ISEA9R DGGS, an axis-aligned and equal-area DGGH based on the Icosahedral Snyder Equal-Area (ISEA) planar projection using rhombuses with a refinement ratio of 9.
+    A raster indexer for the ISEA9R DGGS, an equal area rhombic grid with a refinement ratio of 9 defined in the ISEA projection transformed into a 5x6 Cartesian space resulting in axis-aligned square zones.
     """
 
     def __init__(self, dggs: str):
@@ -175,15 +215,215 @@ class ISEA9RRasterIndexer(DGGALRasterIndexer):
         return self._refinementRatio
 
 
+class IVEA9RRasterIndexer(DGGALRasterIndexer):
+    """
+    A raster indexer for the ISEA9R DGGS, an equal area rhombic grid with a refinement ratio of 9 defined in the IVEA projection transformed into a 5x6 Cartesian space resulting in axis-aligned square zones.
+    """
+
+    def __init__(self, dggs: str):
+        super().__init__(dggs)
+        dggal.pydggal_setup(dggal.Application(appGlobals=globals()))
+        self._dggrs = dggal.IVEA9R()
+        self._refinementRatio = self.dggrs.getRefinementRatio()
+
+    @property
+    def dggrs(self) -> dggal.DGGRS:
+        return self._dggrs
+
+    @property
+    def refinementRatio(self) -> int:
+        return self._refinementRatio
+
+
 class ISEA7HRasterIndexer(DGGALRasterIndexer):
     """
-    A raster indexer for the ISEA7H DGGS, an equal-area hexagonal grid with a refinement ratio of 7 defined in the ISEA projection.
+    A raster indexer for the ISEA7H DGGS, an equal area hexagonal grid with a refinement ratio of 7 defined in the ISEA projection.
     """
 
     def __init__(self, dggs: str):
         super().__init__(dggs)
         dggal.pydggal_setup(dggal.Application(appGlobals=globals()))
         self._dggrs = dggal.ISEA7H()
+        self._refinementRatio = self.dggrs.getRefinementRatio()
+
+    @property
+    def dggrs(self) -> dggal.DGGRS:
+        return self._dggrs
+
+    @property
+    def refinementRatio(self) -> int:
+        return self._refinementRatio
+
+
+class IVEA7HRasterIndexer(DGGALRasterIndexer):
+    """
+    A raster indexer for the IVEA7H DGGS, an equal area hexagonal grid with a refinement ratio of 7 defined in the ISEA projection.
+    """
+
+    def __init__(self, dggs: str):
+        super().__init__(dggs)
+        dggal.pydggal_setup(dggal.Application(appGlobals=globals()))
+        self._dggrs = dggal.IVEA7H()
+        self._refinementRatio = self.dggrs.getRefinementRatio()
+
+    @property
+    def dggrs(self) -> dggal.DGGRS:
+        return self._dggrs
+
+    @property
+    def refinementRatio(self) -> int:
+        return self._refinementRatio
+
+
+class ISEA7HZ7RasterIndexer(DGGALRasterIndexer):
+    """
+    A raster indexer for the ISEA7H DGGS, which has the same Discrete Global Grid Hierarchy (DGGH) and sub-zone order as ISEA7H, but using the Z7 indexing for interoperability with DGGRID and IGEO7.
+    """
+
+    def __init__(self, dggs: str):
+        super().__init__(dggs)
+        dggal.pydggal_setup(dggal.Application(appGlobals=globals()))
+        self._dggrs = dggal.ISEA7H_Z7()
+        self._refinementRatio = self.dggrs.getRefinementRatio()
+
+    @property
+    def dggrs(self) -> dggal.DGGRS:
+        return self._dggrs
+
+    @property
+    def refinementRatio(self) -> int:
+        return self._refinementRatio
+
+
+class IVEA7HZ7RasterIndexer(DGGALRasterIndexer):
+    """
+    A raster indexer for the ISEA7H DGGS, which has the same Discrete Global Grid Hierarchy (DGGH) and sub-zone order as ISEA7H, but using the Z7 indexing for interoperability with DGGRID and IGEO7.
+    """
+
+    def __init__(self, dggs: str):
+        super().__init__(dggs)
+        dggal.pydggal_setup(dggal.Application(appGlobals=globals()))
+        self._dggrs = dggal.IVEA7H_Z7()
+        self._refinementRatio = self.dggrs.getRefinementRatio()
+
+    @property
+    def dggrs(self) -> dggal.DGGRS:
+        return self._dggrs
+
+    @property
+    def refinementRatio(self) -> int:
+        return self._refinementRatio
+
+
+class RTEA4RRasterIndexer(DGGALRasterIndexer):
+    """
+    A raster indexer for the RTEA4R DGGS, an equal-area rhombic grid with a refinement ratio of 4 defined in the RTEA projection transformed into a 5x6 Cartesian space resulting in axis-aligned square zones, using the same global indexing and sub-zone ordering as for ISEA4R.
+    """
+
+    def __init__(self, dggs: str):
+        super().__init__(dggs)
+        dggal.pydggal_setup(dggal.Application(appGlobals=globals()))
+        self._dggrs = dggal.RTEA4R()
+        self._refinementRatio = self.dggrs.getRefinementRatio()
+
+    @property
+    def dggrs(self) -> dggal.DGGRS:
+        return self._dggrs
+
+    @property
+    def refinementRatio(self) -> int:
+        return self._refinementRatio
+
+
+class RTEA9RRasterIndexer(DGGALRasterIndexer):
+    """
+    A raster indexer for the RTEA9R DGGS, an equal-area rhombic grid with a refinement ratio of 9 defined in the RTEA projection transformed into a 5x6 Cartesian space resulting in axis-aligned square zones, using the same global indexing and sub-zone ordering as for ISEA9R.
+    """
+
+    def __init__(self, dggs: str):
+        super().__init__(dggs)
+        dggal.pydggal_setup(dggal.Application(appGlobals=globals()))
+        self._dggrs = dggal.RTEA9R()
+        self._refinementRatio = self.dggrs.getRefinementRatio()
+
+    @property
+    def dggrs(self) -> dggal.DGGRS:
+        return self._dggrs
+
+    @property
+    def refinementRatio(self) -> int:
+        return self._refinementRatio
+
+
+class RTEA7HRasterIndexer(DGGALRasterIndexer):
+    """
+    A raster indexer for the RTEA7H DGGS, an equal-area hexagonal grid with a refinement ratio of 7 defined in the RTEA projection transformed using the same global indexing and sub-zone ordering as for ISEA7H.
+    """
+
+    def __init__(self, dggs: str):
+        super().__init__(dggs)
+        dggal.pydggal_setup(dggal.Application(appGlobals=globals()))
+        self._dggrs = dggal.RTEA7H()
+        self._refinementRatio = self.dggrs.getRefinementRatio()
+
+    @property
+    def dggrs(self) -> dggal.DGGRS:
+        return self._dggrs
+
+    @property
+    def refinementRatio(self) -> int:
+        return self._refinementRatio
+
+
+class RTEA7HZ7RasterIndexer(DGGALRasterIndexer):
+    """
+    A raster indexer for the RTEA7H DGGS, an equal-area hexagonal grid with a refinement ratio of 7 defined in the RTEA projection transformed using the same global indexing and sub-zone ordering as for ISEA7H.
+    """
+
+    def __init__(self, dggs: str):
+        super().__init__(dggs)
+        dggal.pydggal_setup(dggal.Application(appGlobals=globals()))
+        self._dggrs = dggal.RTEA7H_Z7()
+        self._refinementRatio = self.dggrs.getRefinementRatio()
+
+    @property
+    def dggrs(self) -> dggal.DGGRS:
+        return self._dggrs
+
+    @property
+    def refinementRatio(self) -> int:
+        return self._refinementRatio
+
+
+class HEALPixRasterIndexer(DGGALRasterIndexer):
+    """
+    A raster indexer for the HEALPix DGGS, an equal area and axis-aligned grid with square zones topology and a refinement ratio of 4 defined in the HEALPix projection, using configuration Nφ/H = 4, Nθ/K = 3 (same as default PROJ implementation), the new indexing described in OGC API - DGGS Annex B, and scanline-based sub-zone ordering.
+    """
+
+    def __init__(self, dggs: str):
+        super().__init__(dggs)
+        dggal.pydggal_setup(dggal.Application(appGlobals=globals()))
+        self._dggrs = dggal.HEALPix()
+        self._refinementRatio = self.dggrs.getRefinementRatio()
+
+    @property
+    def dggrs(self) -> dggal.DGGRS:
+        return self._dggrs
+
+    @property
+    def refinementRatio(self) -> int:
+        return self._refinementRatio
+
+
+class RHEALPixRasterIndexer(DGGALRasterIndexer):
+    """
+    A raster indexer for the HEALPix DGGS, an equal area and axis-aligned grid with square zones topology and a refinement ratio of 9 defined in the rHEALPix projection using 50° E prime meridian (equivalent to PROJ implementation with parameters +proj=rhealpix +lon_0=50 +ellps=WGS84), the original hierarchical indexing, and scanline-based sub-zone ordering.
+    """
+
+    def __init__(self, dggs: str):
+        super().__init__(dggs)
+        dggal.pydggal_setup(dggal.Application(appGlobals=globals()))
+        self._dggrs = dggal.rHEALPix()
         self._refinementRatio = self.dggrs.getRefinementRatio()
 
     @property

@@ -22,8 +22,20 @@ indexer_lookup = {
     "maidenhead": maidenheadrasterindexer.MaidenheadRasterIndexer,
     "s2": s2rasterindexer.S2RasterIndexer,
     "a5": a5rasterindexer.A5RasterIndexer,
+    "isea4r": dggalrasterindexer.ISEA4RRasterIndexer,
     "isea9r": dggalrasterindexer.ISEA9RRasterIndexer,
     "isea7h": dggalrasterindexer.ISEA7HRasterIndexer,
+    "isea7h_z7": dggalrasterindexer.ISEA7HZ7RasterIndexer,
+    "ivea4r": dggalrasterindexer.IVEA4RRasterIndexer,
+    "ivea9r": dggalrasterindexer.IVEA9RRasterIndexer,
+    "ivea7h": dggalrasterindexer.IVEA7HRasterIndexer,
+    "ivea7h_z7": dggalrasterindexer.IVEA7HZ7RasterIndexer,
+    "rtea4r": dggalrasterindexer.RTEA4RRasterIndexer,
+    "rtea9r": dggalrasterindexer.RTEA9RRasterIndexer,
+    "rtea7h": dggalrasterindexer.RTEA7HRasterIndexer,
+    "rtea7h_z7": dggalrasterindexer.RTEA7HZ7RasterIndexer,
+    "healpix": dggalrasterindexer.HEALPixRasterIndexer,
+    "rhealpix": dggalrasterindexer.RHEALPixRasterIndexer,
 }
 
 
