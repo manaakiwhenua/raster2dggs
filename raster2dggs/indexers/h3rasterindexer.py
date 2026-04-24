@@ -2,19 +2,11 @@
 @author: ndemaio
 """
 
-from numbers import Number
-from typing import Tuple
-
 import h3pandas  # Necessary import despite lack of explicit use
 
 import h3 as h3py
 import pandas as pd
-import pyarrow as pa
-import xarray as xr
-import numpy as np
 import shapely
-
-import raster2dggs.constants as const
 
 from raster2dggs.indexers.rasterindexer import RasterIndexer
 
@@ -24,41 +16,11 @@ class H3RasterIndexer(RasterIndexer):
     Provides integration for Uber's H3 DGGS.
     """
 
-    def index_func(
-        self,
-        sdf: xr.DataArray,
-        resolution: int,
-        parent_res: int,
-        nodata: Number = np.nan,
-        band_labels: Tuple[str] = None,
-    ) -> pa.Table:
-        """
-        Index a raster window to H3.
-        Subsequent steps are necessary to resolve issues at the boundaries of windows.
-        If windows are very small, or in strips rather than blocks, processing may be slower
-        than necessary and the recommendation is to write different windows in the source raster.
-
-        Implementation of interface function.
-        """
-        sdf: pd.DataFrame = (
-            sdf.to_dataframe().drop(columns=["spatial_ref"]).reset_index()
-        )
-        subset: pd.DataFrame = sdf.dropna()
-        subset = subset[subset.value != nodata]
-        subset = pd.pivot_table(
-            subset, values=const.DEFAULT_NAME, index=["x", "y"], columns=["band"]
-        ).reset_index()
-        # Primary H3 index
-        h3index = subset.h3.geo_to_h3(resolution, lat_col="y", lng_col="x").drop(
+    def _index_window(self, wide, resolution: int, parent_res: int):
+        h3df = wide.h3.geo_to_h3(resolution, lat_col="y", lng_col="x").drop(
             columns=["x", "y"]
         )
-        # Secondary (parent) H3 index, used later for partitioning
-        h3index = h3index.h3.h3_to_parent(parent_res).reset_index()
-        # Renaming columns to actual band labels
-        bands = sdf["band"].unique()
-        columns = dict(zip(bands, band_labels))
-        h3index = h3index.rename(columns=columns)
-        return pa.Table.from_pandas(h3index)
+        return h3df.h3.h3_to_parent(parent_res).reset_index()
 
     @staticmethod
     def cell_to_children_size(cell, desired_resolution: int) -> int:
