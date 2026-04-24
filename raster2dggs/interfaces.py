@@ -3,7 +3,7 @@
 """
 
 from numbers import Number
-from typing import Callable, Tuple, Union
+from typing import Callable, Tuple, Union, Optional
 
 import pandas as pd
 import pyarrow as pa
@@ -76,6 +76,8 @@ class IRasterIndexer:
         parent_res: int,
         nodata: Number = np.nan,
         band_labels: Tuple[str] = None,
+        nodata_policy: str = "skip",
+        emit_nodata_value: Optional[Number] = None,
     ) -> pa.Table:
         """
         Function for primary indexation.

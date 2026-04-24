@@ -96,6 +96,22 @@ Options:
                                   numeric indices (1-based indexing) or string
                                   band labels (if present in the input), e.g.
                                   -b B02 -b B07 -b B12.
+  --nodata_policy [skip|emit]     'skip' omits nodata cells from output
+                                  (default). 'emit' includes them, writing the
+                                  source raster nodata value (or
+                                  --emit_nodata_value if set). Note: non-NaN
+                                  emitted values participate in cell
+                                  aggregation (see -a/--aggfunc); if this is
+                                  undesired, ensure your source nodata is NaN
+                                  or override with --emit_nodata_value.
+                                  [default: skip]
+  --emit_nodata_value NUMBER      Override the value written for nodata cells
+                                  when --nodata_policy=emit. If omitted, the
+                                  source raster nodata value is used (NaN if
+                                  none is defined). Pass 'nan' to explicitly
+                                  emit NaN. Coerced to the output dtype. Note:
+                                  non-NaN values participate in cell
+                                  aggregation (see -a/--aggfunc).
   -u, --upscale INTEGER           Upscaling factor, used to upsample input
                                   data on the fly; useful when the raster
                                   resolution is lower than the target DGGS
@@ -304,8 +320,7 @@ Please run `black .` before committing.
 Tests are included. To run them, set up a poetry environment, then follow these instructons:
 
 ```bash
-cd tests
-python ./test_raster2dggs.py
+python tests/test_raster2dggs.py
 ```
 
 Test data are included at `tests/data/`.
