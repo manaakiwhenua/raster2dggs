@@ -289,7 +289,7 @@ dependencies:
   - gdal>=3.8.5
   - pyproj=3.6.*
   - pip:
-    - raster2dggs[all]>=0.8.0
+    - raster2dggs[all]>=0.9.0
 ```
 
 <!-- TODO: package raster2dggs and make available on Conda without pip -->
@@ -357,13 +357,13 @@ raster2dggs h3 --resolution 13 --compression zstd --resampling nearest -a median
   title={{raster2dggs}},
   author={Ardo, James and Law, Richard and Di Maio, Nicoletta},
   url={https://github.com/manaakiwhenua/raster2dggs},
-  version={0.8.0},
+  version={0.9.0},
   date={2025-01-28}
 }
 ```
 
 APA/Harvard
 
-> Ardo, J., Law, R., & Di Maio, N. (2025). raster2dggs (0.8.0) [Computer software]. https://github.com/manaakiwhenua/raster2dggs
+> Ardo, J., Law, R., & Di Maio, N. (2025). raster2dggs (0.9.0) [Computer software]. https://github.com/manaakiwhenua/raster2dggs
 
 [![manaakiwhenua-standards](https://github.com/manaakiwhenua/raster2dggs/workflows/manaakiwhenua-standards/badge.svg)](https://github.com/manaakiwhenua/manaakiwhenua-standards)
