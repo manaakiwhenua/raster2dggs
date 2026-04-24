@@ -305,6 +305,8 @@ def initial_index(
     parent_res: Union[None, int],
     warp_args: dict,
     bands: Optional[Sequence[Union[int, str]]] = None,
+    nodata_policy: str = "skip",
+    emit_nodata_value: Optional[Union[int, float]] = None,
     **kwargs,
 ) -> Path:
     """
@@ -402,7 +404,7 @@ def initial_index(
                     da: xr.Dataset = rioxarray.open_rasterio(
                         vrt,
                         lock=dask.utils.SerializableLock(),
-                        masked=True,
+                        masked=False,
                         default_name=const.DEFAULT_NAME,
                     ).chunk(**{"y": "auto", "x": "auto"})
 
@@ -435,6 +437,8 @@ def initial_index(
                             parent_res,
                             vrt.nodata,
                             band_labels=selected_labels,
+                            nodata_policy=nodata_policy,
+                            emit_nodata_value=emit_nodata_value,
                         )
 
                         partition_col = indexer.partition_col(parent_res)

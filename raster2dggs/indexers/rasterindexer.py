@@ -3,7 +3,7 @@
 """
 
 from numbers import Number
-from typing import Callable, Tuple, Union
+from typing import Callable, Tuple, Union, Optional
 
 import pandas as pd
 import pyarrow as pa
@@ -12,6 +12,24 @@ import numpy as np
 
 from .. import constants as const
 from ..interfaces import IRasterIndexer
+
+
+def _is_nan(v) -> bool:
+    try:
+        return bool(np.isnan(v))
+    except Exception:
+        return False
+
+
+def _mask_is_nodata(series: pd.Series, nodata) -> pd.Series:
+    """Return boolean mask where True means the pixel is nodata."""
+    if nodata is None:
+        return pd.Series(False, index=series.index)
+    if _is_nan(nodata):
+        return series.isna()
+    else:
+        # Sentinel nodata: also treat unexpected NaNs as nodata
+        return series.isna() | (series == nodata)
 
 
 class RasterIndexer(IRasterIndexer):
@@ -75,9 +93,47 @@ class RasterIndexer(IRasterIndexer):
         parent_res: int,
         nodata: Number = np.nan,
         band_labels: Tuple[str] = None,
+        nodata_policy: str = "skip",
+        emit_nodata_value: Optional[Number] = None,
     ) -> pa.Table:
+        sdf: pd.DataFrame = (
+            sdf.to_dataframe().drop(columns=["spatial_ref"]).reset_index()
+        )
+        nodata_mask = _mask_is_nodata(sdf[const.DEFAULT_NAME], nodata)
+        if nodata_policy.lower() == "skip":
+            sdf = sdf[~nodata_mask].copy()
+        elif nodata_policy.lower() == "emit":
+            sdf = sdf.copy()
+            fill_value = emit_nodata_value if emit_nodata_value is not None else nodata
+            if pd.isna(fill_value):
+                if pd.api.types.is_integer_dtype(sdf[const.DEFAULT_NAME]):
+                    sdf[const.DEFAULT_NAME] = sdf[const.DEFAULT_NAME].astype(float)
+                sdf.loc[nodata_mask, const.DEFAULT_NAME] = np.nan
+            else:
+                dtype = sdf[const.DEFAULT_NAME].dtype
+                sdf.loc[nodata_mask, const.DEFAULT_NAME] = dtype.type(fill_value)
+        else:
+            raise ValueError(f"Unknown nodata policy: {nodata_policy}")
+        wide = pd.pivot_table(
+            sdf, values=const.DEFAULT_NAME, index=["x", "y"], columns=["band"]
+        ).reset_index()
+        wide = self._index_window(wide, resolution, parent_res)
+        bands = sorted(sdf["band"].unique())
+        if band_labels is None:
+            band_labels = tuple(str(b) for b in bands)
+        wide = wide.rename(columns=dict(zip(bands, band_labels)))
+        return pa.Table.from_pandas(wide, preserve_index=False)
+
+    def _index_window(
+        self,
+        wide: pd.DataFrame,
+        resolution: int,
+        parent_res: int,
+    ) -> pd.DataFrame:
         """
-        Needs to be implemented by child class
+        Receives a pivoted wide DataFrame with x/y columns and band value columns.
+        Must return it with x/y dropped and DGGS cell-index + parent-partition columns added.
+        Needs to be implemented by child class.
         """
         raise NotImplementedError()
 
@@ -154,7 +210,7 @@ class RasterIndexer(IRasterIndexer):
                     continue
                 expected_count = self.expected_count(parent, resolution)
                 if len(group) == expected_count and all(
-                    group[band_cols].nunique() == 1
+                    group[band_cols].nunique(dropna=False) == 1
                 ):
                     compact_row = group.iloc[0]
                     compact_row.name = parent  # Rename the index to the parent cell

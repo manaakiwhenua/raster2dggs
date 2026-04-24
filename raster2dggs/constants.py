@@ -92,6 +92,7 @@ DEFAULTS = {
     "resampling": "average",
     "geo": "none",
     "tempdir": tempfile.tempdir,
+    "nodata_policy": "skip",
 }
 
 
@@ -141,3 +142,5 @@ AGGFUNC_OPTIONS = [
 ]
 
 GEOM_TYPES = ["point", "polygon", "none"]
+
+NODATA_POLICY_OPTIONS = ["skip", "emit"]

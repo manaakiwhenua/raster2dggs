@@ -35,7 +35,7 @@ SPECS: List[DGGS_Spec] = [
         3,
     ),
     DGGS_Spec("s2", "S2", const.MIN_S2, const.MAX_S2, 8),
-    DGGS_Spec("a5", "A5", const.MIN_A5, const.MAX_A5, 8),
+    DGGS_Spec("a5", "A5", const.MIN_A5, const.MAX_A5, 8), # TODO slow, replace with a5_fast
     DGGS_Spec("isea4r", "ISEA4R", const.MIN_ISEA4R, const.MAX_ISEA4R, 8),
     DGGS_Spec("isea9r", "ISEA9R", const.MIN_ISEA9R, const.MAX_ISEA9R, 5),
     DGGS_Spec("isea3h", "ISEA3H", const.MIN_ISEA3H, const.MAX_ISEA3H, 10),
@@ -51,7 +51,7 @@ SPECS: List[DGGS_Spec] = [
     DGGS_Spec("rtea7h", "RTEA7H", const.MIN_RTEA7H, const.MAX_RTEA7H, 6),
     # DGGS_Spec("rtea7h_z7", "RTEA7H_Z7", const.MIN_RTEA7H_Z7, const.MAX_RTEA7H_Z7, 6),
     DGGS_Spec("healpix", "HEALPix", const.MIN_HEALPIX, const.MAX_HEALPIX, 5),
-    # DGGS_Spec("rhealpix", "rHEALPix", const.MIN_RHEALPIX, const.MAX_RHEALPIX, 5), # Prefer rhp
+    DGGS_Spec("rhealpix", "rHEALPix", const.MIN_RHEALPIX, const.MAX_RHEALPIX, 5), # Prefer rhp
 ]
 # NB use 5 for IS/VEA9R, and 10 for IS/VEA3H, and 8 for GNOSIS --- corresponds to ~64K sub-zones
 
@@ -70,6 +70,8 @@ def run_index(
     resolution: int,
     parent_res: int,
     band,
+    nodata_policy: str,
+    emit_nodata_value: Optional[float],
     upscale: int,
     compression: str,
     threads: int,
@@ -110,6 +112,8 @@ def run_index(
         parent_res,
         warp_args,
         band,
+        nodata_policy,
+        emit_nodata_value,
         **kwargs,
     )
 
@@ -148,6 +152,31 @@ def make_command(spec: DGGS_Spec):
         required=False,
         multiple=True,
         help="Band(s) to include in the output. Can specify multiple, e.g. `-b 1 -b 2 -b 4` for bands 1, 2, and 4 (all unspecified bands are ignored). If unused, all bands are included in the output (this is the default behaviour). Bands can be specified as numeric indices (1-based indexing) or string band labels (if present in the input), e.g. -b B02 -b B07 -b B12.",
+    )
+    @click.option(
+        "--nodata_policy",
+        type=click.Choice(const.NODATA_POLICY_OPTIONS, case_sensitive=False),
+        default=const.DEFAULTS["nodata_policy"],
+        show_default=True,
+        help=(
+            "'skip' omits nodata cells from output (default). "
+            "'emit' includes them, writing the source raster nodata value (or --emit_nodata_value if set). "
+            "Note: non-NaN emitted values participate in cell aggregation (see -a/--aggfunc); "
+            "if this is undesired, ensure your source nodata is NaN or override with --emit_nodata_value."
+        ),
+    )
+    @click.option(
+        "--emit_nodata_value",
+        default=None,
+        type=float,
+        metavar="NUMBER",
+        help=(
+            "Override the value written for nodata cells when --nodata_policy=emit. "
+            "If omitted, the source raster nodata value is used (NaN if none is defined). "
+            "Pass 'nan' to explicitly emit NaN. "
+            "Coerced to the output dtype. "
+            "Note: non-NaN values participate in cell aggregation (see -a/--aggfunc)."
+        ),
     )
     @click.option(
         "-u",
@@ -222,6 +251,8 @@ def make_command(spec: DGGS_Spec):
         resolution,
         parent_res,
         band,
+        nodata_policy,
+        emit_nodata_value,
         upscale,
         compression,
         threads,
@@ -246,6 +277,8 @@ def make_command(spec: DGGS_Spec):
             resolution,
             parent_res,
             band,
+            nodata_policy,
+            emit_nodata_value,
             upscale,
             compression,
             threads,

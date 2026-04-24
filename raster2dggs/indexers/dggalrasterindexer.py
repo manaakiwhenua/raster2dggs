@@ -3,18 +3,12 @@
 """
 
 from abc import abstractmethod
-from functools import reduce, lru_cache
-from numbers import Number
-from typing import List, Tuple
+from functools import lru_cache
+from typing import List
 
 import dggal
 import pandas as pd
-import pyarrow as pa
-import xarray as xr
-import numpy as np
 import shapely
-
-import raster2dggs.constants as const
 
 from raster2dggs.indexers.rasterindexer import RasterIndexer
 
@@ -62,52 +56,22 @@ class DGGALRasterIndexer(RasterIndexer):
             parent = self._get_parent(int(parent))
         return parent
 
-    def index_func(
-        self,
-        sdf: xr.DataArray,
-        resolution: int,
-        parent_res: int,
-        nodata: Number = np.nan,
-        band_labels: Tuple[str] = None,
-    ) -> pa.Table:
-        """
-        Index a raster window to a DGGRS.
-        Subsequent steps are necessary to resolve issues at the boundaries of windows.
-        If windows are very small, or in strips rather than blocks, processing may be slower
-        than necessary and the recommendation is to write different windows in the source raster.
-
-        Implementation of interface function.
-        """
-        sdf: pd.DataFrame = (
-            sdf.to_dataframe().drop(columns=["spatial_ref"]).reset_index()
-        )
-        subset: pd.DataFrame = sdf.dropna()
-        subset = subset[subset.value != nodata]
-        subset = pd.pivot_table(
-            subset, values=const.DEFAULT_NAME, index=["x", "y"], columns=["band"]
-        ).reset_index()
-        # Primary DGGSRS index
+    def _index_window(self, wide, resolution: int, parent_res: int):
         cells = [
             self.dggrs.getZoneFromWGS84Centroid(resolution, dggal.GeoPoint(lon, lat))
-            for lon, lat in zip(subset["y"], subset["x"])
+            for lon, lat in zip(wide["y"], wide["x"])
         ]  # Vectorised
         dggrs_parent = [
             self._get_ancestor(zone, resolution - parent_res) for zone in cells
         ]
-        subset = subset.drop(columns=["x", "y"])
-        index_col = self.index_col(resolution)
-        subset[index_col] = pd.Series(
-            map(self.dggrs.getZoneTextID, cells), index=subset.index
+        wide = wide.drop(columns=["x", "y"])
+        wide[self.index_col(resolution)] = pd.Series(
+            map(self.dggrs.getZoneTextID, cells), index=wide.index
         )
-        partition_col = self.partition_col(parent_res)
-        subset[partition_col] = pd.Series(
-            map(self.dggrs.getZoneTextID, dggrs_parent), index=subset.index
+        wide[self.partition_col(parent_res)] = pd.Series(
+            map(self.dggrs.getZoneTextID, dggrs_parent), index=wide.index
         )
-        # Rename bands
-        bands = sdf["band"].unique()
-        columns = dict(zip(bands, band_labels))
-        subset = subset.rename(columns=columns)
-        return pa.Table.from_pandas(subset)
+        return wide
 
     def cell_to_children_size(self, cell: str, desired_resolution: int) -> int:
         """

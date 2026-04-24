@@ -2,20 +2,12 @@
 @author: ndemaio
 """
 
-from numbers import Number
-from typing import Tuple
-
 import rhppandas  # Necessary import despite lack of explicit use
 
 import rhealpixdggs.rhp_wrappers as rhpw
 import pandas as pd
-import pyarrow as pa
-import xarray as xr
-import numpy as np
 import shapely
 from rhealpixdggs.dggs import WGS84_003
-
-import raster2dggs.constants as const
 
 from raster2dggs.indexers.rasterindexer import RasterIndexer
 
@@ -25,41 +17,11 @@ class RHPRasterIndexer(RasterIndexer):
     Provides integration for MWLR's rHEALPix DGGS.
     """
 
-    def index_func(
-        self,
-        sdf: xr.DataArray,
-        resolution: int,
-        parent_res: int,
-        nodata: Number = np.nan,
-        band_labels: Tuple[str] = None,
-    ) -> pa.Table:
-        """
-        Index a raster window to rHEALPix.
-        Subsequent steps are necessary to resolve issues at the boundaries of windows.
-        If windows are very small, or in strips rather than blocks, processing may be slower
-        than necessary and the recommendation is to write different windows in the source raster.
-
-        Implementation of interface function.
-        """
-        sdf: pd.DataFrame = (
-            sdf.to_dataframe().drop(columns=["spatial_ref"]).reset_index()
-        )
-        subset: pd.DataFrame = sdf.dropna()
-        subset = subset[subset.value != nodata]
-        subset = pd.pivot_table(
-            subset, values=const.DEFAULT_NAME, index=["x", "y"], columns=["band"]
-        ).reset_index()
-        # Primary rHEALPix index
-        rhpindex = subset.rhp.geo_to_rhp(resolution, lat_col="y", lng_col="x").drop(
+    def _index_window(self, wide, resolution: int, parent_res: int):
+        rhpdf = wide.rhp.geo_to_rhp(resolution, lat_col="y", lng_col="x").drop(
             columns=["x", "y"]
         )
-        # Secondary (parent) rHEALPix index, used later for partitioning
-        rhpindex = rhpindex.rhp.rhp_to_parent(parent_res).reset_index()
-        # Renaming columns to actual band labels
-        bands = sdf["band"].unique()
-        columns = dict(zip(bands, band_labels))
-        rhpindex = rhpindex.rename(columns=columns)
-        return pa.Table.from_pandas(rhpindex)
+        return rhpdf.rhp.rhp_to_parent(parent_res).reset_index()
 
     @staticmethod
     def cell_to_children_size(cell, desired_resolution: int) -> int:
