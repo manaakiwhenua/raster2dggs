@@ -115,8 +115,8 @@ def write_geotiff(path, data, crs, transform, nodata=None, dtype=None, tags=None
         "compress": "deflate",
         "predictor": 2 if np.issubdtype(np.dtype(dtype), np.floating) else 1,
         "tiled": True,
-        "blockxsize": 256 if w >= 256 else w,
-        "blockysize": 256 if h >= 256 else h,
+        "blockxsize": max(16, (min(w, 256) // 16) * 16),
+        "blockysize": max(16, (min(h, 256) // 16) * 16),
     }
     if nodata is not None:
         profile["nodata"] = nodata
@@ -306,6 +306,37 @@ def make_zone_ids_laea(outdir, rng):
     write_geotiff(
         path, zones, crs, transform, nodata=nodata, dtype="uint16",
         tags={"SEMANTICS": "piecewise_constant", "SUGGESTED_TRANSFER": "overlay_mode|overlay_weighted(fractions)"}
+    )
+
+
+def make_multiband_per_band_nodata(outdir, rng):
+    """
+    4-band float32 raster where each band has nodata at *different* pixels.
+    Specifically exercises the case where a pixel that is nodata in one band
+    is valid in another, to verify that per-band nodata is handled correctly
+    during DGGS indexing (step 1 pivot and step 2 aggregation).
+    CRS: WGS84 (EPSG:4326), New Zealand region.
+    """
+    crs = CRS.from_epsg(4326)
+    w, h = 120, 120
+    res = 0.001  # ~100 m at this latitude
+    transform = from_origin(174.0, -41.0, res, res)
+
+    nodata = np.float32(-9999.0)
+    bands = []
+    for _ in range(4):
+        field = nlm_fractal((h, w), rng, octaves=5, persistence=0.55)
+        field = (10.0 + 90.0 * field).astype(np.float32)  # values in [10, 100]
+        # Independent NLM mask per band so nodata locations differ across bands
+        mask = nlm_fractal((h, w), rng, octaves=4, persistence=0.65) > 0.75
+        field[mask] = nodata
+        bands.append(field)
+
+    data = np.stack(bands, axis=0)  # (4, h, w)
+    path = os.path.join(outdir, "multiband_per_band_nodata_wgs84.tif")
+    write_geotiff(
+        path, data, crs, transform, nodata=nodata, dtype="float32",
+        tags={"SEMANTICS": "multi_band_test", "NOTE": "per-band nodata at different pixels"},
     )
 
 
