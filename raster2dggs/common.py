@@ -45,6 +45,86 @@ class ParentResolutionException(Exception):
     pass
 
 
+def compute_pixel_area_m2(
+    raster_input, warp_args: dict
+) -> tuple[float, float, float]:
+    """
+    Open the raster (warped to WGS84) and return (pixel_area_m2, center_lat, center_lon).
+    pixel_area_m2 is the mean pixel area: bounding-box geodesic area divided by pixel count.
+    """
+    with rio.Env(CHECK_WITH_INVERT_PROJ=True):
+        with rio.open(raster_input, mode="r", sharing=False) as src:
+            with WarpedVRT(src, src_crs=src.crs, **warp_args) as vrt:
+                bounds = vrt.bounds
+                width, height = vrt.width, vrt.height
+
+    bbox = shapely.geometry.box(bounds.left, bounds.bottom, bounds.right, bounds.top)
+    area_m2, _ = pyproj.Geod(ellps="WGS84").geometry_area_perimeter(bbox)
+    pixel_area_m2 = abs(area_m2) / (width * height)
+    center_lat = (bounds.bottom + bounds.top) / 2
+    center_lon = (bounds.left + bounds.right) / 2
+    return pixel_area_m2, center_lat, center_lon
+
+
+def resolve_resolution_mode(
+    mode: str,
+    dggs: str,
+    raster_input,
+    warp_args: dict,
+    min_res: int,
+    max_res: int,
+) -> int:
+    """
+    Inspect the raster and return the integer resolution best matching the requested mode.
+
+    Modes (all iterate from coarsest to finest resolution):
+      smaller-than-pixel  — first resolution where cell area <= pixel area
+      larger-than-pixel   — last resolution where cell area >= pixel area
+      min-diff            — resolution where |cell area - pixel area| is minimised
+    """
+    import raster2dggs.indexerfactory as idxfactory
+
+    indexer = idxfactory.indexer_instance(dggs)
+    pixel_area_m2, center_lat, center_lon = compute_pixel_area_m2(raster_input, warp_args)
+    LOGGER.info(
+        "Resolution mode '%s': pixel area=%.2f m², raster centre=(%.4f°N, %.4f°E)",
+        mode,
+        pixel_area_m2,
+        center_lat,
+        center_lon,
+    )
+
+    best_res = min_res
+    min_area_diff = None
+
+    for res in range(min_res, max_res + 1):
+        cell_area = indexer.cell_area_m2(res, center_lat, center_lon)
+        LOGGER.debug("  res %d: cell area=%.2f m²", res, cell_area)
+
+        if mode == const.ResolutionMode.SMALLER_THAN_PIXEL:
+            if cell_area <= pixel_area_m2:
+                LOGGER.info("Auto-selected resolution %d (%s)", res, mode)
+                return res
+
+        elif mode == const.ResolutionMode.LARGER_THAN_PIXEL:
+            if cell_area < pixel_area_m2:
+                LOGGER.info("Auto-selected resolution %d (%s)", best_res, mode)
+                return best_res
+            best_res = res
+
+        elif mode == const.ResolutionMode.MIN_DIFF:
+            diff = abs(cell_area - pixel_area_m2)
+            if min_area_diff is None or diff < min_area_diff:
+                min_area_diff = diff
+                best_res = res
+            elif diff > min_area_diff:
+                LOGGER.info("Auto-selected resolution %d (%s)", best_res, mode)
+                return best_res
+
+    LOGGER.info("Auto-selected resolution %d (%s, end of range)", best_res, mode)
+    return best_res
+
+
 def check_resolutions(resolution: int, parent_res: int) -> None:
     if parent_res is not None and not int(parent_res) < int(resolution):
         raise ParentResolutionException(

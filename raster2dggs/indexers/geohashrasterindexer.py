@@ -4,6 +4,7 @@
 
 import geohash as gh
 import pandas as pd
+import pyproj
 import shapely
 
 from raster2dggs.indexers.rasterindexer import RasterIndexer
@@ -65,6 +66,15 @@ class GeohashRasterIndexer(RasterIndexer):
         Not a part of the RasterIndexer interface
         """
         return cell[:desired_precision]
+
+    def cell_area_m2(self, resolution: int, lat: float, lon: float) -> float:
+        cell = gh.encode(lat, lon, precision=resolution)
+        lat_c, lon_c, lat_err, lon_err = gh.decode_exactly(cell)
+        bbox = shapely.geometry.box(
+            lon_c - lon_err, lat_c - lat_err, lon_c + lon_err, lat_c + lat_err
+        )
+        area_m2, _ = pyproj.Geod(ellps="WGS84").geometry_area_perimeter(bbox)
+        return abs(area_m2)
 
     @staticmethod
     def cell_to_point(cell: str) -> shapely.geometry.Point:

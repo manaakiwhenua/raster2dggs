@@ -108,6 +108,14 @@ class IRasterIndexer:
         """
         raise NotImplementedError()
 
+    def cell_area_m2(self, resolution: int, lat: float, lon: float) -> float:
+        """
+        Returns the area in square metres of a DGGS cell at the given resolution and
+        representative location. For equal-area DGGS, lat/lon are unused. For
+        non-equal-area DGGS (Geohash, Maidenhead, S2), lat/lon sample a representative cell.
+        """
+        raise NotImplementedError()
+
     @staticmethod
     def cell_to_point(cell: str) -> shapely.geometry.Point:
         """

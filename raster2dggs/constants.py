@@ -1,5 +1,6 @@
 import multiprocessing
 import tempfile
+from enum import StrEnum
 
 MIN_H3, MAX_H3 = (0, 15)
 MIN_RHP, MAX_RHP = (0, 15)
@@ -127,6 +128,15 @@ def zero_padding(dggs: str) -> int:
         raise ValueError(f"Unknown DGGS type: {dggs}")
     return len(str(max_res))
 
+
+class ResolutionMode(StrEnum):
+    SMALLER_THAN_PIXEL = "smaller-than-pixel"
+    LARGER_THAN_PIXEL = "larger-than-pixel"
+    MIN_DIFF = "min-diff"
+
+# Surface area of the WGS84 oblate spheroid in m²
+# Formula: 2π a²(1 + (b²/a²e) atanh(e)), a=6378137.0 m, b≈6356752.314140 m, e=eccentricity
+WGS84_SURFACE_AREA_M2: float = 5.10065621724088e14
 
 AGGFUNC_OPTIONS = [
     "count",

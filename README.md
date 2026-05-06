@@ -82,7 +82,14 @@ Usage: raster2dggs h3 [OPTIONS] RASTER_INPUT OUTPUT_DIRECTORY
 Options:
   -v, --verbosity LVL             Either CRITICAL, ERROR, WARNING, INFO or
                                   DEBUG  [default: INFO]
-  -r, --resolution INTEGER RANGE  H3 resolution to index  [0<=x<=15; required]
+  -r, --resolution [0-15|smaller-than-pixel|larger-than-pixel|min-diff]
+                                  H3 resolution to index. Accepts an integer
+                                  in [0, 15] or an auto-detection mode:
+                                  'smaller-than-pixel' (first resolution finer
+                                  than a pixel), 'larger-than-pixel' (last
+                                  resolution coarser than a pixel), or 'min-
+                                  diff' (resolution closest to pixel size).
+                                  [required]
   -pr, --parent_res INTEGER RANGE
                                   H3 parent resolution to index and aggregate
                                   to. Defaults to max(0, resolution - 6)

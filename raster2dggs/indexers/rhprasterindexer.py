@@ -9,6 +9,7 @@ import pandas as pd
 import shapely
 from rhealpixdggs.dggs import WGS84_003
 
+import raster2dggs.constants as const
 from raster2dggs.indexers.rasterindexer import RasterIndexer
 
 
@@ -55,6 +56,13 @@ class RHPRasterIndexer(RasterIndexer):
         Implementation of interface function.
         """
         return self.cell_to_children_size(parent, resolution)
+
+    def cell_area_m2(self, resolution: int, lat: float, lon: float) -> float:
+        # rHEALPix is equal-area: 6 face cells at resolution 1, each subdividing by 9.
+        # At resolution n>=1: 6 * 9^(n-1) cells; resolution 0 is the single whole-globe cell.
+        if resolution == 0:
+            return const.WGS84_SURFACE_AREA_M2
+        return const.WGS84_SURFACE_AREA_M2 / (6 * 9 ** (resolution - 1))
 
     @staticmethod
     def cell_to_point(cell: str) -> shapely.geometry.Point:

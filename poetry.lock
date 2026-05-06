@@ -236,7 +236,7 @@ files = [
     {file = "cffi-2.0.0-cp39-cp39-win_amd64.whl", hash = "sha256:b882b3df248017dba09d6b16defe9b5c407fe32fc7c65a9c69798e6175601be9"},
     {file = "cffi-2.0.0.tar.gz", hash = "sha256:44d1b5909021139fe36001ae048dbdde8214afa20200eda0f64c068cac5d5529"},
 ]
-markers = {dev = "platform_machine != \"ppc64le\" and platform_machine != \"s390x\" and sys_platform == \"linux\" and platform_python_implementation != \"PyPy\""}
+markers = {main = "extra == \"isea4r\" or extra == \"isea9r\" or extra == \"isea3h\" or extra == \"isea7h\" or extra == \"isea7h-z7\" or extra == \"ivea4r\" or extra == \"ivea9r\" or extra == \"ivea3h\" or extra == \"ivea7h\" or extra == \"ivea7h-z7\" or extra == \"rtea4r\" or extra == \"rtea9r\" or extra == \"rtea3h\" or extra == \"rtea7h\" or extra == \"rtea7h-z7\" or extra == \"healpix\" or extra == \"rhealpix\" or extra == \"dggal\" or extra == \"all\"", dev = "platform_machine != \"ppc64le\" and platform_machine != \"s390x\" and sys_platform == \"linux\" and platform_python_implementation != \"PyPy\""}
 
 [package.dependencies]
 pycparser = {version = "*", markers = "implementation_name != \"PyPy\""}
@@ -459,9 +459,10 @@ markers = {main = "platform_system == \"Windows\"", dev = "platform_system == \"
 name = "contourpy"
 version = "1.3.3"
 description = "Python library for calculating contours of 2D quadrilateral grids"
-optional = false
+optional = true
 python-versions = ">=3.11"
 groups = ["main"]
+markers = "extra == \"rhp\" or extra == \"all\""
 files = [
     {file = "contourpy-1.3.3-cp311-cp311-macosx_10_9_x86_64.whl", hash = "sha256:709a48ef9a690e1343202916450bc48b9e51c049b089c7f79a267b46cffcdaa1"},
     {file = "contourpy-1.3.3-cp311-cp311-macosx_11_0_arm64.whl", hash = "sha256:23416f38bfd74d5d28ab8429cc4d63fa67d5068bd711a85edb1c3fb0c3e2f381"},
@@ -629,9 +630,10 @@ test-randomorder = ["pytest-randomly"]
 name = "cycler"
 version = "0.12.1"
 description = "Composable style cycles"
-optional = false
+optional = true
 python-versions = ">=3.8"
 groups = ["main"]
+markers = "extra == \"rhp\" or extra == \"all\""
 files = [
     {file = "cycler-0.12.1-py3-none-any.whl", hash = "sha256:85cef7cff222d8644161529808465972e51340599459b8ac3ccbac5a854e0d30"},
     {file = "cycler-0.12.1.tar.gz", hash = "sha256:88bb128f02ba341da8ef447245a9e138fae777f6a23943da4540077d3601eb1c"},
@@ -714,9 +716,10 @@ test = ["pytest"]
 name = "dggal"
 version = "0.0.6"
 description = "The Discrete Global Grid Abstraction Library (DGGAL)"
-optional = false
+optional = true
 python-versions = "*"
 groups = ["main"]
+markers = "extra == \"isea4r\" or extra == \"isea9r\" or extra == \"isea3h\" or extra == \"isea7h\" or extra == \"isea7h-z7\" or extra == \"ivea4r\" or extra == \"ivea9r\" or extra == \"ivea3h\" or extra == \"ivea7h\" or extra == \"ivea7h-z7\" or extra == \"rtea4r\" or extra == \"rtea9r\" or extra == \"rtea3h\" or extra == \"rtea7h\" or extra == \"rtea7h-z7\" or extra == \"healpix\" or extra == \"rhealpix\" or extra == \"dggal\" or extra == \"all\""
 files = [
     {file = "dggal-0.0.6-cp310-cp310-macosx_10_9_x86_64.whl", hash = "sha256:abab67164ef664fbfb1d6cf62ebdfb5c6572ea27ca6aaad2e8d4eb7fc91f69c0"},
     {file = "dggal-0.0.6-cp310-cp310-macosx_11_0_arm64.whl", hash = "sha256:1929a427b921fefe932f42211bac5dc93da07d82c571771031c59bf7711afc27"},
@@ -835,9 +838,10 @@ files = [
 name = "ecrt"
 version = "0.0.6"
 description = "eC Runtime Library"
-optional = false
+optional = true
 python-versions = "*"
 groups = ["main"]
+markers = "extra == \"isea4r\" or extra == \"isea9r\" or extra == \"isea3h\" or extra == \"isea7h\" or extra == \"isea7h-z7\" or extra == \"ivea4r\" or extra == \"ivea9r\" or extra == \"ivea3h\" or extra == \"ivea7h\" or extra == \"ivea7h-z7\" or extra == \"rtea4r\" or extra == \"rtea9r\" or extra == \"rtea3h\" or extra == \"rtea7h\" or extra == \"rtea7h-z7\" or extra == \"healpix\" or extra == \"rhealpix\" or extra == \"dggal\" or extra == \"all\""
 files = [
     {file = "ecrt-0.0.6-cp310-cp310-macosx_10_9_x86_64.whl", hash = "sha256:a88f89f82d436cbf5407d310e865cb41b53b5ed1b256056df97b4a619634de17"},
     {file = "ecrt-0.0.6-cp310-cp310-macosx_11_0_arm64.whl", hash = "sha256:4d6f4224f80adc306b091a83c1ba51b65501607f02d81b99cc4d9bb19e308f79"},
@@ -943,9 +947,10 @@ cffi = ">=1.0.0"
 name = "fonttools"
 version = "4.60.1"
 description = "Tools to manipulate font files"
-optional = false
+optional = true
 python-versions = ">=3.9"
 groups = ["main"]
+markers = "extra == \"rhp\" or extra == \"all\""
 files = [
     {file = "fonttools-4.60.1-cp310-cp310-macosx_10_9_universal2.whl", hash = "sha256:9a52f254ce051e196b8fe2af4634c2d2f02c981756c6464dc192f1b6050b4e28"},
     {file = "fonttools-4.60.1-cp310-cp310-macosx_10_9_x86_64.whl", hash = "sha256:c7420a2696a44650120cdd269a5d2e56a477e2bfa9d95e86229059beb1c19e15"},
@@ -1064,9 +1069,10 @@ tqdm = ["tqdm"]
 name = "future"
 version = "1.0.0"
 description = "Clean single-source support for Python 3 and 2"
-optional = false
+optional = true
 python-versions = ">=2.6, !=3.0.*, !=3.1.*, !=3.2.*"
 groups = ["main"]
+markers = "extra == \"s2\" or extra == \"all\""
 files = [
     {file = "future-1.0.0-py3-none-any.whl", hash = "sha256:929292d34f5872e70396626ef385ec22355a1fae8ad29e1a734c3e43f9fbc216"},
     {file = "future-1.0.0.tar.gz", hash = "sha256:bd2968309307861edae1458a4f8a4f3598c03be43b97521076aebf5d94c07b05"},
@@ -1234,9 +1240,10 @@ dev = ["codecov", "pre-commit", "pytest (>=3.1.0)", "pytest-cov", "pytest-xdist"
 name = "h3"
 version = "4.3.1"
 description = "Uber's hierarchical hexagonal geospatial indexing system"
-optional = false
+optional = true
 python-versions = ">=3.8"
 groups = ["main"]
+markers = "extra == \"h3\" or extra == \"all\""
 files = [
     {file = "h3-4.3.1-cp310-cp310-macosx_10_9_x86_64.whl", hash = "sha256:ce6033bdee8dd0179a99f818d6bdce01bf63821fc0ecee9ce5d013ec54cb1000"},
     {file = "h3-4.3.1-cp310-cp310-macosx_11_0_arm64.whl", hash = "sha256:b6e0d81d60397fae0159e2f6f6a457f959f5b137b1db969e513aeeb26895798a"},
@@ -1297,9 +1304,10 @@ test = ["numpy", "pytest", "pytest-cov", "ruff"]
 name = "h3pandas"
 version = "0.3.0"
 description = "Integration of H3 and GeoPandas"
-optional = false
+optional = true
 python-versions = ">=3.9"
 groups = ["main"]
+markers = "extra == \"h3\" or extra == \"all\""
 files = [
     {file = "h3pandas-0.3.0-py3-none-any.whl", hash = "sha256:4624eca4737cd06bde2685c24d14cbdc6d668f1e621b2eb94cf11dceb22cc7f6"},
     {file = "h3pandas-0.3.0.tar.gz", hash = "sha256:96c9071299df343a844714b90b06da216dc47b6e23067a2d7292d60790dabd27"},
@@ -1517,9 +1525,10 @@ type = ["pygobject-stubs", "pytest-mypy", "shtab", "types-pywin32"]
 name = "kiwisolver"
 version = "1.4.9"
 description = "A fast implementation of the Cassowary constraint solver"
-optional = false
+optional = true
 python-versions = ">=3.10"
 groups = ["main"]
+markers = "extra == \"rhp\" or extra == \"all\""
 files = [
     {file = "kiwisolver-1.4.9-cp310-cp310-macosx_10_9_universal2.whl", hash = "sha256:b4b4d74bda2b8ebf4da5bd42af11d02d04428b2c32846e4c2c93219df8a7987b"},
     {file = "kiwisolver-1.4.9-cp310-cp310-macosx_10_9_x86_64.whl", hash = "sha256:fb3b8132019ea572f4611d770991000d7f58127560c4889729248eb5852a102f"},
@@ -1640,9 +1649,10 @@ files = [
 name = "maidenhead"
 version = "1.8.0"
 description = "Maidenhead Locator, Lat Lon coordinate convertor"
-optional = false
+optional = true
 python-versions = ">=3.9"
 groups = ["main"]
+markers = "extra == \"maidenhead\" or extra == \"all\""
 files = [
     {file = "maidenhead-1.8.0-py3-none-any.whl", hash = "sha256:ddc33fb370e0c3ce917be6040474ecb4c27ccc33b3dc9348536b73b5884bb68a"},
     {file = "maidenhead-1.8.0.tar.gz", hash = "sha256:38f318fbdf29ec995bd45e81f33bfa1f905129a154f0aa0334452f90e6c705bf"},
@@ -1680,9 +1690,10 @@ testing = ["coverage", "pytest", "pytest-cov", "pytest-regressions", "requests"]
 name = "matplotlib"
 version = "3.10.7"
 description = "Python plotting package"
-optional = false
+optional = true
 python-versions = ">=3.10"
 groups = ["main"]
+markers = "extra == \"rhp\" or extra == \"all\""
 files = [
     {file = "matplotlib-3.10.7-cp310-cp310-macosx_10_12_x86_64.whl", hash = "sha256:7ac81eee3b7c266dd92cee1cd658407b16c57eed08c7421fa354ed68234de380"},
     {file = "matplotlib-3.10.7-cp310-cp310-macosx_11_0_arm64.whl", hash = "sha256:667ecd5d8d37813a845053d8f5bf110b534c3c9f30e69ebd25d4701385935a6d"},
@@ -2058,9 +2069,10 @@ files = [
 name = "pillow"
 version = "12.0.0"
 description = "Python Imaging Library (fork)"
-optional = false
+optional = true
 python-versions = ">=3.10"
 groups = ["main"]
+markers = "extra == \"rhp\" or extra == \"all\""
 files = [
     {file = "pillow-12.0.0-cp310-cp310-macosx_10_10_x86_64.whl", hash = "sha256:3adfb466bbc544b926d50fe8f4a4e6abd8c6bffd28a26177594e6e9b2b76572b"},
     {file = "pillow-12.0.0-cp310-cp310-macosx_11_0_arm64.whl", hash = "sha256:1ac11e8ea4f611c3c0147424eae514028b5e9077dd99ab91e1bd7bc33ff145e1"},
@@ -2200,9 +2212,10 @@ testing = ["coverage", "pytest", "pytest-benchmark"]
 name = "pya5"
 version = "0.5.0"
 description = "A5 - Global Pentagonal Geospatial Index"
-optional = false
+optional = true
 python-versions = ">=3.8"
 groups = ["main"]
+markers = "extra == \"a5\" or extra == \"all\""
 files = [
     {file = "pya5-0.5.0-py3-none-any.whl", hash = "sha256:81a5550ef91114fc807d53707f6286dcc8f5888f8fafdcb0a1da8e08f5a865c2"},
     {file = "pya5-0.5.0.tar.gz", hash = "sha256:72f7218f272c71b24a934344bba0d043bd6cc2794d3803873b99db3f9711bb2a"},
@@ -2290,7 +2303,7 @@ files = [
     {file = "pycparser-2.23-py3-none-any.whl", hash = "sha256:e5c6e8d3fbad53479cab09ac03729e0a9faf2bee3db8208a550daf5af81a5934"},
     {file = "pycparser-2.23.tar.gz", hash = "sha256:78816d4f24add8f10a06d6f05b4d424ad9e96cfebf68a4ddc99c65c0720d00c2"},
 ]
-markers = {main = "implementation_name != \"PyPy\"", dev = "platform_machine != \"ppc64le\" and platform_machine != \"s390x\" and sys_platform == \"linux\" and platform_python_implementation != \"PyPy\" and implementation_name != \"PyPy\""}
+markers = {main = "(extra == \"isea4r\" or extra == \"isea9r\" or extra == \"isea3h\" or extra == \"isea7h\" or extra == \"isea7h-z7\" or extra == \"ivea4r\" or extra == \"ivea9r\" or extra == \"ivea3h\" or extra == \"ivea7h\" or extra == \"ivea7h-z7\" or extra == \"rtea4r\" or extra == \"rtea9r\" or extra == \"rtea3h\" or extra == \"rtea7h\" or extra == \"rtea7h-z7\" or extra == \"healpix\" or extra == \"rhealpix\" or extra == \"dggal\" or extra == \"all\") and implementation_name != \"PyPy\"", dev = "platform_machine != \"ppc64le\" and platform_machine != \"s390x\" and sys_platform == \"linux\" and platform_python_implementation != \"PyPy\" and implementation_name != \"PyPy\""}
 
 [[package]]
 name = "pygments"
@@ -2482,9 +2495,10 @@ six = ">=1.5"
 name = "python-geohash"
 version = "0.8.5"
 description = "Fast, accurate python geohashing library"
-optional = false
+optional = true
 python-versions = "*"
 groups = ["main"]
+markers = "extra == \"geohash\" or extra == \"all\""
 files = [
     {file = "python-geohash-0.8.5.tar.gz", hash = "sha256:05a21fcf4eda1a5eddbd291890ade23fc5ddaa6bb98f2ee23d2d384ed14f086d"},
 ]
@@ -2737,9 +2751,10 @@ idna2008 = ["idna"]
 name = "rhealpixdggs"
 version = "0.5.12"
 description = "An implementation of the rHEALPix discrete global grid system"
-optional = false
+optional = true
 python-versions = ">=3.11"
 groups = ["main"]
+markers = "extra == \"rhp\" or extra == \"all\""
 files = [
     {file = "rhealpixdggs-0.5.12-py3-none-any.whl", hash = "sha256:0b27faafdce246ac05375c26cffbc9619d18885f46c86b219317d331a4075ece"},
     {file = "rhealpixdggs-0.5.12.tar.gz", hash = "sha256:2d2b53b78192d585e13e580274dc8fab19516b8bcf1dd1892b16f0b4a4c338fd"},
@@ -2756,9 +2771,10 @@ shapely = ">=2.1"
 name = "rhppandas"
 version = "0.2.1"
 description = "Integration of rHEALPixDGGS and Pandas/GeoPandas"
-optional = false
+optional = true
 python-versions = ">=3.11"
 groups = ["main"]
+markers = "extra == \"rhp\" or extra == \"all\""
 files = [
     {file = "rhppandas-0.2.1-py3-none-any.whl", hash = "sha256:69a8139b52391a65758ab6b1488d1430585441cbcc5c9db9d534515814f16755"},
     {file = "rhppandas-0.2.1.tar.gz", hash = "sha256:50950d94142a655b94438694784197c6b3619ab2cee799519f60674d9ed26e4d"},
@@ -2821,9 +2837,10 @@ interp = ["scipy"]
 name = "s2sphere"
 version = "0.2.5"
 description = "Python implementation of the S2 Geometry Library"
-optional = false
+optional = true
 python-versions = "*"
 groups = ["main"]
+markers = "extra == \"s2\" or extra == \"all\""
 files = [
     {file = "s2sphere-0.2.5-py2.py3-none-any.whl", hash = "sha256:d2340c9cf458ddc9a89afd1d8048a4195ce6fa6b0095ab900d4be5271e537401"},
     {file = "s2sphere-0.2.5.tar.gz", hash = "sha256:c2478c1ff7c601a59a7151a57b605435897514578fa6bdb8730721c182adbbaf"},
@@ -2858,9 +2875,10 @@ crt = ["botocore[crt] (>=1.37.4,<2.0a.0)"]
 name = "scipy"
 version = "1.16.2"
 description = "Fundamental algorithms for scientific computing in Python"
-optional = false
+optional = true
 python-versions = ">=3.11"
 groups = ["main"]
+markers = "extra == \"rhp\" or extra == \"all\""
 files = [
     {file = "scipy-1.16.2-cp311-cp311-macosx_10_14_x86_64.whl", hash = "sha256:6ab88ea43a57da1af33292ebd04b417e8e2eaf9d5aa05700be8d6e1b6501cd92"},
     {file = "scipy-1.16.2-cp311-cp311-macosx_12_0_arm64.whl", hash = "sha256:c95e96c7305c96ede73a7389f46ccd6c659c4da5ef1b2789466baeaed3622b6e"},
@@ -3100,9 +3118,10 @@ keyring = ["keyring (>=21.2.0)"]
 name = "typing-extensions"
 version = "4.15.0"
 description = "Backported and Experimental Type Hints for Python 3.9+"
-optional = false
+optional = true
 python-versions = ">=3.9"
 groups = ["main"]
+markers = "extra == \"h3\" or extra == \"all\" or extra == \"rhp\""
 files = [
     {file = "typing_extensions-4.15.0-py3-none-any.whl", hash = "sha256:f0fa19c6845758ab08074a0cfa8b7aecb71c999ca73d62883bc25cc018c4e548"},
     {file = "typing_extensions-4.15.0.tar.gz", hash = "sha256:0cea48d173cc12fa28ecabc3b837ea3cf6f38c6d1136f85cbaaf598984861466"},
@@ -3185,7 +3204,34 @@ enabler = ["pytest-enabler (>=2.2)"]
 test = ["big-O", "jaraco.functools", "jaraco.itertools", "jaraco.test", "more_itertools", "pytest (>=6,!=8.1.*)", "pytest-ignore-flaky"]
 type = ["pytest-mypy"]
 
+[extras]
+a5 = ["pya5"]
+all = ["dggal", "h3pandas", "maidenhead", "pya5", "python-geohash", "rhealpixdggs", "rhppandas", "s2sphere"]
+dggal = ["dggal"]
+geohash = ["python-geohash"]
+h3 = ["h3pandas"]
+healpix = ["dggal"]
+isea3h = ["dggal"]
+isea4r = ["dggal"]
+isea7h = ["dggal"]
+isea7h-z7 = ["dggal"]
+isea9r = ["dggal"]
+ivea3h = ["dggal"]
+ivea4r = ["dggal"]
+ivea7h = ["dggal"]
+ivea7h-z7 = ["dggal"]
+ivea9r = ["dggal"]
+maidenhead = ["maidenhead"]
+rhealpix = ["dggal"]
+rhp = ["rhealpixdggs", "rhppandas"]
+rtea3h = ["dggal"]
+rtea4r = ["dggal"]
+rtea7h = ["dggal"]
+rtea7h-z7 = ["dggal"]
+rtea9r = ["dggal"]
+s2 = ["s2sphere"]
+
 [metadata]
 lock-version = "2.1"
 python-versions = "^3.11"
-content-hash = "e00efcc9f6675c1b48dae53709a6d5d270b7038f489fe82ad28ad2398bb0f54d"
+content-hash = "790c39eab4d9a4f1f621f189334e666960eae7f67b8510fe4eb9102a4a64c7ec"
