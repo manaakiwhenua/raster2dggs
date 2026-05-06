@@ -4,6 +4,7 @@
 
 import maidenhead as mh
 import pandas as pd
+import pyproj
 import shapely
 
 from raster2dggs.indexers.rasterindexer import RasterIndexer
@@ -66,6 +67,16 @@ class MaidenheadRasterIndexer(RasterIndexer):
         Not a part of the RasterIndexer interface.
         """
         return cell[: parent_level * 2]
+
+    def cell_area_m2(self, resolution: int, lat: float, lon: float) -> float:
+        cell = mh.to_maiden(lat, lon, resolution)
+        loc1, loc2, _ = mh.to_location_rect(cell)
+        bbox = shapely.geometry.box(
+            min(loc1[1], loc2[1]), min(loc1[0], loc2[0]),
+            max(loc1[1], loc2[1]), max(loc1[0], loc2[0]),
+        )
+        area_m2, _ = pyproj.Geod(ellps="WGS84").geometry_area_perimeter(bbox)
+        return abs(area_m2)
 
     @staticmethod
     def cell_to_point(cell: str) -> shapely.geometry.Point:

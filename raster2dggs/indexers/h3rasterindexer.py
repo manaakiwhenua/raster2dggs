@@ -56,6 +56,10 @@ class H3RasterIndexer(RasterIndexer):
         """
         return self.cell_to_children_size(parent, resolution)
 
+    def cell_area_m2(self, resolution: int, lat: float, lon: float) -> float:
+        cell = h3py.latlng_to_cell(lat, lon, resolution)
+        return h3py.cell_area(cell, unit="m^2")
+
     @staticmethod
     def cell_to_point(cell: str) -> shapely.geometry.Point:
         return shapely.Point(h3py.cell_to_latlng(cell)[::-1])

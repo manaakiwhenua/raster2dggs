@@ -12,6 +12,41 @@ import raster2dggs.common as common
 from raster2dggs import __version__
 
 
+class ResolutionParamType(click.ParamType):
+    """Accepts an integer resolution in [min_res, max_res] or a named auto-detection mode."""
+
+    name = "RESOLUTION"
+
+    def __init__(self, min_res: int, max_res: int):
+        self.min_res = min_res
+        self.max_res = max_res
+
+    def convert(self, value, param, ctx):
+        if isinstance(value, int):
+            return value
+        if value in const.ResolutionMode:
+            return const.ResolutionMode(value)
+        try:
+            int_val = int(value)
+        except (ValueError, TypeError):
+            self.fail(
+                f"'{value}': expected an integer in [{self.min_res}, {self.max_res}] "
+                f"or one of: {'|'.join(const.ResolutionMode)}",
+                param,
+                ctx,
+            )
+        if not (self.min_res <= int_val <= self.max_res):
+            self.fail(
+                f"{int_val} is outside the valid range [{self.min_res}, {self.max_res}]",
+                param,
+                ctx,
+            )
+        return int_val
+
+    def get_metavar(self, param, ctx=None):
+        return f"[{self.min_res}-{self.max_res}|{'|'.join(const.ResolutionMode)}]"
+
+
 @dataclass(frozen=True)
 class DGGS_Spec:
     name: str  # command name and dggs key used by indexers
@@ -136,8 +171,14 @@ def make_command(spec: DGGS_Spec):
         "-r",
         "--resolution",
         required=True,
-        type=click.IntRange(spec.min_res, spec.max_res),
-        help=f"{spec.pretty} resolution to index",
+        type=ResolutionParamType(spec.min_res, spec.max_res),
+        help=(
+            f"{spec.pretty} resolution to index. "
+            f"Accepts an integer in [{spec.min_res}, {spec.max_res}] or an auto-detection "
+            f"mode: 'smaller-than-pixel' (first resolution finer than a pixel), "
+            f"'larger-than-pixel' (last resolution coarser than a pixel), or "
+            f"'min-diff' (resolution closest to pixel size)."
+        ),
     )
     @click.option(
         "-pr",
@@ -265,6 +306,17 @@ def make_command(spec: DGGS_Spec):
         geo,
         tempdir,
     ):
+        if isinstance(resolution, str):
+            warp_args = common.assemble_warp_args(resampling, warp_mem_limit)
+            raster_path = common.resolve_input_path(raster_input)
+            resolution = common.resolve_resolution_mode(
+                resolution,
+                spec.name,
+                raster_path,
+                warp_args,
+                spec.min_res,
+                spec.max_res,
+            )
         parent_res: int = (
             int(parent_res)
             if parent_res is not None

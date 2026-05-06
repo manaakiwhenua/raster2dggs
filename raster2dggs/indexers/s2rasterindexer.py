@@ -82,6 +82,13 @@ class S2RasterIndexer(RasterIndexer):
             s2sphere.CellId.from_token(parent), resolution
         )
 
+    def cell_area_m2(self, resolution: int, lat: float, lon: float) -> float:
+        cell_id = s2sphere.CellId.from_lat_lng(
+            s2sphere.LatLng.from_degrees(lat, lon)
+        ).parent(resolution)
+        # approx_area() returns steradians; multiply by Earth's mean radius squared
+        return s2sphere.Cell(cell_id).approx_area() * (6_371_000.0 ** 2)
+
     @staticmethod
     def cell_to_point(cell: str) -> shapely.geometry.Point:
         latLng = s2sphere.LatLng.from_point(s2sphere.CellId.from_token(cell).to_point())
