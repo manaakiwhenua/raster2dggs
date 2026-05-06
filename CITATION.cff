@@ -1,0 +1,16 @@
+cff-version: 1.2.0
+message: "If you use this software, please cite it as below."
+type: software
+title: raster2dggs
+authors:
+  - family-names: Ardo
+    given-names: James
+  - family-names: Law
+    given-names: Richard
+  - family-names: Di Maio
+    given-names: Nicoletta
+repository-code: https://github.com/manaakiwhenua/raster2dggs
+url: https://github.com/manaakiwhenua/raster2dggs
+version: "0.9.1"
+date-released: "2026-05-07"
+license: LGPL-3.0-or-later

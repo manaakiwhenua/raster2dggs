@@ -359,18 +359,6 @@ raster2dggs h3 --resolution 13 --compression zstd --resampling nearest -a median
 
 ## Citation
 
-```bibtex
-@software{raster2dggs,
-  title={{raster2dggs}},
-  author={Ardo, James and Law, Richard and Di Maio, Nicoletta},
-  url={https://github.com/manaakiwhenua/raster2dggs},
-  version={0.9.0},
-  date={2025-01-28}
-}
-```
-
-APA/Harvard
-
-> Ardo, J., Law, R., & Di Maio, N. (2025). raster2dggs (0.9.0) [Computer software]. https://github.com/manaakiwhenua/raster2dggs
+Citation metadata is maintained in [`CITATION.cff`](CITATION.cff). GitHub renders this as a **"Cite this repository"** button on the repository page (top-right of the About panel), which provides ready-to-copy BibTeX and APA formats.
 
 [![manaakiwhenua-standards](https://github.com/manaakiwhenua/raster2dggs/workflows/manaakiwhenua-standards/badge.svg)](https://github.com/manaakiwhenua/manaakiwhenua-standards)
