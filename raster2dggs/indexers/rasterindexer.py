@@ -161,11 +161,16 @@ class RasterIndexer(IRasterIndexer):
         partition_col = self.partition_col(parent_res)
         df = df.set_index(index_col)
         if decimals > 0:
-            gb = (
-                df.groupby([partition_col, index_col], sort=False, observed=True)
-                .agg(aggfunc)
-                .round(decimals)
+            agg = df.groupby([partition_col, index_col], sort=False, observed=True).agg(
+                aggfunc
             )
+            # float32 cannot represent most decimal fractions exactly, so
+            # rounding in float32 leaves artefacts like 0.4000000059604645.
+            # Promote to float64 first so the rounded values are exact.
+            float32_cols = agg.select_dtypes(include="float32").columns
+            if len(float32_cols):
+                agg = agg.astype({c: "float64" for c in float32_cols})
+            gb = agg.round(decimals)
         else:
             gb = (
                 df.groupby([partition_col, index_col], sort=False, observed=True)
