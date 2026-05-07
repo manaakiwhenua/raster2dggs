@@ -93,14 +93,19 @@ class RasterIndexer(IRasterIndexer):
         parent_res: int,
         nodata: Number = np.nan,
         band_labels: Tuple[str] = None,
-        nodata_policy: str = "skip",
+        nodata_policy: str = "omit",
         emit_nodata_value: Optional[Number] = None,
+        transformer=None,
     ) -> pa.Table:
         sdf: pd.DataFrame = (
             sdf.to_dataframe().drop(columns=["spatial_ref"]).reset_index()
         )
+        if transformer is not None:
+            lons, lats = transformer.transform(sdf["x"].values, sdf["y"].values)
+            sdf["x"] = lons
+            sdf["y"] = lats
         nodata_mask = _mask_is_nodata(sdf[const.DEFAULT_NAME], nodata)
-        if nodata_policy.lower() == "skip":
+        if nodata_policy.lower() == "omit":
             sdf = sdf[~nodata_mask].copy()
         elif nodata_policy.lower() == "emit":
             sdf = sdf.copy()
