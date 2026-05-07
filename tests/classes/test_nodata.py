@@ -101,24 +101,24 @@ class TestNodataPolicy(TestRunthrough):
         self.assertEqual(result.exit_code, 0, result.output)
         return _read_output(TEST_OUTPUT_PATH)
 
-    def test_skip_excludes_nodata_cells(self):
-        df = self._run("--nodata_policy", "skip")
+    def test_omit_excludes_nodata_cells(self):
+        df = self._run("--nodata_policy", "omit")
         self.assertFalse((df["band_1"] == NODATA_SENTINEL).any(),
-                         "skip policy should produce no nodata-sentinel values")
+                         "omit policy should produce no nodata-sentinel values")
         self.assertFalse(df["band_1"].isna().any(),
-                         "skip policy should produce no NaN values")
+                         "omit policy should produce no NaN values")
 
     def test_emit_with_explicit_value_lowers_cell_value(self):
         # All valid pixels have value 42. The nodata pixel is replaced with 0,
         # so any H3 cell containing it will have a mean < 42 (or exactly 0 if isolated).
-        df_skip = self._run("--nodata_policy", "skip")
-        skip_min = df_skip["band_1"].min()
+        df_omit = self._run("--nodata_policy", "omit")
+        omit_min = df_omit["band_1"].min()
         df_emit = self._run("--nodata_policy", "emit", "--emit_nodata_value", "0")
-        self.assertLess(df_emit["band_1"].min(), skip_min,
+        self.assertLess(df_emit["band_1"].min(), omit_min,
                         "replacing nodata with 0 should pull at least one cell's mean below 42")
 
     def test_emit_without_explicit_value_includes_nodata_cells(self):
-        df_skip = self._run("--nodata_policy", "skip")
+        df_omit = self._run("--nodata_policy", "omit")
         df_emit = self._run("--nodata_policy", "emit")
-        self.assertGreaterEqual(len(df_emit), len(df_skip),
-                                "emit policy should produce at least as many rows as skip")
+        self.assertGreaterEqual(len(df_emit), len(df_omit),
+                                "emit policy should produce at least as many rows as omit")

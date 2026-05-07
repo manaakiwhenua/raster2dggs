@@ -76,8 +76,9 @@ class IRasterIndexer:
         parent_res: int,
         nodata: Number = np.nan,
         band_labels: Tuple[str] = None,
-        nodata_policy: str = "skip",
+        nodata_policy: str = "omit",
         emit_nodata_value: Optional[Number] = None,
+        transformer=None,
     ) -> pa.Table:
         """
         Function for primary indexation.

@@ -84,16 +84,13 @@ MIN_RHEALPIX, MAX_RHEALPIX = (
 DEFAULT_NAME: str = "value"
 
 DEFAULTS = {
-    "upscale": 1,
     "compression": "snappy",
     "threads": (multiprocessing.cpu_count() - 1),
     "aggfunc": "mean",
     "decimals": 1,
-    "warp_mem_limit": 12000,
-    "resampling": "average",
     "geo": "none",
     "tempdir": tempfile.tempdir,
-    "nodata_policy": "skip",
+    "nodata_policy": "omit",
 }
 
 
@@ -153,4 +150,4 @@ AGGFUNC_OPTIONS = [
 
 GEOM_TYPES = ["point", "polygon", "none"]
 
-NODATA_POLICY_OPTIONS = ["skip", "emit"]
+NODATA_POLICY_OPTIONS = ["omit", "emit"]
