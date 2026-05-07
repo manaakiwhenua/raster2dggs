@@ -292,7 +292,20 @@ def address_boundary_issues(
     out_meta = pd.DataFrame(
         {
             partition_col: pd.Series([], dtype="string"),
-            **{c: pd.Series([], dtype=ddf[c].dtype) for c in band_cols},
+            **{
+                c: pd.Series(
+                    [],
+                    dtype=(
+                        # decimals=0 means integer output
+                        "Int64"
+                        if kwargs["decimals"] == 0
+                        # float32 is promoted to float64 before rounding so
+                        # that decimal values are exactly representable
+                        else "float64" if ddf[c].dtype == np.float32 else ddf[c].dtype
+                    ),
+                )
+                for c in band_cols
+            },
         }
     )
     out_meta.index = pd.Index([], name=index_col, dtype="string")
