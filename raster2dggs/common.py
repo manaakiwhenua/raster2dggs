@@ -1,3 +1,4 @@
+import gc
 import os
 import errno
 import tempfile
@@ -48,12 +49,9 @@ def compute_pixel_area_m2(raster_input) -> tuple[float, float, float]:
     pixel_area_m2 is the mean pixel area: bounding-box geodesic area divided by pixel count.
     Bounds are projected to WGS84 for the area calculation.
     """
-    with rio.Env(CHECK_WITH_INVERT_PROJ=True):
-        with rio.open(raster_input, mode="r", sharing=False) as src:
-            left, bottom, right, top = transform_bounds(
-                src.crs, "EPSG:4326", *src.bounds
-            )
-            width, height = src.width, src.height
+    with rio.open(raster_input, mode="r", sharing=False) as src:
+        left, bottom, right, top = transform_bounds(src.crs, "EPSG:4326", *src.bounds)
+        width, height = src.width, src.height
 
     bbox = shapely.geometry.box(left, bottom, right, top)
     area_m2, _ = pyproj.Geod(ellps="WGS84").geometry_area_perimeter(bbox)
@@ -297,7 +295,7 @@ def address_boundary_issues(
             **{c: pd.Series([], dtype=ddf[c].dtype) for c in band_cols},
         }
     )
-    out_meta.index = pd.Index([], name=index_col, dtype="object")
+    out_meta.index = pd.Index([], name=index_col, dtype="string")
     with TqdmCallback(desc=f"Aggregating{'/compacting' if kwargs['compact'] else ''}"):
         ddf = ddf.map_partitions(
             indexer.parent_groupby,
@@ -339,7 +337,7 @@ def address_boundary_issues(
                 dask.compute(*write_tasks)
 
         else:
-
+            write_schema = pa.Schema.from_pandas(out_meta, preserve_index=True)
             ddf.to_parquet(
                 output,
                 engine="pyarrow",
@@ -348,6 +346,7 @@ def address_boundary_issues(
                 write_index=True,
                 append=False,
                 compression=kwargs["compression"],
+                schema=write_schema,
             )
 
     LOGGER.debug("Stage 2 (aggregation) complete")
@@ -388,7 +387,7 @@ def initial_index(
     with tempfile.TemporaryDirectory() as tmpdir:
         LOGGER.debug(f"Create temporary directory {tmpdir}")
 
-        with rio.Env(CHECK_WITH_INVERT_PROJ=True):
+        with rio.Env():
             with rio.open(raster_input, mode="r", sharing=False) as src:
                 LOGGER.debug("Source CRS: %s", src.crs)
                 band_names = tuple(src.descriptions) if src.descriptions else tuple()
@@ -453,9 +452,7 @@ def initial_index(
                     len(windows),
                 )
 
-                selected_labels = tuple(
-                    [labels_by_index[i] for i in selected_indices]
-                )
+                selected_labels = tuple([labels_by_index[i] for i in selected_indices])
                 compression = kwargs["compression"]
                 nodata = src.nodata
 
@@ -489,14 +486,26 @@ def initial_index(
 
                     return None
 
-                with ThreadPoolExecutor(
-                    max_workers=kwargs["threads"]
-                ) as executor, tqdm(
-                    total=len(windows), desc="Raster windows"
-                ) as pbar:
-                    for _ in executor.map(process, windows, chunksize=1):
-                        pbar.update(1)
-
+                try:
+                    with ThreadPoolExecutor(
+                        max_workers=kwargs["threads"]
+                    ) as executor, tqdm(
+                        total=len(windows), desc="Raster windows"
+                    ) as pbar:
+                        for _ in executor.map(process, windows, chunksize=1):
+                            pbar.update(1)
+                finally:
+                    da.close()
+                    # da, transformer, and process are closure cells and won't
+                    # be freed by reference counting alone if they're in a dask
+                    # task-graph cycle.  Explicitly delete all three and collect
+                    # now, while still inside rio.open(), so the GDAL/PROJ
+                    # objects they hold are torn down during normal execution
+                    # rather than at interpreter shutdown (which causes a
+                    # silent "Error in sys.excepthook" crash for non-WGS84
+                    # rasters).
+                    del da, transformer, process
+                    gc.collect()
             LOGGER.debug("Stage 1 (primary indexing) complete")
             return address_boundary_issues(
                 indexer,

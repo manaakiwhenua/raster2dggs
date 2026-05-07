@@ -91,7 +91,7 @@ class A5RasterIndexer(RasterIndexer):
 
     def cell_area_m2(self, resolution: int, lat: float, lon: float) -> float:
         # A5 is equal-area: 12 cells at resolution 0, each subdividing by 4
-        return const.WGS84_SURFACE_AREA_M2 / (12 * 4 ** resolution)
+        return const.WGS84_SURFACE_AREA_M2 / (12 * 4**resolution)
 
     @staticmethod
     def cell_to_point(cell: str) -> shapely.geometry.Point:

@@ -16,7 +16,6 @@ from data.datapaths import TEST_OUTPUT_PATH
 from raster2dggs.cli import cli
 from raster2dggs.indexers.rasterindexer import _mask_is_nodata
 
-
 NODATA_SENTINEL = -9999.0
 # 10x10 pixel Float32 raster in EPSG:4326; top-left pixel is nodata
 RASTER_BOUNDS = (174.0, -41.1, 174.1, -41.0)  # (left, bottom, right, top)
@@ -95,7 +94,8 @@ class TestNodataPolicy(TestRunthrough):
             "h3",
             self._raster.name,
             str(TEST_OUTPUT_PATH),
-            "-r", str(H3_RES),
+            "-r",
+            str(H3_RES),
         ] + list(extra_args)
         result = runner.invoke(cli, args, catch_exceptions=False)
         self.assertEqual(result.exit_code, 0, result.output)
@@ -103,10 +103,13 @@ class TestNodataPolicy(TestRunthrough):
 
     def test_omit_excludes_nodata_cells(self):
         df = self._run("--nodata_policy", "omit")
-        self.assertFalse((df["band_1"] == NODATA_SENTINEL).any(),
-                         "omit policy should produce no nodata-sentinel values")
-        self.assertFalse(df["band_1"].isna().any(),
-                         "omit policy should produce no NaN values")
+        self.assertFalse(
+            (df["band_1"] == NODATA_SENTINEL).any(),
+            "omit policy should produce no nodata-sentinel values",
+        )
+        self.assertFalse(
+            df["band_1"].isna().any(), "omit policy should produce no NaN values"
+        )
 
     def test_emit_with_explicit_value_lowers_cell_value(self):
         # All valid pixels have value 42. The nodata pixel is replaced with 0,
@@ -114,11 +117,17 @@ class TestNodataPolicy(TestRunthrough):
         df_omit = self._run("--nodata_policy", "omit")
         omit_min = df_omit["band_1"].min()
         df_emit = self._run("--nodata_policy", "emit", "--emit_nodata_value", "0")
-        self.assertLess(df_emit["band_1"].min(), omit_min,
-                        "replacing nodata with 0 should pull at least one cell's mean below 42")
+        self.assertLess(
+            df_emit["band_1"].min(),
+            omit_min,
+            "replacing nodata with 0 should pull at least one cell's mean below 42",
+        )
 
     def test_emit_without_explicit_value_includes_nodata_cells(self):
         df_omit = self._run("--nodata_policy", "omit")
         df_emit = self._run("--nodata_policy", "emit")
-        self.assertGreaterEqual(len(df_emit), len(df_omit),
-                                "emit policy should produce at least as many rows as omit")
+        self.assertGreaterEqual(
+            len(df_emit),
+            len(df_omit),
+            "emit policy should produce at least as many rows as omit",
+        )

@@ -131,6 +131,7 @@ class ResolutionMode(StrEnum):
     LARGER_THAN_PIXEL = "larger-than-pixel"
     MIN_DIFF = "min-diff"
 
+
 # Surface area of the WGS84 oblate spheroid in m²
 # Formula: 2π a²(1 + (b²/a²e) atanh(e)), a=6378137.0 m, b≈6356752.314140 m, e=eccentricity
 WGS84_SURFACE_AREA_M2: float = 5.10065621724088e14
