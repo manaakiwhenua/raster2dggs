@@ -37,7 +37,7 @@ rhealpixdggs = {version = "^0.5", optional = true}
 python-geohash = {version = "^0.8", optional = true}
 maidenhead = {version = "^1.8", optional = true}
 s2sphere = {version = "^0.2", optional = true}
-pya5 = {version = "^0.5", optional = true}
+a5-fast = {version = "^0.2", optional = true}
 dggal = {version = "^0.0.6", optional = true}
 
 [tool.poetry.group.dev.dependencies]
@@ -61,7 +61,7 @@ rhp = ["rhppandas","rhealpixdggs"]
 geohash = ["python-geohash"]
 maidenhead = ["maidenhead"]
 s2 = ["s2sphere"]
-a5 = ["pya5"]
+a5 = ["a5-fast"]
 isea4r = ["dggal"]
 isea9r = ["dggal"]
 isea3h = ["dggal"]
@@ -81,4 +81,4 @@ healpix = ["dggal"]
 rhealpix = ["dggal"]
 # Convenience extras
 dggal = ["dggal"]
-all = ["h3pandas", "rhppandas", "rhealpixdggs", "python-geohash", "s2sphere", "pya5", "maidenhead", "dggal"]
+all = ["h3pandas", "rhppandas", "rhealpixdggs", "python-geohash", "s2sphere", "a5-fast", "maidenhead", "dggal"]
