@@ -1321,31 +1321,6 @@ numpy = ["numpy"]
 test = ["numpy", "pytest", "pytest-cov", "ruff"]
 
 [[package]]
-name = "h3pandas"
-version = "0.3.0"
-description = "Integration of H3 and GeoPandas"
-optional = true
-python-versions = ">=3.9"
-groups = ["main"]
-markers = "extra == \"h3\" or extra == \"all\""
-files = [
-    {file = "h3pandas-0.3.0-py3-none-any.whl", hash = "sha256:4624eca4737cd06bde2685c24d14cbdc6d668f1e621b2eb94cf11dceb22cc7f6"},
-    {file = "h3pandas-0.3.0.tar.gz", hash = "sha256:96c9071299df343a844714b90b06da216dc47b6e23067a2d7292d60790dabd27"},
-]
-
-[package.dependencies]
-geopandas = "*"
-h3 = ">=4"
-numpy = "*"
-pandas = "*"
-shapely = "*"
-typing-extensions = "*"
-
-[package.extras]
-docs = ["numpydoc", "pytest-sphinx-theme", "sphinx", "typing-extensions"]
-test = ["pytest", "pytest-cov", "ruff"]
-
-[[package]]
 name = "id"
 version = "1.6.1"
 description = "A tool for generating OIDC identities"
@@ -3258,7 +3233,7 @@ description = "Backported and Experimental Type Hints for Python 3.9+"
 optional = true
 python-versions = ">=3.9"
 groups = ["main"]
-markers = "extra == \"h3\" or extra == \"all\" or extra == \"rhp\""
+markers = "extra == \"rhp\" or extra == \"all\""
 files = [
     {file = "typing_extensions-4.15.0-py3-none-any.whl", hash = "sha256:f0fa19c6845758ab08074a0cfa8b7aecb71c999ca73d62883bc25cc018c4e548"},
     {file = "typing_extensions-4.15.0.tar.gz", hash = "sha256:0cea48d173cc12fa28ecabc3b837ea3cf6f38c6d1136f85cbaaf598984861466"},
@@ -3344,10 +3319,10 @@ type = ["pytest-mypy"]
 
 [extras]
 a5 = ["a5-fast"]
-all = ["a5-fast", "dggal", "h3pandas", "maidenhead", "python-geohash", "rhealpixdggs", "rhppandas", "s2sphere"]
+all = ["a5-fast", "dggal", "h3", "maidenhead", "python-geohash", "rhealpixdggs", "rhppandas", "s2sphere"]
 dggal = ["dggal"]
 geohash = ["python-geohash"]
-h3 = ["h3pandas"]
+h3 = ["h3"]
 healpix = ["dggal"]
 isea3h = ["dggal"]
 isea4r = ["dggal"]
@@ -3372,4 +3347,4 @@ s2 = ["s2sphere"]
 [metadata]
 lock-version = "2.1"
 python-versions = "^3.11"
-content-hash = "a7fa5cdd92b77199998c0e4f1b5d5ec732b811eeec16298e5d90d5837510c2a9"
+content-hash = "50b627a277dceeb647d45c87cebe82507f6a5fb0dafb845ab0558be32cff2f27"
