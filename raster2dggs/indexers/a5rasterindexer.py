@@ -2,7 +2,8 @@
 @author: ndemaio
 """
 
-import a5 as a5py
+import a5_fast as a5py
+import numpy as np
 import pandas as pd
 import shapely
 
@@ -16,10 +17,8 @@ class A5RasterIndexer(RasterIndexer):
     """
 
     def _index_window(self, wide, resolution: int, parent_res: int):
-        cells = [
-            a5py.lonlat_to_cell((lon, lat), resolution)
-            for lon, lat in zip(wide["x"], wide["y"])
-        ]  # NB a5py.lonlat_to_cell is quite slow
+        flat_coords = np.column_stack([wide["x"], wide["y"]]).ravel().tolist()
+        cells = a5py.lonlat_to_cell_batch(flat_coords, resolution)
         a5_parent = [a5py.cell_to_parent(cell, parent_res) for cell in cells]
         wide = wide.drop(columns=["x", "y"])
         wide[self.index_col(resolution)] = pd.Series(
@@ -74,20 +73,16 @@ class A5RasterIndexer(RasterIndexer):
         return self.cell_to_children_size(a5py.hex_to_u64(parent), resolution)
 
     @staticmethod
-    def is_valid_a5_cell(
-        cell: str,
-    ) -> bool:
+    def is_valid_a5_cell(cell: str) -> bool:
         """
         Returns cell validity.
 
         Not a part of the RasterIndexer interface
         """
-        cell = a5py.hex_to_u64(cell)
         try:
-            c: a5py.A5Cell = a5py.core.serialization.deserialize(cell)
-        except TypeError:
+            return const.MIN_A5 <= a5py.get_resolution(a5py.hex_to_u64(cell)) <= const.MAX_A5
+        except Exception:
             return False
-        return True
 
     def cell_area_m2(self, resolution: int, lat: float, lon: float) -> float:
         # A5 is equal-area: 12 cells at resolution 0, each subdividing by 4
