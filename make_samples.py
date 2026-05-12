@@ -31,6 +31,7 @@ from rasterio.crs import CRS
 
 try:
     from scipy.ndimage import gaussian_filter
+
     HAVE_SCIPY = True
 except Exception:
     HAVE_SCIPY = False
@@ -45,7 +46,7 @@ def box_blur(img, k=5, passes=2):
         acc = np.zeros_like(out, dtype=np.float32)
         for dy in range(k):
             for dx in range(k):
-                acc += padded[dy:dy + out.shape[0], dx:dx + out.shape[1]]
+                acc += padded[dy : dy + out.shape[0], dx : dx + out.shape[1]]
         out = acc / (k * k)
     return out
 
@@ -93,7 +94,6 @@ def nlm_fractal(shape, rng, octaves=5, persistence=0.55):
     return field
 
 
-
 def write_geotiff(path, data, crs, transform, nodata=None, dtype=None, tags=None):
     os.makedirs(os.path.dirname(path), exist_ok=True)
     if data.ndim == 2:
@@ -139,7 +139,7 @@ def make_landcover_piecewise_constant(outdir, rng):
 
     f = nlm_fractal((h, w), rng, octaves=6, persistence=0.58)
     # skew distribution so classes occupy uneven areas
-    g = np.clip(f ** 1.7, 0, 1)
+    g = np.clip(f**1.7, 0, 1)
 
     # quantize into 6 classes
     bins = np.quantile(g, [0.12, 0.28, 0.50, 0.72, 0.88])
@@ -154,8 +154,16 @@ def make_landcover_piecewise_constant(outdir, rng):
 
     path = os.path.join(outdir, "landcover_utm33.tif")
     write_geotiff(
-        path, classes, crs, transform, nodata=nodata, dtype="uint8",
-        tags={"SEMANTICS": "piecewise_constant", "SUGGESTED_TRANSFER": "overlay_mode|overlay_weighted(fractions)|sample_nn"}
+        path,
+        classes,
+        crs,
+        transform,
+        nodata=nodata,
+        dtype="uint8",
+        tags={
+            "SEMANTICS": "piecewise_constant",
+            "SUGGESTED_TRANSFER": "overlay_mode|overlay_weighted(fractions)|sample_nn",
+        },
     )
 
 
@@ -176,7 +184,9 @@ def make_fractional_cover(outdir, rng):
 
     # coastline-ish nodata mask: half-plane + noisy boundary
     yy, xx = np.mgrid[0:h, 0:w]
-    boundary = (0.55 * w + 25 * (smooth(rng.random((h, w), dtype=np.float32), 6.0) - 0.5)).astype(np.float32)
+    boundary = (
+        0.55 * w + 25 * (smooth(rng.random((h, w), dtype=np.float32), 6.0) - 0.5)
+    ).astype(np.float32)
     mask = xx > boundary  # "ocean" nodata
     nodata = np.float32(-9999.0)
     frac = frac.copy()
@@ -184,8 +194,16 @@ def make_fractional_cover(outdir, rng):
 
     path = os.path.join(outdir, "frac_treecover_utm33.tif")
     write_geotiff(
-        path, frac, crs, transform, nodata=nodata, dtype="float32",
-        tags={"SEMANTICS": "fraction_cover", "SUGGESTED_TRANSFER": "overlay_weighted(mean)|histogram(numeric)|sample_interp(careful)"}
+        path,
+        frac,
+        crs,
+        transform,
+        nodata=nodata,
+        dtype="float32",
+        tags={
+            "SEMANTICS": "fraction_cover",
+            "SUGGESTED_TRANSFER": "overlay_weighted(mean)|histogram(numeric)|sample_interp(careful)",
+        },
     )
 
 
@@ -208,7 +226,9 @@ def make_popcount_mass_in_cell(outdir, rng):
     cx, cy = int(0.62 * w), int(0.42 * h)
     r2 = (xx - cx) ** 2 + (yy - cy) ** 2
     hotspot = np.exp(-r2 / (2 * (0.12 * min(h, w)) ** 2)).astype(np.float32)
-    corridor = np.exp(-((yy - 0.55 * h) ** 2) / (2 * (0.07 * h) ** 2)).astype(np.float32)
+    corridor = np.exp(-((yy - 0.55 * h) ** 2) / (2 * (0.07 * h) ** 2)).astype(
+        np.float32
+    )
 
     intensity = np.clip(0.55 * field + 0.9 * hotspot + 0.3 * corridor, 0, 1)
     # Heavy-tailed counts: lognormal-ish
@@ -228,8 +248,13 @@ def make_popcount_mass_in_cell(outdir, rng):
 
     path = os.path.join(outdir, "popcount_webmerc.tif")
     write_geotiff(
-        path, counts, crs, transform, nodata=nodata, dtype="int32",
-        tags={"SEMANTICS": "count_total", "SUGGESTED_TRANSFER": "mass_preserve(sum)"}
+        path,
+        counts,
+        crs,
+        transform,
+        nodata=nodata,
+        dtype="int32",
+        tags={"SEMANTICS": "count_total", "SUGGESTED_TRANSFER": "mass_preserve(sum)"},
     )
 
 
@@ -260,8 +285,16 @@ def make_temp_cell_average_geographic(outdir, rng):
 
     path = os.path.join(outdir, "temp_mean_wgs84.tif")
     write_geotiff(
-        path, temp, crs, transform, nodata=nodata, dtype="float32",
-        tags={"SEMANTICS": "cell_average", "SUGGESTED_TRANSFER": "overlay_weighted(mean, area-model matters)"}
+        path,
+        temp,
+        crs,
+        transform,
+        nodata=nodata,
+        dtype="float32",
+        tags={
+            "SEMANTICS": "cell_average",
+            "SUGGESTED_TRANSFER": "overlay_weighted(mean, area-model matters)",
+        },
     )
 
 
@@ -278,7 +311,9 @@ def make_zone_ids_laea(outdir, rng):
     yy, xx = np.mgrid[0:h, 0:w]
     # Build a few big zones as Voronoi-like regions from random seeds
     n_seeds = 8
-    seeds = np.stack([rng.integers(0, w, size=n_seeds), rng.integers(0, h, size=n_seeds)], axis=1)
+    seeds = np.stack(
+        [rng.integers(0, w, size=n_seeds), rng.integers(0, h, size=n_seeds)], axis=1
+    )
     dmin = None
     idx = None
     for i, (sx, sy) in enumerate(seeds):
@@ -298,12 +333,20 @@ def make_zone_ids_laea(outdir, rng):
     zones[islands] = nodata
     # Tiny zone patches (simulate slivers)
     slivers = nlm_fractal((h, w), rng, octaves=5, persistence=0.5) > 0.985
-    zones[slivers] = (n_seeds + 1)
+    zones[slivers] = n_seeds + 1
 
     path = os.path.join(outdir, "zone_ids_laea.tif")
     write_geotiff(
-        path, zones, crs, transform, nodata=nodata, dtype="uint16",
-        tags={"SEMANTICS": "piecewise_constant", "SUGGESTED_TRANSFER": "overlay_mode|overlay_weighted(fractions)"}
+        path,
+        zones,
+        crs,
+        transform,
+        nodata=nodata,
+        dtype="uint16",
+        tags={
+            "SEMANTICS": "piecewise_constant",
+            "SUGGESTED_TRANSFER": "overlay_mode|overlay_weighted(fractions)",
+        },
     )
 
 
@@ -333,8 +376,16 @@ def make_multiband_per_band_nodata(outdir, rng):
     data = np.stack(bands, axis=0)  # (4, h, w)
     path = os.path.join(outdir, "multiband_per_band_nodata_wgs84.tif")
     write_geotiff(
-        path, data, crs, transform, nodata=nodata, dtype="float32",
-        tags={"SEMANTICS": "multi_band_test", "NOTE": "per-band nodata at different pixels"},
+        path,
+        data,
+        crs,
+        transform,
+        nodata=nodata,
+        dtype="float32",
+        tags={
+            "SEMANTICS": "multi_band_test",
+            "NOTE": "per-band nodata at different pixels",
+        },
     )
 
 
@@ -354,7 +405,9 @@ def main():
     make_multiband_per_band_nodata(args.outdir, rng)
 
     print(f"Wrote rasters to: {args.outdir}")
-    print(f"scipy available: {HAVE_SCIPY} (gaussian smoothing {'enabled' if HAVE_SCIPY else 'using box blur fallback'})")
+    print(
+        f"scipy available: {HAVE_SCIPY} (gaussian smoothing {'enabled' if HAVE_SCIPY else 'using box blur fallback'})"
+    )
 
 
 if __name__ == "__main__":

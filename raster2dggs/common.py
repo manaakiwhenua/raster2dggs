@@ -1,3 +1,4 @@
+import gc
 import os
 import errno
 import tempfile
@@ -19,9 +20,6 @@ import pyproj
 
 from typing import Union, Optional, Sequence, Callable
 from pathlib import Path
-from rasterio import crs
-from rasterio.vrt import WarpedVRT
-from rasterio.enums import Resampling
 from tqdm import tqdm
 from tqdm.dask import TqdmCallback
 import dask.dataframe as dd
@@ -30,7 +28,7 @@ import xarray as xr
 from concurrent.futures import ThreadPoolExecutor
 
 from urllib.parse import urlparse
-from rasterio.warp import calculate_default_transform
+from rasterio.warp import transform_bounds
 
 import raster2dggs.constants as const
 import raster2dggs.indexerfactory as idxfactory
@@ -45,24 +43,21 @@ class ParentResolutionException(Exception):
     pass
 
 
-def compute_pixel_area_m2(
-    raster_input, warp_args: dict
-) -> tuple[float, float, float]:
+def compute_pixel_area_m2(raster_input) -> tuple[float, float, float]:
     """
-    Open the raster (warped to WGS84) and return (pixel_area_m2, center_lat, center_lon).
+    Open the raster and return (pixel_area_m2, center_lat, center_lon).
     pixel_area_m2 is the mean pixel area: bounding-box geodesic area divided by pixel count.
+    Bounds are projected to WGS84 for the area calculation.
     """
-    with rio.Env(CHECK_WITH_INVERT_PROJ=True):
-        with rio.open(raster_input, mode="r", sharing=False) as src:
-            with WarpedVRT(src, src_crs=src.crs, **warp_args) as vrt:
-                bounds = vrt.bounds
-                width, height = vrt.width, vrt.height
+    with rio.open(raster_input, mode="r", sharing=False) as src:
+        left, bottom, right, top = transform_bounds(src.crs, "EPSG:4326", *src.bounds)
+        width, height = src.width, src.height
 
-    bbox = shapely.geometry.box(bounds.left, bounds.bottom, bounds.right, bounds.top)
+    bbox = shapely.geometry.box(left, bottom, right, top)
     area_m2, _ = pyproj.Geod(ellps="WGS84").geometry_area_perimeter(bbox)
     pixel_area_m2 = abs(area_m2) / (width * height)
-    center_lat = (bounds.bottom + bounds.top) / 2
-    center_lon = (bounds.left + bounds.right) / 2
+    center_lat = (bottom + top) / 2
+    center_lon = (left + right) / 2
     return pixel_area_m2, center_lat, center_lon
 
 
@@ -70,7 +65,6 @@ def resolve_resolution_mode(
     mode: str,
     dggs: str,
     raster_input,
-    warp_args: dict,
     min_res: int,
     max_res: int,
 ) -> int:
@@ -85,7 +79,7 @@ def resolve_resolution_mode(
     import raster2dggs.indexerfactory as idxfactory
 
     indexer = idxfactory.indexer_instance(dggs)
-    pixel_area_m2, center_lat, center_lon = compute_pixel_area_m2(raster_input, warp_args)
+    pixel_area_m2, center_lat, center_lon = compute_pixel_area_m2(raster_input)
     LOGGER.info(
         "Resolution mode '%s': pixel area=%.2f m², raster centre=(%.4f°N, %.4f°E)",
         mode,
@@ -151,18 +145,6 @@ def resolve_input_path(raster_input: Union[str, Path]) -> Union[str, Path]:
     return raster_input
 
 
-def assemble_warp_args(resampling: str, warp_mem_limit: int) -> dict:
-    warp_args: dict = {
-        "resampling": Resampling[resampling],
-        "crs": crs.CRS.from_epsg(
-            4326
-        ),  # Input raster must be converted to WGS84 (4326) for DGGS indexing
-        "warp_mem_limit": warp_mem_limit,
-    }
-
-    return warp_args
-
-
 def first_mode(x):
     m = pd.Series.mode(x, dropna=False)
     # Result is empty if all x is nan
@@ -180,25 +162,19 @@ def create_aggfunc(aggfunc: str) -> str:
 
 
 def assemble_kwargs(
-    upscale: int,
     compression: str,
     threads: int,
     aggfunc: Union[str, Callable],
     decimals: int,
-    warp_mem_limit: int,
-    resampling: str,
     overwrite: bool,
     compact: bool,
     geo: str,
 ) -> dict:
     kwargs = {
-        "upscale": upscale,
         "compression": compression,
         "threads": threads,
         "aggfunc": aggfunc,
         "decimals": decimals,
-        "warp_mem_limit": warp_mem_limit,
-        "resampling": resampling,
         "overwrite": overwrite,
         "compact": compact,
         "geo": geo if geo != "none" else None,
@@ -316,10 +292,23 @@ def address_boundary_issues(
     out_meta = pd.DataFrame(
         {
             partition_col: pd.Series([], dtype="string"),
-            **{c: pd.Series([], dtype=ddf[c].dtype) for c in band_cols},
+            **{
+                c: pd.Series(
+                    [],
+                    dtype=(
+                        # decimals=0 means integer output
+                        "Int64"
+                        if kwargs["decimals"] == 0
+                        # float32 is promoted to float64 before rounding so
+                        # that decimal values are exactly representable
+                        else "float64" if ddf[c].dtype == np.float32 else ddf[c].dtype
+                    ),
+                )
+                for c in band_cols
+            },
         }
     )
-    out_meta.index = pd.Index([], name=index_col, dtype="object")
+    out_meta.index = pd.Index([], name=index_col, dtype="string")
     with TqdmCallback(desc=f"Aggregating{'/compacting' if kwargs['compact'] else ''}"):
         ddf = ddf.map_partitions(
             indexer.parent_groupby,
@@ -361,7 +350,7 @@ def address_boundary_issues(
                 dask.compute(*write_tasks)
 
         else:
-
+            write_schema = pa.Schema.from_pandas(out_meta, preserve_index=True)
             ddf.to_parquet(
                 output,
                 engine="pyarrow",
@@ -370,6 +359,7 @@ def address_boundary_issues(
                 write_index=True,
                 append=False,
                 compression=kwargs["compression"],
+                schema=write_schema,
             )
 
     LOGGER.debug("Stage 2 (aggregation) complete")
@@ -383,21 +373,16 @@ def initial_index(
     output: Path,
     resolution: int,
     parent_res: Union[None, int],
-    warp_args: dict,
     bands: Optional[Sequence[Union[int, str]]] = None,
-    nodata_policy: str = "skip",
+    nodata_policy: str = "omit",
     emit_nodata_value: Optional[Union[int, float]] = None,
     **kwargs,
 ) -> Path:
     """
-    Responsible for opening the raster_input, and performing DGGS indexing
-        per window of a WarpedVRT.
+    Responsible for opening the raster_input and performing DGGS indexing per window.
 
-    A WarpedVRT is used to enforce reprojection to https://epsg.io/4326,
-        which is used for all DGGS indexing.
-
-    It also allows on-the-fly resampling of the input, which is useful if
-        the target DGGS resolution exceeds the resolution of the input.
+    Pixel centre coordinates are projected from the source CRS to WGS84 using
+    pyproj.Transformer, preserving original raster values without resampling.
 
     This function passes a path to a temporary directory (which contains
         the output of this "stage 1" processing) to a secondary function
@@ -415,11 +400,9 @@ def initial_index(
     with tempfile.TemporaryDirectory() as tmpdir:
         LOGGER.debug(f"Create temporary directory {tmpdir}")
 
-        # https://rasterio.readthedocs.io/en/latest/api/rasterio.warp.html#rasterio.warp.calculate_default_transform
-        with rio.Env(CHECK_WITH_INVERT_PROJ=True):
+        with rio.Env():
             with rio.open(raster_input, mode="r", sharing=False) as src:
                 LOGGER.debug("Source CRS: %s", src.crs)
-                # VRT used to avoid additional disk use given the potential for reprojection to 4326 prior to DGGS indexing
                 band_names = tuple(src.descriptions) if src.descriptions else tuple()
                 count = src.count  # Bands
                 labels_by_index = {
@@ -455,88 +438,68 @@ def initial_index(
                         i for i in selected_indices if not (i in seen or seen.add(i))
                     ]
 
-                upscale_factor = kwargs["upscale"]
-                if upscale_factor > 1:
-                    dst_crs = warp_args["crs"]
-                    transform, width, height = calculate_default_transform(
-                        src.crs,
-                        dst_crs,
-                        src.width,
-                        src.height,
-                        *src.bounds,
-                        dst_width=src.width * upscale_factor,
-                        dst_height=src.height * upscale_factor,
-                    )
-                    upsample_args = dict(
-                        {"transform": transform, "width": width, "height": height}
-                    )
-                    LOGGER.debug(upsample_args)
-                else:
-                    upsample_args = dict({})
+                transformer = pyproj.Transformer.from_crs(
+                    src.crs, "EPSG:4326", always_xy=True
+                )
+                LOGGER.debug("Coordinate transformer: %s → EPSG:4326", src.crs)
 
-                with WarpedVRT(
+                da: xr.Dataset = rioxarray.open_rasterio(
                     src,
-                    src_crs=src.crs,
-                    **warp_args,
-                    **upsample_args,
-                ) as vrt:
-                    LOGGER.debug("VRT CRS: %s", vrt.crs)
-                    da: xr.Dataset = rioxarray.open_rasterio(
-                        vrt,
-                        lock=dask.utils.SerializableLock(),
-                        masked=False,
-                        default_name=const.DEFAULT_NAME,
-                    ).chunk(**{"y": "auto", "x": "auto"})
+                    lock=dask.utils.SerializableLock(),
+                    masked=False,
+                    default_name=const.DEFAULT_NAME,
+                ).chunk(**{"y": "auto", "x": "auto"})
 
-                    # Band selection
-                    if "band" in da.dims and (len(selected_indices) != count):
-                        if (
-                            "band" in da.coords
-                        ):  # rioxarray commonly exposes 1..N as band coords
-                            da = da.sel(band=selected_indices)
-                        else:
-                            da = da.isel(band=[i - 1 for i in selected_indices])
+                # Band selection
+                if "band" in da.dims and (len(selected_indices) != count):
+                    if (
+                        "band" in da.coords
+                    ):  # rioxarray commonly exposes 1..N as band coords
+                        da = da.sel(band=selected_indices)
+                    else:
+                        da = da.isel(band=[i - 1 for i in selected_indices])
 
-                    windows = [window for _, window in vrt.block_windows()]
-                    LOGGER.debug(
-                        "%d windows",
-                        len(windows),
+                windows = [window for _, window in src.block_windows()]
+                LOGGER.debug(
+                    "%d windows",
+                    len(windows),
+                )
+
+                selected_labels = tuple([labels_by_index[i] for i in selected_indices])
+                compression = kwargs["compression"]
+                nodata = src.nodata
+
+                def process(window):
+                    sdf = da.rio.isel_window(window)
+
+                    result = indexer.index_func(
+                        sdf,
+                        resolution,
+                        parent_res,
+                        nodata,
+                        band_labels=selected_labels,
+                        nodata_policy=nodata_policy,
+                        emit_nodata_value=emit_nodata_value,
+                        transformer=transformer,
                     )
 
-                    selected_labels = tuple(
-                        [labels_by_index[i] for i in selected_indices]
+                    partition_col = indexer.partition_col(parent_res)
+                    pq.write_to_dataset(
+                        result,
+                        root_path=tmpdir,
+                        partition_cols=[partition_col],
+                        basename_template=str(window.col_off)
+                        + "."
+                        + str(window.row_off)
+                        + ".{i}.parquet",
+                        use_threads=False,  # Already threading indexing and reading
+                        existing_data_behavior="overwrite_or_ignore",  # Overwrite files with the same name; other existing files are ignored. Allows for an append workflow
+                        compression=compression,
                     )
-                    compression = kwargs["compression"]
 
-                    def process(window):
-                        sdf = da.rio.isel_window(window)
+                    return None
 
-                        result = indexer.index_func(
-                            sdf,
-                            resolution,
-                            parent_res,
-                            vrt.nodata,
-                            band_labels=selected_labels,
-                            nodata_policy=nodata_policy,
-                            emit_nodata_value=emit_nodata_value,
-                        )
-
-                        partition_col = indexer.partition_col(parent_res)
-                        pq.write_to_dataset(
-                            result,
-                            root_path=tmpdir,
-                            partition_cols=[partition_col],
-                            basename_template=str(window.col_off)
-                            + "."
-                            + str(window.row_off)
-                            + ".{i}.parquet",
-                            use_threads=False,  # Already threading indexing and reading
-                            existing_data_behavior="overwrite_or_ignore",  # Overwrite files with the same name; other existing files are ignored. Allows for an append workflow
-                            compression=compression,
-                        )
-
-                        return None
-
+                try:
                     with ThreadPoolExecutor(
                         max_workers=kwargs["threads"]
                     ) as executor, tqdm(
@@ -544,7 +507,18 @@ def initial_index(
                     ) as pbar:
                         for _ in executor.map(process, windows, chunksize=1):
                             pbar.update(1)
-
+                finally:
+                    da.close()
+                    # da, transformer, and process are closure cells and won't
+                    # be freed by reference counting alone if they're in a dask
+                    # task-graph cycle.  Explicitly delete all three and collect
+                    # now, while still inside rio.open(), so the GDAL/PROJ
+                    # objects they hold are torn down during normal execution
+                    # rather than at interpreter shutdown (which causes a
+                    # silent "Error in sys.excepthook" crash for non-WGS84
+                    # rasters).
+                    del da, transformer, process
+                    gc.collect()
             LOGGER.debug("Stage 1 (primary indexing) complete")
             return address_boundary_issues(
                 indexer,
