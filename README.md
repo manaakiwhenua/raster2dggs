@@ -344,13 +344,13 @@ D SELECT band_1 FROM read_parquet('./tests/data/output/larger-than-pixel/temp_me
 │                             band_1                             │
 │ struct(min bigint, max bigint, majority bigint, "mode" bigint) │
 ├────────────────────────────────────────────────────────────────┤
-│ {'min': 16, 'max': 16, 'majority': NULL, 'mode': 16}           │
-│ {'min': 16, 'max': 16, 'majority': NULL, 'mode': 16}           │
-│ {'min': 16, 'max': 17, 'majority': NULL, 'mode': 16}           │
-│ {'min': 18, 'max': 18, 'majority': NULL, 'mode': 18}           │
-│ {'min': 16, 'max': 17, 'majority': NULL, 'mode': 16}           │
-│ {'min': 17, 'max': 18, 'majority': NULL, 'mode': 17}           │
-│ {'min': 16, 'max': 17, 'majority': NULL, 'mode': 16}           │
+│ {'min': 16, 'max': 16, 'majority': 16, 'mode': 16}             │
+│ {'min': 16, 'max': 16, 'majority': 16, 'mode': 16}             │
+│ {'min': 16, 'max': 17, 'majority': 17, 'mode': 17}             │
+│ {'min': 18, 'max': 18, 'majority': 18, 'mode': 18}             │
+│ {'min': 16, 'max': 17, 'majority': 17, 'mode': 17}             │
+│ {'min': -9999, 'max': 18, 'majority': 18, 'mode': 18}          │
+│ {'min': 16, 'max': 17, 'majority': 16, 'mode': 16}             │
 └────────────────────────────────────────────────────────────────┘
 ```
 
