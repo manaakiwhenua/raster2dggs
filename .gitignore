@@ -5,3 +5,5 @@ conda*
 .vscode/
 .spyproject/
 tests/data/input
+tests/data/output
+sample_rasters/

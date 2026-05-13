@@ -6,6 +6,7 @@ import logging
 import numpy as np
 import rioxarray
 import dask
+import click
 import click_log
 import shutil
 
@@ -18,7 +19,7 @@ import json
 import shapely
 import pyproj
 
-from typing import Union, Optional, Sequence, Callable
+from typing import Any, Union, Optional, Sequence, Callable, List, Tuple
 from pathlib import Path
 from tqdm import tqdm
 from tqdm.dask import TqdmCallback
@@ -145,42 +146,68 @@ def resolve_input_path(raster_input: Union[str, Path]) -> Union[str, Path]:
     return raster_input
 
 
-def first_mode(x):
-    m = pd.Series.mode(x, dropna=False)
-    # Result is empty if all x is nan
-    return m.iloc[0] if not m.empty else np.nan
+def create_aggfuncs(
+    names: Tuple[str, ...],
+    decimals: Optional[int] = None,
+) -> List[Tuple[str, Union[str, Callable]]]:
+    """Convert a tuple of aggfunc name strings to (name, callable_or_str) pairs."""
 
+    def _mode(x: pd.Series) -> Any:
+        binned = x.round(decimals) if decimals is not None else x
+        m = pd.Series.mode(binned, dropna=False)
+        return m.iloc[0] if not m.empty else np.nan
 
-def create_aggfunc(aggfunc: str) -> str:
-    if aggfunc == "mode":
-        logging.warning(
-            "Mode aggregation: arbitrary behaviour: if there is more than one mode when aggregating, only the first value will be recorded."
-        )
-        aggfunc = first_mode
+    def _majority(x: pd.Series) -> Any:
+        """Most common value if it appears in >50% of all contributing pixels, else NaN."""
+        valid = x.dropna()
+        if valid.empty:
+            return np.nan
+        binned = valid.round(decimals) if decimals is not None else valid
+        counts = binned.value_counts()
+        if counts.iloc[0] / len(x) > 0.5:
+            return counts.index[0]
+        return np.nan
 
-    return aggfunc
+    result = []
+    for name in names:
+        if name == "mode":
+            logging.warning(
+                "Mode aggregation: arbitrary behaviour: if there is more than one mode when aggregating, only the first value will be recorded."
+            )
+            result.append((name, _mode))
+        elif name == "majority":
+            result.append((name, _majority))
+        elif name == "range":
+            result.append((name, lambda x: x.max() - x.min()))
+        else:
+            result.append((name, name))  # pandas knows these strings
+    return result
 
 
 def assemble_kwargs(
     compression: str,
     threads: int,
-    aggfunc: Union[str, Callable],
+    aggfuncs: List[Tuple[str, Union[str, Callable]]],
     decimals: int,
     overwrite: bool,
     compact: bool,
     geo: str,
+    semantics: str = const.Semantics.POINT_CENTER_STRICT,
+    transfer: str = const.Transfer.ASSIGN_CENTERS,
+    out: str = const.OutputSchema.VALUE,
 ) -> dict:
-    kwargs = {
+    return {
         "compression": compression,
         "threads": threads,
-        "aggfunc": aggfunc,
+        "aggfuncs": aggfuncs,
         "decimals": decimals,
         "overwrite": overwrite,
         "compact": compact,
         "geo": geo if geo != "none" else None,
+        "semantics": semantics,
+        "transfer": transfer,
+        "out": out,
     }
-
-    return kwargs
 
 
 def write_partition_as_geoparquet(
@@ -189,6 +216,7 @@ def write_partition_as_geoparquet(
     base_dir: Union[str, Path],
     partition_col_name: str,
     compression: str,
+    schema: pa.Schema,
 ) -> None:
     # Build shapely geometries for this partition
     geoms = pdf.index.map(geom_func)
@@ -213,13 +241,11 @@ def write_partition_as_geoparquet(
     # Convert to WKB bytes (canonical encoding)
     pdf["geometry"] = shapely.to_wkb(geoms, hex=False)
 
-    table = pa.Table.from_pandas(pdf, preserve_index=True)
-
-    # Ensure geometry is Binary
-    geom_idx = table.schema.get_field_index("geometry")
-    if not pa.types.is_binary(table.field(geom_idx).type):
-        geom_array = pa.array(table.column(geom_idx).to_pylist(), type=pa.binary())
-        table = table.set_column(geom_idx, "geometry", geom_array)
+    table = pa.Table.from_pandas(
+        pdf,
+        schema=schema.append(pa.field("geometry", pa.binary())),
+        preserve_index=True,
+    )
 
     # GeoParquet 1.1.0 metadata
     crs_meta = pyproj.CRS.from_epsg(4326).to_json_dict()
@@ -288,40 +314,130 @@ def address_boundary_issues(
     )
     # Cols to aggregate (bands only)
     band_cols = [c for c in ddf.columns if not c.startswith(f"{indexer.dggs}_")]
+    # Capture source dtypes before map_partitions changes them
+    source_dtypes = {c: ddf[c].dtype for c in band_cols}
 
-    out_meta = pd.DataFrame(
-        {
-            partition_col: pd.Series([], dtype="string"),
-            **{
-                c: pd.Series(
-                    [],
-                    dtype=(
-                        # decimals=0 means integer output
-                        "Int64"
-                        if kwargs["decimals"] == 0
-                        # float32 is promoted to float64 before rounding so
-                        # that decimal values are exactly representable
-                        else "float64" if ddf[c].dtype == np.float32 else ddf[c].dtype
-                    ),
-                )
-                for c in band_cols
-            },
-        }
-    )
-    out_meta.index = pd.Index([], name=index_col, dtype="string")
-    with TqdmCallback(desc=f"Aggregating{'/compacting' if kwargs['compact'] else ''}"):
-        ddf = ddf.map_partitions(
-            indexer.parent_groupby,
-            resolution,
-            parent_res,
-            kwargs["aggfunc"],
-            kwargs["decimals"],
-            meta=out_meta,
+    out = kwargs.get("out", "value")
+
+    decimals = kwargs.get("decimals")
+
+    aggfuncs = kwargs.get("aggfuncs", [("mean", "mean")])
+
+    if out in ("list", "histogram") or (out == "value" and len(aggfuncs) > 1):
+        out_meta = pd.DataFrame(
+            {
+                partition_col: pd.Series([], dtype="string"),
+                **{c: pd.Series([], dtype="object") for c in band_cols},
+            }
         )
+        tqdm_label = (
+            "Collecting"
+            if out != "value"
+            else f"Aggregating{'/compacting' if kwargs['compact'] else ''}"
+        )
+    else:
+        out_meta = pd.DataFrame(
+            {
+                partition_col: pd.Series([], dtype="string"),
+                **{
+                    c: pd.Series(
+                        [],
+                        dtype=(
+                            # decimals=0 means integer output
+                            "Int64"
+                            if decimals == 0
+                            # float32 is promoted to float64 before rounding so
+                            # that decimal values are exactly representable
+                            else (
+                                "float64"
+                                if decimals is not None
+                                and source_dtypes[c] == np.float32
+                                else source_dtypes[c]
+                            )
+                        ),
+                    )
+                    for c in band_cols
+                },
+            }
+        )
+        tqdm_label = f"Aggregating{'/compacting' if kwargs['compact'] else ''}"
+
+    out_meta.index = pd.Index([], name=index_col, dtype="string")
+
+    with TqdmCallback(desc=tqdm_label):
+        if out == "list":
+            mp_func = indexer.parent_groupby_list
+            mp_args = (resolution, parent_res, decimals)
+        elif out == "histogram":
+            mp_func = indexer.parent_groupby_histogram
+            mp_args = (resolution, parent_res, decimals)
+        else:
+            mp_func = indexer.parent_groupby
+            mp_args = (resolution, parent_res, aggfuncs, decimals)
+
+        ddf = ddf.map_partitions(mp_func, *mp_args, meta=out_meta)
+
         if kwargs["compact"]:
             ddf = ddf.map_partitions(
                 indexer.compaction, resolution, parent_res, meta=out_meta
             )
+
+        def _element_type(src_dtype):
+            if decimals == 0:
+                return pa.int64()
+            if decimals is not None and src_dtype == np.float32:
+                return pa.float64()
+            return pa.from_numpy_dtype(src_dtype)
+
+        common_fields = [
+            pa.field(index_col, pa.string()),
+            pa.field(partition_col, pa.string()),
+        ]
+        if out == "list":
+            write_schema = pa.schema(
+                common_fields
+                + [
+                    pa.field(c, pa.list_(_element_type(source_dtypes[c])))
+                    for c in band_cols
+                ]
+            )
+        elif out == "histogram":
+            write_schema = pa.schema(
+                common_fields
+                + [
+                    pa.field(
+                        c,
+                        pa.struct(
+                            [
+                                pa.field(
+                                    "values",
+                                    pa.list_(_element_type(source_dtypes[c])),
+                                ),
+                                pa.field("counts", pa.list_(pa.int64())),
+                            ]
+                        ),
+                    )
+                    for c in band_cols
+                ]
+            )
+        elif len(aggfuncs) > 1:
+            write_schema = pa.schema(
+                common_fields
+                + [
+                    pa.field(
+                        c,
+                        pa.struct(
+                            [
+                                pa.field(agg_name, _element_type(source_dtypes[c]))
+                                for agg_name, _ in aggfuncs
+                            ]
+                        ),
+                    )
+                    for c in band_cols
+                ]
+            )
+        else:
+            write_schema = pa.Schema.from_pandas(out_meta, preserve_index=True)
 
         if kwargs["geo"]:
 
@@ -341,6 +457,7 @@ def address_boundary_issues(
                     output,
                     partition_col,
                     kwargs["compression"],
+                    write_schema,
                 )
                 for part in delayed_parts
             ]
@@ -350,7 +467,6 @@ def address_boundary_issues(
                 dask.compute(*write_tasks)
 
         else:
-            write_schema = pa.Schema.from_pandas(out_meta, preserve_index=True)
             ddf.to_parquet(
                 output,
                 engine="pyarrow",
@@ -365,6 +481,19 @@ def address_boundary_issues(
     LOGGER.debug("Stage 2 (aggregation) complete")
 
     return output
+
+
+def validate_transfer_config(semantics: str, transfer: str, out: str) -> None:
+    if (semantics, transfer) in const.INAPPROPRIATE:
+        raise click.UsageError(
+            f"--transfer {transfer!r} is inappropriate for --semantics {semantics!r}. "
+            f"See the semantics × transfer matrix in the documentation."
+        )
+    if (semantics, transfer, out) not in const.IMPLEMENTED:
+        raise NotImplementedError(
+            f"--semantics {semantics!r} / --transfer {transfer!r} / --out {out!r} "
+            f"is a valid combination but is not yet implemented."
+        )
 
 
 def initial_index(
@@ -388,6 +517,8 @@ def initial_index(
         the output of this "stage 1" processing) to a secondary function
         that addresses issues at the boundaries of raster windows.
     """
+    validate_transfer_config(kwargs["semantics"], kwargs["transfer"], kwargs["out"])
+
     indexer = idxfactory.indexer_instance(dggs)
     LOGGER.info(
         "Indexing %s at %s resolution %d, parent resolution %d",

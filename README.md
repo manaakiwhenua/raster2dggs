@@ -108,7 +108,7 @@ Options:
                                   source raster nodata value (or
                                   --emit_nodata_value if set). Note: non-NaN
                                   emitted values participate in cell
-                                  aggregation (see -a/--aggfunc); if this is
+                                  aggregation (see -a/--agg); if this is
                                   undesired, ensure your source nodata is NaN
                                   or override with --emit_nodata_value.
                                   [default: omit]
@@ -118,7 +118,7 @@ Options:
                                   none is defined). Pass 'nan' to explicitly
                                   emit NaN. Coerced to the output dtype. Note:
                                   non-NaN values participate in cell
-                                  aggregation (see -a/--aggfunc).
+                                  aggregation (see -a/--agg).
   -c, --compression TEXT          Compression method to use for the output
                                   Parquet files. Options include 'snappy',
                                   'gzip', 'brotli', 'lz4', 'zstd', etc. Use
@@ -127,20 +127,36 @@ Options:
   -t, --threads INTEGER           Number of threads to use when running in
                                   parallel. The default is determined based
                                   dynamically as the total number of available
-                                  cores, minus one.  [default: 19]
-  -a, --aggfunc [count|mean|sum|prod|std|var|min|max|median|mode]
-                                  Numpy aggregate function to apply when
-                                  aggregating cell values after DGGS indexing,
-                                  in case of multiple pixels mapping to the
-                                  same DGGS cell.  [default: mean]
-  -d, --decimals INTEGER          Number of decimal places to round values
-                                  when aggregating. Use 0 for integer output.
-                                  [default: 1]
+                                  cores, minus one.
+  -a, --agg AGGFUNC[,AGGFUNC...]  Aggregation function(s) applied when
+                                  multiple raster pixels map to the same DGGS
+                                  cell. Options: count, mean, sum, prod, std,
+                                  var, min, max, median, mode, majority,
+                                  nunique, range. Comma-separate multiple
+                                  names (e.g. min,max) to produce a struct
+                                  column per band.  [default: mean]
+  --semantics [point_center_strict|point_sample_field|cell_average|piecewise_constant|fraction_cover|count_total|density|event_indicator]
+                                  What a raster cell value means (determines
+                                  valid transfer operators).  [default:
+                                  point_center_strict]
+  --transfer [assign_centers|sample_nn|sample_interp|overlay_weighted|overlay_mode|mass_preserve]
+                                  How values are mapped from raster pixels to
+                                  DGGS cells.  [default: assign_centers]
+  --out [value|fractions|histogram|list]
+                                  Output schema: scalar value, class
+                                  fractions, histogram, or sorted sample list.
+                                  'list' collects all contributing pixel
+                                  values per cell in ascending order
+                                  (deterministic); use -d/--decimals to
+                                  control precision.  [default: value]
+  -d, --decimals INTEGER|none     Decimal places to round output values. Use 0
+                                  for integer output, 'none' to disable
+                                  rounding.  [default: 1]
   -o, --overwrite
   -co, --compact                  Compact the cells up to the parent
-                                  resolution. Compaction is not applied for
-                                  cells without identical values across all
-                                  bands.
+                                  resolution. Compaction is only applied where
+                                  all sibling cells share identical values in
+                                  every output column.
   -g, --geo [point|polygon|none]  Write output as a GeoParquet (v1.1.0) with
                                   either point or polygon geometry.  [default:
                                   none]
@@ -151,6 +167,80 @@ Options:
   --version                       Show the version and exit.
   --help                          Show this message and exit.
 ```
+
+## Raster semantics and transfer operators
+
+The conversion from raster to DGGS is not a single operation — it depends on what a raster cell value *means* and how you want values *mapped* to DGGS cells. Three flags control this:
+
+- `--semantics` — what a raster cell value represents
+- `--transfer` — the method used to map values from pixels to DGGS cells
+- `--out` — the output schema (scalar value, class fractions, histogram, or sorted list)
+- `-a`/`--agg` — aggregation function(s) applied when multiple pixels map to the same DGGS cell; comma-separate multiple names (e.g. `--agg min,max`) to produce a struct column per band (`band_1: struct<min: T, max: T>`) instead of a scalar
+
+The defaults (`--semantics point_center_strict --transfer assign_centers --out value`) reflect the historical behaviour of the tool: each pixel centre is indexed to a DGGS cell, and multiple pixels mapping to the same cell are aggregated with the function specified by `--agg`. This produces sparse output (gaps) when the DGGS resolution is finer than the raster.
+
+Support for additional semantics × transfer combinations is being added incrementally. Combinations that are not yet implemented will raise a clear error rather than silently producing incorrect output.
+
+### Semantics (`--semantics`)
+
+| Value | Meaning | Examples |
+|---|---|---|
+| `point_center_strict` | Value applies **only** at the pixel centre; no implied value elsewhere | Observation grids, sensor samples on a lattice |
+| `point_sample_field` | Sample of a continuous field (reconstructable by interpolation) | DEMs (often), modelled temperature/pressure surfaces |
+| `cell_average` | Value is the **average over the pixel area** (block support) | Climate "mean over grid cell", averaged concentration grids |
+| `piecewise_constant` | Uniform value across the pixel area ("pixel-as-polygon") | Land cover class, soil class, zone IDs, masks |
+| `fraction_cover` | Value is a proportion of a class or material within the pixel | % tree cover, % impervious surface, fractional water/snow |
+| `count_total` | Value is a total within the pixel (extensive; must conserve sums) | Population count per cell, emissions totals, incident counts |
+| `density` | Per-area intensity (intensive quantity) | People/km², biomass density, W/m², rainfall rate |
+| `event_indicator` | Presence/absence or event count binned to cells | Fire detected (0/1), lightning presence, event counts |
+
+### Transfer operators (`--transfer`)
+
+| Value | Description |
+|---|---|
+| `assign_centers` | For each raster pixel, index its **centre coordinate** to a DGGS cell. Produces sparse output (gaps) when the DGGS resolution is finer than the raster. |
+| `sample_nn` | For each DGGS cell, sample the raster at the **DGGS cell centre** using nearest-neighbour. |
+| `sample_interp` | For each DGGS cell, sample the raster at the DGGS cell centre with interpolation (e.g. bilinear). Suitable for continuous fields. |
+| `overlay_weighted` | For each DGGS cell, compute overlap-weighted outputs (means, fractions, histograms). Requires an area model. |
+| `overlay_mode` | For each DGGS cell, assign the class with the greatest overlap area. Typically paired with `--valid-coverage-threshold`. |
+| `mass_preserve` | Redistribute each raster cell total into DGGS cells proportional to overlap area. Conserves sums. |
+
+### Semantics × transfer compatibility
+
+Legend: **✓** appropriate/common · **△** possible (with caveats) · **✗** inappropriate (breaks semantics) · **—** not yet implemented
+
+> [!NOTE]
+> The following table was produced with LLM assistance and may contain errors.
+
+| `--semantics` | `assign_centers` | `sample_nn` | `sample_interp` | `overlay_weighted` | `overlay_mode` | `mass_preserve` | Typical `--out` / `--agg` |
+|---|:---:|:---:|:---:|:---:|:---:|:---:|---|
+| `point_center_strict` | **✓** | ✗ | ✗ | ✗ | ✗ | ✗ | `value` with `--agg mean\|min\|max\|…`; `--agg min,max` for struct; `--out list\|histogram` |
+| `point_sample_field` | △ | **✓** | **✓** | △ | ✗ | ✗ | `value` |
+| `cell_average` | ✗ | △ | ✗ | **✓** | ✗ | ✗ | `value --agg mean` |
+| `piecewise_constant` | ✗ | △ | ✗ | **✓** | **✓** | ✗ | `value --agg mode` or `fractions` |
+| `fraction_cover` | ✗ | △ | △ | **✓** | ✗ | ✗ | `value --agg mean` |
+| `count_total` | ✗ | ✗ | ✗ | △ | ✗ | **✓** | `value --agg sum` |
+| `density` | ✗ | △ | △ | **✓** | ✗ | △ | `value --agg mean` |
+| `event_indicator` | △ | △ | ✗ | △ | △ | **✓** | Presence: `fractions`; Counts: `value --agg sum` |
+
+### Output schemas (`--out`)
+
+| Value | Schema | Description |
+|---|---|---|
+| `value` | Scalar `T`, or `struct<name: T, …>` with multi-`--agg` | One value per DGGS cell per band (default). Pass a single `--agg` for a scalar; pass comma-separated names (e.g. `--agg min,max`) for a struct. |
+| `fractions` | *(not yet implemented)* | Area fractions per class per DGGS cell, for categorical rasters. |
+| `histogram` | `struct<values: list<T>, counts: list<int64>>` | Value-count pairs for all contributing pixels, in ascending value order. |
+| `list` | `list<T>` | All contributing pixel values in ascending order (deterministic). Useful for `point_center_strict` coarsening workflows. `--agg` has no effect. |
+
+### Currently implemented combinations
+
+| `--semantics` | `--transfer` | `--out` | Notes |
+|---|---|---|---|
+| `point_center_strict` | `assign_centers` | `value` | Single `--agg` → scalar; multiple `--agg` (e.g. `min,max`) → struct per band. |
+| `point_center_strict` | `assign_centers` | `list` | Sorted list of all contributing pixel values per cell. `--agg` is ignored. |
+| `point_center_strict` | `assign_centers` | `histogram` | Value-count struct per cell. `--agg` is ignored. |
+
+All other valid combinations will raise a `NotImplementedError` with a descriptive message until they are added.
 
 ## Visualising output
 
@@ -199,6 +289,71 @@ D SELECT * FROM read_parquet('se_island.pq') LIMIT 7;
 │    0.1 │    0.1 │    0.3 │ POLYGON ((-176.1832814769592 -44.33554799806149, -176.1832814769592 -44.3356…  │ 72b47e02824 │ 72b47   │
 └────────┴────────┴────────┴────────────────────────────────────────────────────────────────────────────────┴─────────────┴─────────┘
 ```
+
+Output value columns may also be arrays (`double[]` or `int64[]`) or structs, not just scalar values, depending on the options you pass to the tool (e.g. `--agg min,max` (multiple aggregations) or `--output list|histogram`) and the relative size of the DGGS cells and raster cells.
+
+In the case of struct outputs, it should be noted that there's no real consequence of using a struct (i.e. `band_1.min`, `band_1.max`) over a series of flat columns (i.e. `band_1_min`, `band_1_max`), since Parquet uses Dremel shredding for nested types: a `struct(min double, max double)` column is physically stored as two separate column chunks (`band_1.min`, `band_1.max`) with definition/repetition level metadata. So the on-disk layout is identical to flat columns. Consequences:
+
+- **Compression**: identical. The min values are stored contiguously together, max values together, same as flat columns. Encoding schemes (dictionary, RLE, delta) apply the same way.
+- **Column pruning / projection pushdown**: also identical for modern readers. DuckDB's `SELECT band_1.min FROM ...` reads only the min sub-column chunk, same as `SELECT band_1_min FROM ...` would with flat columns.
+- **Definition level overhead**: structs add a small amount of metadata to encode nullability at each nesting level. For non-nullable structs with non-nullable fields this is negligible: a few bytes per row group.
+
+Examples:
+
+`--out list -d 1`:
+
+```bash
+D SELECT band_1 FROM read_parquet('./tests/data/output/larger-than-pixel/temp_mean_wgs84-poly.geoparquet') LIMIT 7;
+┌────────────────────────────────────────────┐
+│                   band_1                   │
+│                  double[]                  │
+├────────────────────────────────────────────┤
+│ [15.9, 15.9, 16.1, 16.1, 16.3, 16.3]       │
+│ [16.0, 16.0, 16.0, 16.1, 16.1, 16.2, 16.2] │
+│ [16.4, 16.6, 16.7, 16.7, 17.0, 17.1]       │
+│ [18.0, 18.2, 18.3, 18.4, 18.5]             │
+│ [16.4, 16.5, 16.5, 16.6, 16.8, 16.8]       │
+│ [17.4, 17.6, 17.7, 17.9, 18.0, 18.2]       │
+│ [16.1, 16.2, 16.2, 16.3, 16.4, 16.5]       │
+└────────────────────────────────────────────┘
+```
+
+`--out histogram -d 0`:
+
+```bash
+D SELECT band_1 FROM read_parquet('./tests/data/output/larger-than-pixel/temp_mean_wgs84-poly.geoparquet') LIMIT 7;
+┌────────────────────────────────────────────┐
+│                   band_1                   │
+│ struct("values" bigint[], counts bigint[]) │
+├────────────────────────────────────────────┤
+│ {'values': [16], 'counts': [6]}            │
+│ {'values': [16], 'counts': [7]}            │
+│ {'values': [16, 17], 'counts': [1, 5]}     │
+│ {'values': [18], 'counts': [5]}            │
+│ {'values': [16, 17], 'counts': [2, 4]}     │
+│ {'values': [17, 18], 'counts': [1, 5]}     │
+│ {'values': [16, 17], 'counts': [5, 1]}     │
+└────────────────────────────────────────────┘
+```
+
+`--out value --agg min,max,majority,mode -d 0`:
+
+```bash
+D SELECT band_1 FROM read_parquet('./tests/data/output/larger-than-pixel/temp_mean_wgs84-poly.geoparquet') LIMIT 7;
+┌────────────────────────────────────────────────────────────────┐
+│                             band_1                             │
+│ struct(min bigint, max bigint, majority bigint, "mode" bigint) │
+├────────────────────────────────────────────────────────────────┤
+│ {'min': 16, 'max': 16, 'majority': NULL, 'mode': 16}           │
+│ {'min': 16, 'max': 16, 'majority': NULL, 'mode': 16}           │
+│ {'min': 16, 'max': 17, 'majority': NULL, 'mode': 16}           │
+│ {'min': 18, 'max': 18, 'majority': NULL, 'mode': 18}           │
+│ {'min': 16, 'max': 17, 'majority': NULL, 'mode': 16}           │
+│ {'min': 17, 'max': 18, 'majority': NULL, 'mode': 17}           │
+│ {'min': 16, 'max': 17, 'majority': NULL, 'mode': 16}           │
+└────────────────────────────────────────────────────────────────┘
+```
+
 
 ### GDAL
 

@@ -132,6 +132,78 @@ class ResolutionMode(StrEnum):
     MIN_DIFF = "min-diff"
 
 
+class Semantics(StrEnum):
+    POINT_CENTER_STRICT = "point_center_strict"
+    POINT_SAMPLE_FIELD = "point_sample_field"
+    CELL_AVERAGE = "cell_average"
+    PIECEWISE_CONSTANT = "piecewise_constant"
+    FRACTION_COVER = "fraction_cover"
+    COUNT_TOTAL = "count_total"
+    DENSITY = "density"
+    EVENT_INDICATOR = "event_indicator"
+
+
+class Transfer(StrEnum):
+    ASSIGN_CENTERS = "assign_centers"
+    SAMPLE_NN = "sample_nn"
+    SAMPLE_INTERP = "sample_interp"
+    OVERLAY_WEIGHTED = "overlay_weighted"
+    OVERLAY_MODE = "overlay_mode"
+    MASS_PRESERVE = "mass_preserve"
+
+
+class OutputSchema(StrEnum):
+    VALUE = "value"
+    FRACTIONS = "fractions"
+    HISTOGRAM = "histogram"
+    LIST = "list"
+
+
+INAPPROPRIATE: set = {
+    # point_center_strict: only assign_centers is appropriate
+    ("point_center_strict", "sample_nn"),
+    ("point_center_strict", "sample_interp"),
+    ("point_center_strict", "overlay_weighted"),
+    ("point_center_strict", "overlay_mode"),
+    ("point_center_strict", "mass_preserve"),
+    # point_sample_field: assign_centers treats pixels as non-interpolatable points
+    ("point_sample_field", "assign_centers"),
+    # cell_average: must use area-weighted overlay
+    ("cell_average", "assign_centers"),
+    ("cell_average", "sample_nn"),
+    ("cell_average", "sample_interp"),
+    ("cell_average", "overlay_mode"),
+    ("cell_average", "mass_preserve"),
+    # piecewise_constant: assign_centers ignores pixel area; interp and mass wrong
+    ("piecewise_constant", "assign_centers"),
+    ("piecewise_constant", "sample_interp"),
+    ("piecewise_constant", "mass_preserve"),
+    # fraction_cover: values are areal fractions; point-based methods are wrong
+    ("fraction_cover", "assign_centers"),
+    ("fraction_cover", "sample_nn"),
+    ("fraction_cover", "overlay_mode"),
+    ("fraction_cover", "mass_preserve"),
+    # count_total: totals require mass preservation; sampling breaks conservation
+    ("count_total", "assign_centers"),
+    ("count_total", "sample_nn"),
+    ("count_total", "sample_interp"),
+    ("count_total", "overlay_weighted"),
+    ("count_total", "overlay_mode"),
+    # density: per-area intensity; assign_centers and overlay_mode are wrong
+    ("density", "assign_centers"),
+    ("density", "overlay_mode"),
+    ("density", "mass_preserve"),
+    # event_indicator: interpolation is meaningless for discrete events
+    ("event_indicator", "sample_interp"),
+}
+
+IMPLEMENTED: set = {
+    ("point_center_strict", "assign_centers", "value"),
+    ("point_center_strict", "assign_centers", "list"),
+    ("point_center_strict", "assign_centers", "histogram"),
+}
+
+
 # Surface area of the WGS84 oblate spheroid in m²
 # Formula: 2π a²(1 + (b²/a²e) atanh(e)), a=6378137.0 m, b≈6356752.314140 m, e=eccentricity
 WGS84_SURFACE_AREA_M2: float = 5.10065621724088e14
@@ -147,6 +219,9 @@ AGGFUNC_OPTIONS = [
     "max",
     "median",
     "mode",
+    "majority",
+    "nunique",
+    "range",
 ]
 
 GEOM_TYPES = ["point", "polygon", "none"]

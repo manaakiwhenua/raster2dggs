@@ -80,7 +80,11 @@ class A5RasterIndexer(RasterIndexer):
         Not a part of the RasterIndexer interface
         """
         try:
-            return const.MIN_A5 <= a5py.get_resolution(a5py.hex_to_u64(cell)) <= const.MAX_A5
+            return (
+                const.MIN_A5
+                <= a5py.get_resolution(a5py.hex_to_u64(cell))
+                <= const.MAX_A5
+            )
         except Exception:
             return False
 
