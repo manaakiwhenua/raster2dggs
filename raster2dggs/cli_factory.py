@@ -11,6 +11,55 @@ import raster2dggs.common as common
 from raster2dggs import __version__
 
 
+class AggFuncListParamType(click.ParamType):
+    """Accepts one or more comma-separated aggregation function names."""
+
+    name = "AGGFUNC"
+
+    def convert(self, value, param, ctx):
+        if isinstance(value, tuple):
+            return value
+        parts = tuple(v.strip() for v in str(value).split(","))
+        for p in parts:
+            if p not in const.AGGFUNC_OPTIONS:
+                self.fail(
+                    f"'{p}' is not a valid aggregation function. "
+                    f"Choose from: {', '.join(const.AGGFUNC_OPTIONS)}",
+                    param,
+                    ctx,
+                )
+        return parts
+
+    def get_metavar(self, param, ctx=None):
+        return "AGGFUNC[,AGGFUNC...]"
+
+
+class DecimalsParamType(click.ParamType):
+    """Accepts a non-negative integer or 'none' (meaning: do not round)."""
+
+    name = "DECIMALS"
+
+    def convert(self, value, param, ctx):
+        if value is None:
+            return None
+        if isinstance(value, int):
+            return value
+        if isinstance(value, str) and value.lower() == "none":
+            return None
+        try:
+            i = int(value)
+            if i < 0:
+                self.fail(f"{i}: decimals must be >= 0", param, ctx)
+            return i
+        except (ValueError, TypeError):
+            self.fail(
+                f"'{value}': expected a non-negative integer or 'none'", param, ctx
+            )
+
+    def get_metavar(self, param, ctx=None):
+        return "INTEGER|none"
+
+
 class ResolutionParamType(click.ParamType):
     """Accepts an integer resolution in [min_res, max_res] or a named auto-detection mode."""
 
@@ -69,7 +118,7 @@ SPECS: List[DGGS_Spec] = [
         3,
     ),
     DGGS_Spec("s2", "S2", const.MIN_S2, const.MAX_S2, 8),
-    DGGS_Spec("a5", "A5", const.MIN_A5, const.MAX_A5, 8), # TODO slow, replace with a5_fast
+    DGGS_Spec("a5", "A5", const.MIN_A5, const.MAX_A5, 8),
     DGGS_Spec("isea4r", "ISEA4R", const.MIN_ISEA4R, const.MAX_ISEA4R, 8),
     DGGS_Spec("isea9r", "ISEA9R", const.MIN_ISEA9R, const.MAX_ISEA9R, 5),
     DGGS_Spec("isea3h", "ISEA3H", const.MIN_ISEA3H, const.MAX_ISEA3H, 10),
@@ -85,7 +134,9 @@ SPECS: List[DGGS_Spec] = [
     DGGS_Spec("rtea7h", "RTEA7H", const.MIN_RTEA7H, const.MAX_RTEA7H, 6),
     # DGGS_Spec("rtea7h_z7", "RTEA7H_Z7", const.MIN_RTEA7H_Z7, const.MAX_RTEA7H_Z7, 6),
     DGGS_Spec("healpix", "HEALPix", const.MIN_HEALPIX, const.MAX_HEALPIX, 5),
-    DGGS_Spec("rhealpix", "rHEALPix", const.MIN_RHEALPIX, const.MAX_RHEALPIX, 5), # Prefer rhp
+    DGGS_Spec(
+        "rhealpix", "rHEALPix", const.MIN_RHEALPIX, const.MAX_RHEALPIX, 5
+    ),  # Prefer rhp
 ]
 # NB use 5 for IS/VEA9R, and 10 for IS/VEA3H, and 8 for GNOSIS --- corresponds to ~64K sub-zones
 
@@ -108,27 +159,33 @@ def run_index(
     emit_nodata_value: Optional[float],
     compression: str,
     threads: int,
-    aggfunc: str,
-    decimals: int,
+    agg,
+    decimals,
     overwrite: bool,
     compact: bool,
     geo: str,
     tempdir,
+    semantics: str,
+    transfer: str,
+    out: str,
 ):
     tempfile.tempdir = tempdir if tempdir is not None else tempfile.tempdir
 
     common.check_resolutions(resolution, parent_res)
 
     raster_input = common.resolve_input_path(raster_input)
-    aggfunc = common.create_aggfunc(aggfunc)
+    agg = common.create_aggfuncs(agg, decimals)
     kwargs = common.assemble_kwargs(
         compression,
         threads,
-        aggfunc,
+        agg,
         decimals,
         overwrite,
         compact,
         geo,
+        semantics,
+        transfer,
+        out,
     )
 
     common.initial_index(
@@ -193,7 +250,7 @@ def make_command(spec: DGGS_Spec):
         help=(
             "'omit' excludes nodata cells from output (default). "
             "'emit' includes them, writing the source raster nodata value (or --emit_nodata_value if set). "
-            "Note: non-NaN emitted values participate in cell aggregation (see -a/--aggfunc); "
+            "Note: non-NaN emitted values participate in cell aggregation (see -a/--agg); "
             "if this is undesired, ensure your source nodata is NaN or override with --emit_nodata_value."
         ),
     )
@@ -207,7 +264,7 @@ def make_command(spec: DGGS_Spec):
             "If omitted, the source raster nodata value is used (NaN if none is defined). "
             "Pass 'nan' to explicitly emit NaN. "
             "Coerced to the output dtype. "
-            "Note: non-NaN values participate in cell aggregation (see -a/--aggfunc)."
+            "Note: non-NaN values participate in cell aggregation (see -a/--agg)."
         ),
     )
     @click.option(
@@ -225,24 +282,50 @@ def make_command(spec: DGGS_Spec):
     )
     @click.option(
         "-a",
-        "--aggfunc",
+        "--agg",
         default=const.DEFAULTS["aggfunc"],
-        type=click.Choice(const.AGGFUNC_OPTIONS),
-        help="Numpy aggregate function to apply when aggregating cell values after DGGS indexing, in case of multiple pixels mapping to the same DGGS cell.",
+        type=AggFuncListParamType(),
+        show_default=True,
+        help=(
+            "Aggregation function(s) applied when multiple raster pixels map to the same DGGS cell. "
+            f"Options: {', '.join(const.AGGFUNC_OPTIONS)}. "
+            "Comma-separate multiple names (e.g. min,max) to produce a struct column per band."
+        ),
+    )
+    @click.option(
+        "--semantics",
+        default=const.Semantics.POINT_CENTER_STRICT.value,
+        type=click.Choice([s.value for s in const.Semantics]),
+        show_default=True,
+        help="What a raster cell value means (determines valid transfer operators).",
+    )
+    @click.option(
+        "--transfer",
+        default=const.Transfer.ASSIGN_CENTERS.value,
+        type=click.Choice([t.value for t in const.Transfer]),
+        show_default=True,
+        help="How values are mapped from raster pixels to DGGS cells.",
+    )
+    @click.option(
+        "--out",
+        default=const.OutputSchema.VALUE.value,
+        type=click.Choice([o.value for o in const.OutputSchema]),
+        show_default=True,
+        help="Output schema: scalar value, class fractions, histogram, or sorted sample list. 'list' collects all contributing pixel values per cell in ascending order (deterministic); use -d/--decimals to control precision.",
     )
     @click.option(
         "-d",
         "--decimals",
         default=const.DEFAULTS["decimals"],
-        type=int,
-        help="Number of decimal places to round values when aggregating. Use 0 for integer output.",
+        type=DecimalsParamType(),
+        help="Decimal places to round output values. Use 0 for integer output, 'none' to disable rounding.",
     )
     @click.option("-o", "--overwrite", is_flag=True)
     @click.option(
         "-co",
         "--compact",
         is_flag=True,
-        help="Compact the cells up to the parent resolution. Compaction is not applied for cells without identical values across all bands.",
+        help="Compact the cells up to the parent resolution. Compaction is only applied where all sibling cells share identical values in every output column.",
     )
     @click.option(
         "-g",
@@ -268,12 +351,15 @@ def make_command(spec: DGGS_Spec):
         emit_nodata_value,
         compression,
         threads,
-        aggfunc,
+        agg,
         decimals,
         overwrite,
         compact,
         geo,
         tempdir,
+        semantics,
+        transfer,
+        out,
     ):
         if isinstance(resolution, str):
             raster_path = common.resolve_input_path(raster_input)
@@ -289,6 +375,15 @@ def make_command(spec: DGGS_Spec):
             if parent_res is not None
             else (max(spec.min_res, int(resolution) - spec.default_parent_offset))
         )
+        if out in ("list", "histogram", "interval"):
+            ctx = click.get_current_context()
+            if (
+                ctx.get_parameter_source("agg")
+                == click.core.ParameterSource.COMMANDLINE
+            ):
+                common.LOGGER.warning(
+                    f"--out {out!r}: --agg has no effect (all contributing values are collected)"
+                )
         return run_index(
             spec.name,
             raster_input,
@@ -300,12 +395,15 @@ def make_command(spec: DGGS_Spec):
             emit_nodata_value,
             compression,
             threads,
-            aggfunc,
+            agg,
             decimals,
             overwrite,
             compact,
             geo,
             tempdir,
+            semantics,
+            transfer,
+            out,
         )
 
     return cmd
