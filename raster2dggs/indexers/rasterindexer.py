@@ -3,7 +3,7 @@
 """
 
 from numbers import Number
-from typing import Callable, Tuple, Union, Optional
+from typing import Any, Callable, List, Tuple, Union, Optional
 
 import pandas as pd
 import pyarrow as pa
@@ -19,6 +19,15 @@ def _is_nan(v) -> bool:
         return bool(np.isnan(v))
     except Exception:
         return False
+
+
+def _col_is_uniform(series: pd.Series) -> bool:
+    """Return True if every value in series is identical. Handles unhashable types (e.g. dicts)."""
+    try:
+        return series.nunique(dropna=False) == 1
+    except TypeError:
+        first = series.iloc[0]
+        return all(v == first for v in series)
 
 
 def _mask_is_nodata(series: pd.Series, nodata) -> pd.Series:
@@ -144,44 +153,141 @@ class RasterIndexer(IRasterIndexer):
 
     def parent_groupby(
         self,
-        df,
+        df: pd.DataFrame,
         resolution: int,
         parent_res: int,
-        aggfunc: Union[str, Callable],
-        decimals: int,
+        aggfuncs: List[Tuple[str, Union[str, Callable]]],
+        decimals: Optional[int],
     ) -> pd.DataFrame:
         """
-        Function for aggregating the DGGS resolution values per parent
-            partition. Each partition will be run through with a pandas
-            groupby function. This step is to ensure there are no duplicate
-            cell values, which will happen when indexing a high resolution
-            raster at a coarser DGGS resolution.
+        Aggregate DGGS cell values per parent partition.
+
+        aggfuncs is a list of (name, callable_or_str) pairs.
+        Single-element list → scalar output per band (existing behaviour).
+        Multi-element list → struct output keyed by aggregation name.
         """
         index_col = self.index_col(resolution)
         partition_col = self.partition_col(parent_res)
         df = df.set_index(index_col)
-        if decimals > 0:
+
+        if len(aggfuncs) == 1:
+            _, func = aggfuncs[0]
             agg = df.groupby([partition_col, index_col], sort=False, observed=True).agg(
-                aggfunc
+                func
             )
-            # float32 cannot represent most decimal fractions exactly, so
-            # rounding in float32 leaves artefacts like 0.4000000059604645.
-            # Promote to float64 first so the rounded values are exact.
-            float32_cols = agg.select_dtypes(include="float32").columns
-            if len(float32_cols):
-                agg = agg.astype({c: "float64" for c in float32_cols})
-            gb = agg.round(decimals)
+            if decimals is None:
+                gb = agg
+            elif decimals > 0:
+                # float32 cannot represent most decimal fractions exactly, so
+                # rounding in float32 leaves artefacts like 0.4000000059604645.
+                # Promote to float64 first so the rounded values are exact.
+                float32_cols = agg.select_dtypes(include="float32").columns
+                if len(float32_cols):
+                    agg = agg.astype({c: "float64" for c in float32_cols})
+                gb = agg.round(decimals)
+            else:
+                gb = agg.round(decimals).astype("Int64")
+            gb = gb.reset_index(level=0)
+            gb.index.name = index_col
+            return gb
         else:
-            gb = (
-                df.groupby([partition_col, index_col], sort=False, observed=True)
-                .agg(aggfunc)
-                .round(decimals)
-                .astype("Int64")
+            # Multi-agg: run each function separately, combine into per-band structs.
+            per_agg = {}
+            for agg_name, func in aggfuncs:
+                r = df.groupby(
+                    [partition_col, index_col], sort=False, observed=True
+                ).agg(func)
+                if decimals is not None:
+                    float32_cols = r.select_dtypes(include="float32").columns
+                    if len(float32_cols):
+                        r = r.astype({c: "float64" for c in float32_cols})
+                    r = r.round(decimals)
+                per_agg[agg_name] = r.reset_index(level=0)
+
+            base = next(iter(per_agg.values()))
+            result = pd.DataFrame(
+                {partition_col: base[partition_col]}, index=base.index
             )
-        # Move parent out to a column; keep child as the index
-        # MultiIndex levels are [partition_col, index_col] in that order
-        gb = gb.reset_index(level=0)  # parent -> column
-        gb.index.name = index_col  # child remains index
+            result.index.name = index_col
+            for col in self.band_cols(base):
+                result[col] = [
+                    {agg_name: per_agg[agg_name].at[idx, col] for agg_name in per_agg}
+                    for idx in result.index
+                ]
+            return result
+
+    def _collect_lists(
+        self,
+        df: pd.DataFrame,
+        resolution: int,
+        parent_res: int,
+    ) -> pd.DataFrame:
+        """Group by cell, collecting all contributing pixel values into lists per band."""
+        index_col = self.index_col(resolution)
+        partition_col = self.partition_col(parent_res)
+        df = df.set_index(index_col)
+        gb = df.groupby([partition_col, index_col], sort=False, observed=True).agg(list)
+        gb = gb.reset_index(level=0)
+        gb.index.name = index_col
+        return gb
+
+    def parent_groupby_list(
+        self,
+        df: pd.DataFrame,
+        resolution: int,
+        parent_res: int,
+        decimals: Optional[int] = None,
+    ) -> pd.DataFrame:
+        """
+        Collect all contributing pixel values per DGGS cell into lists.
+        Used with --out list. Applies rounding element-wise if decimals is not None.
+        """
+        gb = self._collect_lists(df, resolution, parent_res)
+        for col in self.band_cols(gb):
+            if decimals == 0:
+                gb[col] = gb[col].map(
+                    lambda lst: sorted(int(round(float(v))) for v in lst)
+                )
+            elif decimals is not None:
+                gb[col] = gb[col].map(
+                    lambda lst: sorted(round(float(v), decimals) for v in lst)
+                )
+            else:
+                gb[col] = gb[col].map(sorted)
+        return gb
+
+    def parent_groupby_histogram(
+        self,
+        df: pd.DataFrame,
+        resolution: int,
+        parent_res: int,
+        decimals: Optional[int] = None,
+    ) -> pd.DataFrame:
+        """
+        Collect contributing pixel values per DGGS cell as a value-count histogram.
+        Used with --out histogram. Each band column becomes a dict
+        {"values": [sorted unique values], "counts": [corresponding counts]}.
+        """
+        gb = self._collect_lists(df, resolution, parent_res)
+        for col in self.band_cols(gb):
+
+            def _to_hist(lst, _decimals=decimals):
+                if _decimals == 0:
+                    vals = [int(round(float(v))) for v in lst]
+                elif _decimals is not None:
+                    vals = [round(float(v), _decimals) for v in lst]
+                else:
+                    vals = list(lst)
+                counts: dict = {}
+                for v in vals:
+                    counts[v] = counts.get(v, 0) + 1
+                sorted_keys = sorted(counts.keys())
+                return {
+                    "values": sorted_keys,
+                    "counts": [counts[k] for k in sorted_keys],
+                }
+
+            gb[col] = gb[col].map(_to_hist)
         return gb
 
     @staticmethod
@@ -220,7 +326,7 @@ class RasterIndexer(IRasterIndexer):
                     continue
                 expected_count = self.expected_count(parent, resolution)
                 if len(group) == expected_count and all(
-                    group[band_cols].nunique(dropna=False) == 1
+                    _col_is_uniform(group[c]) for c in band_cols
                 ):
                     compact_row = group.iloc[0]
                     compact_row.name = parent  # Rename the index to the parent cell
