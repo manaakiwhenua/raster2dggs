@@ -103,7 +103,7 @@ Options:
                                   numeric indices (1-based indexing) or string
                                   band labels (if present in the input), e.g.
                                   -b B02 -b B07 -b B12.
-  --nodata_policy [skip|emit]     'skip' omits nodata cells from output
+  --nodata_policy [omit|emit]     'omit' excludes nodata cells from output
                                   (default). 'emit' includes them, writing the
                                   source raster nodata value (or
                                   --emit_nodata_value if set). Note: non-NaN
@@ -111,7 +111,7 @@ Options:
                                   aggregation (see -a/--aggfunc); if this is
                                   undesired, ensure your source nodata is NaN
                                   or override with --emit_nodata_value.
-                                  [default: skip]
+                                  [default: omit]
   --emit_nodata_value NUMBER      Override the value written for nodata cells
                                   when --nodata_policy=emit. If omitted, the
                                   source raster nodata value is used (NaN if
@@ -119,12 +119,6 @@ Options:
                                   emit NaN. Coerced to the output dtype. Note:
                                   non-NaN values participate in cell
                                   aggregation (see -a/--aggfunc).
-  -u, --upscale INTEGER           Upscaling factor, used to upsample input
-                                  data on the fly; useful when the raster
-                                  resolution is lower than the target DGGS
-                                  resolution. Default (1) applies no
-                                  upscaling. The resampling method controls
-                                  interpolation.  [default: 1]
   -c, --compression TEXT          Compression method to use for the output
                                   Parquet files. Options include 'snappy',
                                   'gzip', 'brotli', 'lz4', 'zstd', etc. Use
@@ -143,17 +137,6 @@ Options:
                                   when aggregating. Use 0 for integer output.
                                   [default: 1]
   -o, --overwrite
-  --warp_mem_limit INTEGER        Input raster may be warped to EPSG:4326 if
-                                  it is not already in this CRS. This setting
-                                  specifies the warp operation's memory limit
-                                  in MB.  [default: 12000]
-  --resampling [nearest|bilinear|cubic|cubic_spline|lanczos|average|mode|gauss|max|min|med|q1|q3|sum|rms]
-                                  Input raster may be warped to EPSG:4326 if
-                                  it is not already in this CRS. Or, if the
-                                  upscale parameter is greater than 1, there
-                                  is a need to resample. This setting
-                                  specifies this resampling algorithm.
-                                  [default: average]
   -co, --compact                  Compact the cells up to the parent
                                   resolution. Compaction is not applied for
                                   cells without identical values across all
@@ -354,7 +337,7 @@ raster2dggs rhp --resolution 11 -d 0 s3://raster2dggs-test-data/Sen2_Test.tif ./
 ```
 
 ```bash
-raster2dggs h3 --resolution 13 --compression zstd --resampling nearest -a median -d 1 -u 2 --geo polygon s3://raster2dggs-test-data/TestDEM.tif ./tests/data/output/13/TestDEM
+raster2dggs h3 --resolution 13 --compression zstd -a median -d 1 --geo polygon s3://raster2dggs-test-data/TestDEM.tif ./tests/data/output/13/TestDEM
 ```
 
 ## Citation

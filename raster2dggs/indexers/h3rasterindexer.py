@@ -2,8 +2,6 @@
 @author: ndemaio
 """
 
-import h3pandas  # Necessary import despite lack of explicit use
-
 import h3 as h3py
 import pandas as pd
 import shapely
@@ -17,10 +15,16 @@ class H3RasterIndexer(RasterIndexer):
     """
 
     def _index_window(self, wide, resolution: int, parent_res: int):
-        h3df = wide.h3.geo_to_h3(resolution, lat_col="y", lng_col="x").drop(
-            columns=["x", "y"]
-        )
-        return h3df.h3.h3_to_parent(parent_res).reset_index()
+        index_col = self.index_col(resolution)
+        partition_col = self.partition_col(parent_res)
+        cells = [
+            h3py.latlng_to_cell(lat, lon, resolution)
+            for lat, lon in zip(wide["y"], wide["x"])
+        ]
+        wide = wide.drop(columns=["x", "y"])
+        wide[index_col] = cells
+        wide[partition_col] = [h3py.cell_to_parent(c, parent_res) for c in cells]
+        return wide.reset_index(drop=True)
 
     @staticmethod
     def cell_to_children_size(cell, desired_resolution: int) -> int:

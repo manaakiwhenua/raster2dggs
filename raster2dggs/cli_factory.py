@@ -5,7 +5,6 @@ from typing import List, Optional
 
 import click
 import click_log
-from rasterio.enums import Resampling
 
 import raster2dggs.constants as const
 import raster2dggs.common as common
@@ -107,14 +106,11 @@ def run_index(
     band,
     nodata_policy: str,
     emit_nodata_value: Optional[float],
-    upscale: int,
     compression: str,
     threads: int,
     aggfunc: str,
     decimals: int,
     overwrite: bool,
-    warp_mem_limit: int,
-    resampling: str,
     compact: bool,
     geo: str,
     tempdir,
@@ -124,16 +120,12 @@ def run_index(
     common.check_resolutions(resolution, parent_res)
 
     raster_input = common.resolve_input_path(raster_input)
-    warp_args = common.assemble_warp_args(resampling, warp_mem_limit)
     aggfunc = common.create_aggfunc(aggfunc)
     kwargs = common.assemble_kwargs(
-        upscale,
         compression,
         threads,
         aggfunc,
         decimals,
-        warp_mem_limit,
-        resampling,
         overwrite,
         compact,
         geo,
@@ -145,7 +137,6 @@ def run_index(
         output_directory,
         resolution,
         parent_res,
-        warp_args,
         band,
         nodata_policy,
         emit_nodata_value,
@@ -200,7 +191,7 @@ def make_command(spec: DGGS_Spec):
         default=const.DEFAULTS["nodata_policy"],
         show_default=True,
         help=(
-            "'skip' omits nodata cells from output (default). "
+            "'omit' excludes nodata cells from output (default). "
             "'emit' includes them, writing the source raster nodata value (or --emit_nodata_value if set). "
             "Note: non-NaN emitted values participate in cell aggregation (see -a/--aggfunc); "
             "if this is undesired, ensure your source nodata is NaN or override with --emit_nodata_value."
@@ -218,13 +209,6 @@ def make_command(spec: DGGS_Spec):
             "Coerced to the output dtype. "
             "Note: non-NaN values participate in cell aggregation (see -a/--aggfunc)."
         ),
-    )
-    @click.option(
-        "-u",
-        "--upscale",
-        default=const.DEFAULTS["upscale"],
-        type=int,
-        help="Upscaling factor, used to upsample input data on the fly; useful when the raster resolution is lower than the target DGGS resolution. Default (1) applies no upscaling. The resampling method controls interpolation.",
     )
     @click.option(
         "-c",
@@ -255,18 +239,6 @@ def make_command(spec: DGGS_Spec):
     )
     @click.option("-o", "--overwrite", is_flag=True)
     @click.option(
-        "--warp_mem_limit",
-        default=const.DEFAULTS["warp_mem_limit"],
-        type=int,
-        help="Input raster may be warped to EPSG:4326 if it is not already in this CRS. This setting specifies the warp operation's memory limit in MB.",
-    )
-    @click.option(
-        "--resampling",
-        default=const.DEFAULTS["resampling"],
-        type=click.Choice(Resampling._member_names_),
-        help="Input raster may be warped to EPSG:4326 if it is not already in this CRS. Or, if the upscale parameter is greater than 1, there is a need to resample. This setting specifies this resampling algorithm.",
-    )
-    @click.option(
         "-co",
         "--compact",
         is_flag=True,
@@ -294,26 +266,21 @@ def make_command(spec: DGGS_Spec):
         band,
         nodata_policy,
         emit_nodata_value,
-        upscale,
         compression,
         threads,
         aggfunc,
         decimals,
         overwrite,
-        warp_mem_limit,
-        resampling,
         compact,
         geo,
         tempdir,
     ):
         if isinstance(resolution, str):
-            warp_args = common.assemble_warp_args(resampling, warp_mem_limit)
             raster_path = common.resolve_input_path(raster_input)
             resolution = common.resolve_resolution_mode(
                 resolution,
                 spec.name,
                 raster_path,
-                warp_args,
                 spec.min_res,
                 spec.max_res,
             )
@@ -331,14 +298,11 @@ def make_command(spec: DGGS_Spec):
             band,
             nodata_policy,
             emit_nodata_value,
-            upscale,
             compression,
             threads,
             aggfunc,
             decimals,
             overwrite,
-            warp_mem_limit,
-            resampling,
             compact,
             geo,
             tempdir,

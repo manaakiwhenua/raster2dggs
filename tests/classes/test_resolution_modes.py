@@ -74,18 +74,17 @@ class TestComputePixelAreaM2(TestCase):
     def setUp(self):
         self._tmp = tempfile.NamedTemporaryFile(suffix=".tiff", delete=False)
         _make_raster(self._tmp.name)
-        self.warp_args = common.assemble_warp_args("average", 12000)
 
     def tearDown(self):
         Path(self._tmp.name).unlink(missing_ok=True)
 
     def test_returns_positive_area(self):
-        area, _, _ = common.compute_pixel_area_m2(self._tmp.name, self.warp_args)
+        area, _, _ = common.compute_pixel_area_m2(self._tmp.name)
         self.assertGreater(area, 0)
 
     def test_centre_within_bounds(self):
         left, bottom, right, top = _BOUNDS
-        _, clat, clon = common.compute_pixel_area_m2(self._tmp.name, self.warp_args)
+        _, clat, clon = common.compute_pixel_area_m2(self._tmp.name)
         self.assertGreaterEqual(clat, bottom)
         self.assertLessEqual(clat, top)
         self.assertGreaterEqual(clon, left)
@@ -93,7 +92,7 @@ class TestComputePixelAreaM2(TestCase):
 
     def test_area_plausible_for_pixel_size(self):
         # 0.01° × 0.01° at ~41°S → roughly 600 000 – 1 200 000 m²
-        area, _, _ = common.compute_pixel_area_m2(self._tmp.name, self.warp_args)
+        area, _, _ = common.compute_pixel_area_m2(self._tmp.name)
         self.assertGreater(area, 5e5)
         self.assertLess(area, 2e6)
 
@@ -108,10 +107,9 @@ class TestResolveModeInvariants(TestCase):
     def setUp(self):
         self._tmp = tempfile.NamedTemporaryFile(suffix=".tiff", delete=False)
         _make_raster(self._tmp.name)
-        self.warp_args = common.assemble_warp_args("average", 12000)
         self.indexer = H3RasterIndexer("h3")
         self.pixel_area, self.clat, self.clon = common.compute_pixel_area_m2(
-            self._tmp.name, self.warp_args
+            self._tmp.name
         )
 
     def tearDown(self):
@@ -119,7 +117,7 @@ class TestResolveModeInvariants(TestCase):
 
     def _resolve(self, mode):
         return common.resolve_resolution_mode(
-            mode, "h3", self._tmp.name, self.warp_args, _H3_MIN, _H3_MAX
+            mode, "h3", self._tmp.name, _H3_MIN, _H3_MAX
         )
 
     def _cell_area(self, res):

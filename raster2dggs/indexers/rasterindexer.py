@@ -93,14 +93,19 @@ class RasterIndexer(IRasterIndexer):
         parent_res: int,
         nodata: Number = np.nan,
         band_labels: Tuple[str] = None,
-        nodata_policy: str = "skip",
+        nodata_policy: str = "omit",
         emit_nodata_value: Optional[Number] = None,
+        transformer=None,
     ) -> pa.Table:
         sdf: pd.DataFrame = (
             sdf.to_dataframe().drop(columns=["spatial_ref"]).reset_index()
         )
+        if transformer is not None:
+            lons, lats = transformer.transform(sdf["x"].values, sdf["y"].values)
+            sdf["x"] = lons
+            sdf["y"] = lats
         nodata_mask = _mask_is_nodata(sdf[const.DEFAULT_NAME], nodata)
-        if nodata_policy.lower() == "skip":
+        if nodata_policy.lower() == "omit":
             sdf = sdf[~nodata_mask].copy()
         elif nodata_policy.lower() == "emit":
             sdf = sdf.copy()
@@ -156,11 +161,16 @@ class RasterIndexer(IRasterIndexer):
         partition_col = self.partition_col(parent_res)
         df = df.set_index(index_col)
         if decimals > 0:
-            gb = (
-                df.groupby([partition_col, index_col], sort=False, observed=True)
-                .agg(aggfunc)
-                .round(decimals)
+            agg = df.groupby([partition_col, index_col], sort=False, observed=True).agg(
+                aggfunc
             )
+            # float32 cannot represent most decimal fractions exactly, so
+            # rounding in float32 leaves artefacts like 0.4000000059604645.
+            # Promote to float64 first so the rounded values are exact.
+            float32_cols = agg.select_dtypes(include="float32").columns
+            if len(float32_cols):
+                agg = agg.astype({c: "float64" for c in float32_cols})
+            gb = agg.round(decimals)
         else:
             gb = (
                 df.groupby([partition_col, index_col], sort=False, observed=True)

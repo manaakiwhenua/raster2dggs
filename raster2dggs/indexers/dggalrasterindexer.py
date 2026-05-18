@@ -151,7 +151,9 @@ class DGGALRasterIndexer(RasterIndexer):
 
     def cell_area_m2(self, resolution: int, lat: float, lon: float) -> float:
         zone = self.dggrs.getZoneFromWGS84Centroid(resolution, dggal.GeoPoint(lon, lat))
-        geo_points: List[dggal.GeoPoint] = self.dggrs.getZoneRefinedWGS84Vertices(zone, 0)
+        geo_points: List[dggal.GeoPoint] = self.dggrs.getZoneRefinedWGS84Vertices(
+            zone, 0
+        )
         polygon = shapely.Polygon([(p.lon, p.lat) for p in geo_points])
         area_m2, _ = pyproj.Geod(ellps="WGS84").geometry_area_perimeter(polygon)
         return abs(area_m2)

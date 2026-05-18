@@ -17,8 +17,7 @@ class MaidenheadRasterIndexer(RasterIndexer):
 
     def _index_window(self, wide, resolution: int, parent_res: int):
         maidenhead = [
-            mh.to_maiden(lat, lon, resolution)
-            for lat, lon in zip(wide["y"], wide["x"])
+            mh.to_maiden(lat, lon, resolution) for lat, lon in zip(wide["y"], wide["x"])
         ]
         maidenhead_parent = [self.cell_to_parent(m, parent_res) for m in maidenhead]
         wide = wide.drop(columns=["x", "y"])
@@ -72,8 +71,10 @@ class MaidenheadRasterIndexer(RasterIndexer):
         cell = mh.to_maiden(lat, lon, resolution)
         loc1, loc2, _ = mh.to_location_rect(cell)
         bbox = shapely.geometry.box(
-            min(loc1[1], loc2[1]), min(loc1[0], loc2[0]),
-            max(loc1[1], loc2[1]), max(loc1[0], loc2[0]),
+            min(loc1[1], loc2[1]),
+            min(loc1[0], loc2[0]),
+            max(loc1[1], loc2[1]),
+            max(loc1[0], loc2[0]),
         )
         area_m2, _ = pyproj.Geod(ellps="WGS84").geometry_area_perimeter(bbox)
         return abs(area_m2)
