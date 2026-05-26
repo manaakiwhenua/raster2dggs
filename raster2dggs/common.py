@@ -334,8 +334,11 @@ def address_boundary_issues(
                     c: pd.Series(
                         [],
                         dtype=(
+                            # decimals=0 means integer output
                             "Int64"
                             if decimals == 0
+                            # float32 is promoted to float64 before rounding so
+                            # that decimal values are exactly representable
                             else (
                                 "float64"
                                 if decimals is not None
