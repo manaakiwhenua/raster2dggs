@@ -287,7 +287,8 @@ def make_command(spec: DGGS_Spec):
         type=AggFuncListParamType(),
         show_default=True,
         help=(
-            "Aggregation function(s) applied when multiple raster pixels map to the same DGGS cell. "
+            "Aggregation function(s) applied when multiple raster pixels map to the same DGGS cell "
+            "(only relevant for --transfer assign_centers). "
             f"Options: {', '.join(const.AGGFUNC_OPTIONS)}. "
             "Comma-separate multiple names (e.g. min,max) to produce a struct column per band."
         ),
@@ -375,15 +376,18 @@ def make_command(spec: DGGS_Spec):
             if parent_res is not None
             else (max(spec.min_res, int(resolution) - spec.default_parent_offset))
         )
-        if out in ("list", "histogram", "interval"):
-            ctx = click.get_current_context()
-            if (
-                ctx.get_parameter_source("agg")
-                == click.core.ParameterSource.COMMANDLINE
-            ):
-                common.LOGGER.warning(
-                    f"--out {out!r}: --agg has no effect (all contributing values are collected)"
-                )
+        ctx = click.get_current_context()
+        agg_from_cli = (
+            ctx.get_parameter_source("agg") == click.core.ParameterSource.COMMANDLINE
+        )
+        if out in ("list", "histogram", "interval") and agg_from_cli:
+            common.LOGGER.warning(
+                f"--out {out!r}: --agg has no effect (all contributing values are collected)"
+            )
+        if transfer == const.Transfer.SAMPLE_NN.value and agg_from_cli:
+            common.LOGGER.warning(
+                "--transfer sample_nn: --agg has no effect (one sample per DGGS cell)"
+            )
         return run_index(
             spec.name,
             raster_input,

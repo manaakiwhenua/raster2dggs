@@ -1,8 +1,5 @@
-"""
-@author: ndemaio
-"""
-
 import h3 as h3py
+import numpy as np
 import pandas as pd
 import shapely
 
@@ -63,6 +60,36 @@ class H3RasterIndexer(RasterIndexer):
     def cell_area_m2(self, resolution: int, lat: float, lon: float) -> float:
         cell = h3py.latlng_to_cell(lat, lon, resolution)
         return h3py.cell_area(cell, unit="m^2")
+
+    SUPPORTS_CELL_ENUMERATION: bool = True
+
+    def cells_in_bbox(
+        self,
+        min_lon: float,
+        min_lat: float,
+        max_lon: float,
+        max_lat: float,
+        resolution: int,
+    ) -> set:
+        """
+        Return H3 cells at the given resolution whose centres fall within
+        the WGS84 bounding box. H3's geo_to_cells includes a cell if its
+        centre is within the polygon.
+        """
+        poly = h3py.LatLngPoly(
+            [
+                (max_lat, min_lon),
+                (max_lat, max_lon),
+                (min_lat, max_lon),
+                (min_lat, min_lon),
+            ]
+        )
+        return set(h3py.geo_to_cells(poly, resolution))
+
+    @staticmethod
+    def cells_to_lonlat_arrays(cells: pd.Series) -> tuple[np.ndarray, np.ndarray]:
+        arr = np.array([h3py.cell_to_latlng(c) for c in cells])
+        return arr[:, 1], arr[:, 0]  # lons, lats
 
     @staticmethod
     def cell_to_point(cell: str) -> shapely.geometry.Point:

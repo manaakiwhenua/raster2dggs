@@ -1,12 +1,9 @@
-"""
-@author: alpha-beta-soup
-"""
-
 from abc import abstractmethod
 from functools import lru_cache
 from typing import List
 
 import dggal
+import numpy as np
 import pandas as pd
 import pyproj
 import shapely
@@ -121,6 +118,26 @@ class DGGALRasterIndexer(RasterIndexer):
             cells,
         )
 
+    def single_parent_cells(self, cells, resolution: int) -> map:
+        """
+        Override: always return exactly one parent per cell.
+
+        For 3H grids, parent_cells() returns all ancestors (up to 3^depth per
+        cell) to support compaction. For partitioning in sample_nn we only need
+        one representative parent — the centroid-parent path, which is what
+        _get_ancestor already uses for all DGGAL grids.
+        """
+        child_resolution = self.dggrs.getZoneLevel(
+            self.dggrs.getZoneFromTextID(next(iter(cells)))
+        )
+        relative_depth = child_resolution - resolution
+        return map(
+            lambda zone: self.dggrs.getZoneTextID(
+                self._get_ancestor(self.dggrs.getZoneFromTextID(zone), relative_depth)
+            ),
+            cells,
+        )
+
     def _get_all_ancestors_3h(self, zone: int, levels_up: int) -> set:
         """
         For 3H DGGRS, get all ancestors at specified level via all parent paths.
@@ -149,6 +166,39 @@ class DGGALRasterIndexer(RasterIndexer):
         """
         return self.cell_to_children_size(parent, resolution)
 
+    SUPPORTS_CELL_ENUMERATION: bool = True
+
+    def cells_in_bbox(
+        self,
+        min_lon: float,
+        min_lat: float,
+        max_lon: float,
+        max_lat: float,
+        resolution: int,
+    ) -> set:
+        """
+        Return DGGAL cell text IDs at the given resolution whose centres fall
+        within the WGS84 bounding box.
+
+        Uses DGGAL's native ``listZones(level, GeoExtent)`` which returns all
+        zones whose extents intersect the bounding box, then filters to those
+        whose WGS84 centroid lies strictly inside the bbox — matching the
+        semantics used by every other DGGS implementation.
+        """
+        bbox = dggal.GeoExtent(
+            ll=dggal.GeoPoint(min_lat, min_lon),
+            ur=dggal.GeoPoint(max_lat, max_lon),
+        )
+        zones = self.dggrs.listZones(resolution, bbox)
+        result = set()
+        for zone in zones:
+            centroid = self.dggrs.getZoneWGS84Centroid(zone)
+            lat = float(centroid.lat)
+            lon = float(centroid.lon)
+            if min_lat <= lat <= max_lat and min_lon <= lon <= max_lon:
+                result.add(self.dggrs.getZoneTextID(zone))
+        return result
+
     def cell_area_m2(self, resolution: int, lat: float, lon: float) -> float:
         zone = self.dggrs.getZoneFromWGS84Centroid(resolution, dggal.GeoPoint(lon, lat))
         geo_points: List[dggal.GeoPoint] = self.dggrs.getZoneRefinedWGS84Vertices(
@@ -157,6 +207,19 @@ class DGGALRasterIndexer(RasterIndexer):
         polygon = shapely.Polygon([(p.lon, p.lat) for p in geo_points])
         area_m2, _ = pyproj.Geod(ellps="WGS84").geometry_area_perimeter(polygon)
         return abs(area_m2)
+
+    def cells_to_lonlat_arrays(self, cells: pd.Series) -> tuple[np.ndarray, np.ndarray]:
+        pts = np.array(
+            [
+                (gp.lon, gp.lat)
+                for gp in (
+                    self.dggrs.getZoneWGS84Centroid(self.dggrs.getZoneFromTextID(c))
+                    for c in cells
+                )
+            ],
+            dtype=float,  # ecrt.Degrees objects need an explicit cast
+        )
+        return pts[:, 0], pts[:, 1]  # lons, lats
 
     def cell_to_point(self, cell: str) -> shapely.geometry.Point:
         geo_point: dggal.GeoPoint = self.dggrs.getZoneWGS84Centroid(

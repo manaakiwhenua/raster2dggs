@@ -1,7 +1,3 @@
-"""
-@author: ndemaio
-"""
-
 from unittest import *
 from data.datapaths import *
 

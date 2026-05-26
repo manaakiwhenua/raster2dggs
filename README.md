@@ -239,6 +239,7 @@ Legend: **✓** appropriate/common · **△** possible (with caveats) · **✗**
 | `point_center_strict` | `assign_centers` | `value` | Single `--agg` → scalar; multiple `--agg` (e.g. `min,max`) → struct per band. |
 | `point_center_strict` | `assign_centers` | `list` | Sorted list of all contributing pixel values per cell. `--agg` is ignored. |
 | `point_center_strict` | `assign_centers` | `histogram` | Value-count struct per cell. `--agg` is ignored. |
+| `point_sample_field` | `sample_nn` | `value` | Nearest-neighbour sample at each DGGS cell centre. `--agg` is ignored. Supports `--compact`. |
 
 All other valid combinations will raise a `NotImplementedError` with a descriptive message until they are added.
 

@@ -201,12 +201,17 @@ IMPLEMENTED: set = {
     ("point_center_strict", "assign_centers", "value"),
     ("point_center_strict", "assign_centers", "list"),
     ("point_center_strict", "assign_centers", "histogram"),
+    ("point_sample_field", "sample_nn", "value"),
 }
 
 
 # Surface area of the WGS84 oblate spheroid in m²
 # Formula: 2π a²(1 + (b²/a²e) atanh(e)), a=6378137.0 m, b≈6356752.314140 m, e=eccentricity
 WGS84_SURFACE_AREA_M2: float = 5.10065621724088e14
+
+# Authalic mean radius of the Earth in m (GRS 80 / WGS84)
+# Used when a single representative radius is needed (e.g. steradian → m² conversion)
+EARTH_MEAN_RADIUS_M: float = 6_371_000.0
 
 AGGFUNC_OPTIONS = [
     "count",

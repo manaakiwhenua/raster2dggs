@@ -1,7 +1,3 @@
-"""
-@author: ndemaio, alpha-beta-soup
-"""
-
 from importlib import import_module
 from typing import Dict, Tuple, Type
 

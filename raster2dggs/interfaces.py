@@ -1,7 +1,3 @@
-"""
-@author: ndemaio
-"""
-
 from numbers import Number
 from typing import Callable, Tuple, Union, Optional
 
@@ -84,6 +80,42 @@ class IRasterIndexer:
         Function for primary indexation.
         """
         raise NotImplementedError()
+
+    def cells_to_lonlat_arrays(self, cells: pd.Series) -> tuple[np.ndarray, np.ndarray]:
+        """
+        Return (lons, lats) as numpy arrays for a Series of cell IDs, without
+        constructing shapely Point objects as intermediaries.
+        """
+        raise NotImplementedError
+
+    def parent_groupby_nn(
+        self,
+        df: pd.DataFrame,
+        resolution: int,
+        parent_res: int,
+        decimals: Optional[int] = None,
+    ) -> pd.DataFrame:
+        """
+        For sample_nn transfer: deduplicate cells that appear in more than one
+        window partition. Applies decimals rounding/casting when provided.
+        """
+        raise NotImplementedError
+
+    SUPPORTS_CELL_ENUMERATION: bool = False
+
+    def cells_in_bbox(
+        self,
+        min_lon: float,
+        min_lat: float,
+        max_lon: float,
+        max_lat: float,
+        resolution: int,
+    ) -> set:
+        """
+        Return cell IDs whose centres fall within the WGS84 bounding box.
+        Only implemented by DGGS systems where SUPPORTS_CELL_ENUMERATION is True.
+        """
+        raise NotImplementedError
 
     def parent_groupby(
         self,
