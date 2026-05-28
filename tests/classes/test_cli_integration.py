@@ -2,7 +2,7 @@ import sys
 import time
 from threading import Event, Thread
 
-from classes.base import TestRunthrough
+import pytest
 from data.datapaths import *
 from click.testing import CliRunner
 
@@ -13,6 +13,15 @@ RES_BY_DGGS = {
     "maidenhead": 3,
 }
 DEFAULT_RES = 6
+
+
+def _clear_folder(folder):
+    for child in folder.iterdir():
+        if child.is_dir():
+            _clear_folder(child)
+            child.rmdir()
+        else:
+            child.unlink()
 
 
 def safe_resolution(spec):
@@ -30,7 +39,6 @@ class LiveTimer:
 
     def _run(self):
         if not sys.stdout.isatty():
-            # Non-interactive: just print once
             print(self.label)
             return
         start = time.perf_counter()
@@ -51,38 +59,54 @@ class LiveTimer:
         self._t.join()
 
 
-class TestAllDGGS(TestRunthrough):
-    def test_all_commands_point_polygon_and_none(self):
+_PARAMS = [
+    (spec, geo, compaction)
+    for spec in SPECS
+    for geo in (None, "point", "polygon")
+    for compaction in (True, False)
+]
+
+_IDS = [
+    f"{spec.name}-{geo or 'none'}-{'co' if compaction else 'noco'}"
+    for spec, geo, compaction in _PARAMS
+]
+
+
+class TestAllDGGS:
+    def setup_method(self):
+        TEST_OUTPUT_PATH.mkdir(exist_ok=True)
+
+    def teardown_method(self):
+        if TEST_OUTPUT_PATH.exists():
+            _clear_folder(TEST_OUTPUT_PATH)
+            TEST_OUTPUT_PATH.rmdir()
+
+    @pytest.mark.parametrize("spec,geo,compaction", _PARAMS, ids=_IDS)
+    def test_command(self, spec, geo, compaction):
         runner = CliRunner()
-        for spec in SPECS:
-            res = safe_resolution(spec)
-            for geo in (None, "point", "polygon"):
-                for compaction in (True, False):
-                    timer = LiveTimer(
-                        f"Testing {spec.pretty}\t--geo {geo} {'-co' if compaction else ''}"
-                    )
-                    timer.start()
-                    try:
-                        with self.subTest(dggs=spec.name, geo=geo):
-                            args = [
-                                spec.name,
-                                TEST_FILE_PATH,
-                                str(TEST_OUTPUT_PATH),
-                                "-r",
-                                str(res),
-                            ]
-                            if geo:
-                                args += ["-g", geo]
-                            if compaction:
-                                args += ["-co"]
-                            result = runner.invoke(cli, args, catch_exceptions=False)
-                            self.assertEqual(
-                                result.exit_code,
-                                0,
-                                f"{spec.name} {geo or 'none'} failed:\n{result.output}",
-                            )
-                    finally:
-                        timer.stop()
+        res = safe_resolution(spec)
+        timer = LiveTimer(
+            f"Testing {spec.pretty}\t--geo {geo or 'none'} {'-co' if compaction else ''}"
+        )
+        timer.start()
+        try:
+            args = [
+                spec.name,
+                TEST_FILE_PATH,
+                str(TEST_OUTPUT_PATH),
+                "-r",
+                str(res),
+            ]
+            if geo:
+                args += ["-g", geo]
+            if compaction:
+                args += ["-co"]
+            result = runner.invoke(cli, args, catch_exceptions=False)
+            assert result.exit_code == 0, (
+                f"{spec.name} {geo or 'none'} failed:\n{result.output}"
+            )
+        finally:
+            timer.stop()
 
     def test_help_shows_input_output(self):
         runner = CliRunner()
