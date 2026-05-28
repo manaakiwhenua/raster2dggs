@@ -17,7 +17,7 @@ classifiers = [
 
 [tool.poetry.dependencies]
 python = "^3.11"
-gdal = "^3.8"
+gdal = "<3.13"
 geopandas = "^1.0"
 rioxarray = "^0.19"
 dask-geopandas = "^0.5"
@@ -51,6 +51,10 @@ raster2dggs = "raster2dggs.cli:main"
 [build-system]
 requires = ["poetry-core"]
 build-backend = "poetry.core.masonry.api"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["tests"]
 
 [tool.black]
 line-length = 88
