@@ -213,6 +213,14 @@ WGS84_SURFACE_AREA_M2: float = 5.10065621724088e14
 # Used when a single representative radius is needed (e.g. steradian → m² conversion)
 EARTH_MEAN_RADIUS_M: float = 6_371_000.0
 
+# Total surface of the sphere in square degrees (360° × 180°)
+# Used to approximate DGGS cell size in degrees for bbox pruning
+EARTH_DEGREE_SQUARE: float = 360.0 * 180.0
+
+# Approximate metres per degree of latitude (and longitude at the equator).
+# Derived from EARTH_MEAN_RADIUS_M: π × R / 180 ≈ 111 195 m/°
+WGS84_APPROX_DISTANCE_DEG_M: float = 111_195.0
+
 AGGFUNC_OPTIONS = [
     "count",
     "mean",
