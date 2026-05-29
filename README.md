@@ -239,6 +239,7 @@ Legend: **✓** appropriate/common · **△** possible (with caveats) · **✗**
 | `point_center_strict` | `assign_centers` | `value` | Single `--agg` → scalar; multiple `--agg` (e.g. `min,max`) → struct per band. |
 | `point_center_strict` | `assign_centers` | `list` | Sorted list of all contributing pixel values per cell. `--agg` is ignored. |
 | `point_center_strict` | `assign_centers` | `histogram` | Value-count struct per cell. `--agg` is ignored. |
+| `point_sample_field` | `sample_nn` | `value` | Nearest-neighbour sample at each DGGS cell centre. `--agg` is ignored. Supports `--compact`. |
 
 All other valid combinations will raise a `NotImplementedError` with a descriptive message until they are added.
 
@@ -462,13 +463,49 @@ Please run `black .` before committing.
 
 #### Tests
 
-Tests are included. To run them, set up a poetry environment, then follow these instructons:
+Tests are included. To run them, set up a poetry environment, then run from the project root:
 
 ```bash
-python tests/test_raster2dggs.py
+pytest -v --durations=10 --tb=short
+```
+
+- `-v` — one line per test with pass/fail status
+- `--durations=10` — reports the 10 slowest tests at the end
+- `--tb=short` — compact tracebacks on failure
+- Add `-x` to stop on the first failure when debugging
+
+To run a subset of tests:
+
+```bash
+pytest -k h3                        # all tests whose ID contains "h3"
+pytest -k "h3 or rhp"
+pytest -k "sample_nn and rhp"
+pytest tests/classes/test_sample_nn.py          # single file
+pytest "tests/classes/test_cli_integration.py::TestAllDGGS::test_command[h3-polygon-co]"  # exact parametrized case
 ```
 
 Test data are included at `tests/data/`.
+
+#### Generating synthetic sample rasters
+
+[`make_samples.py`](make_samples.py) generates a small suite of synthetic GeoTIFF rasters for experimentation. It only requires `numpy` and `rasterio` (plus optional `scipy` for better smoothing):
+
+```bash
+python make_samples.py --outdir sample_rasters --seed 42
+```
+
+This writes six rasters to `sample_rasters/`:
+
+| File | Semantics | Nodata pattern | CRS |
+|---|---|---|---|
+| `landcover_utm33.tif` | `piecewise_constant` — 6 landcover classes | Scattered holes + missing stripe | UTM 33N |
+| `frac_treecover_utm33.tif` | `fraction_cover` — tree cover 0–1 | Coastline-shaped mask | UTM 33N |
+| `popcount_webmerc.tif` | `count_total` — heavy-tailed counts | Rotated rectangle polygon | Web Mercator |
+| `temp_mean_wgs84.tif` | `cell_average` — continuous temperature | Edge band + scattered pixels | WGS84 |
+| `zone_ids_laea.tif` | `piecewise_constant` — Voronoi zone IDs | Islands + sliver patches | Europe LAEA |
+| `multiband_per_band_nodata_wgs84.tif` | 4-band float32 | Nodata at *different* pixels per band | WGS84 |
+
+The multi-band raster is specifically designed to exercise per-band nodata handling: a pixel that is nodata in one band can be valid in another.
 
 #### Experimenting
 

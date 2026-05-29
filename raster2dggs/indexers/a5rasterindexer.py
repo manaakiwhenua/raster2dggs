@@ -1,7 +1,3 @@
-"""
-@author: ndemaio
-"""
-
 import a5_fast as a5py
 import numpy as np
 import pandas as pd
@@ -88,14 +84,89 @@ class A5RasterIndexer(RasterIndexer):
         except Exception:
             return False
 
+    SUPPORTS_CELL_ENUMERATION: bool = True
+
+    def cells_in_bbox(
+        self,
+        min_lon: float,
+        min_lat: float,
+        max_lon: float,
+        max_lat: float,
+        resolution: int,
+    ) -> set:
+        """
+        Return A5 cell IDs (hex strings) at the given resolution whose centres
+        fall within the WGS84 bounding box.
+
+        Uses a top-down recursive descent from the 12 res-0 cells, pruning
+        branches where the cell centroid cannot possibly be inside the bbox
+        at the target resolution.
+
+        NOTE: the upstream A5 API exposes a native ``polygonToCells`` function
+        (https://a5geo.org/docs/api-reference/regions#polygontocells) that
+        returns compacted cells whose centres lie inside a polygon ring.  This
+        would be the preferred implementation, but ``a5-fast`` v0.2 (the
+        Python binding used here) does not yet include the region-covering
+        functions.  Replace this implementation with ``polygonToCells`` +
+        ``uncompact`` once a version of ``a5-fast`` that exposes it is
+        released.
+        """
+        result = set()
+
+        def _cell_radius_deg(cell_res: int) -> float:
+            """Approximate half-width of an A5 cell in degrees."""
+            # A5: 12 * 4^res cells
+            n = 12 * (4**cell_res)
+            return (const.EARTH_DEGREE_SQUARE / n) ** 0.5 * 0.75
+
+        def _recurse(cell_u64: int, cell_res: int):
+            _lon, lat = a5py.cell_to_lonlat(cell_u64)
+            # a5py may return longitudes outside [-180, 180]; normalise.
+            lon = (_lon + 180.0) % 360.0 - 180.0
+            rad = _cell_radius_deg(cell_res)
+            if lat < min_lat - rad or lat > max_lat + rad:
+                return
+            # Antimeridian-safe lon test: check raw and ±360-shifted positions.
+            lon_in_range = (
+                (min_lon - rad <= lon <= max_lon + rad)
+                or (min_lon - rad <= lon + 360 <= max_lon + rad)
+                or (min_lon - rad <= lon - 360 <= max_lon + rad)
+            )
+            if not lon_in_range:
+                return
+
+            if cell_res == resolution:
+                if min_lat <= lat <= max_lat and min_lon <= lon <= max_lon:
+                    result.add(a5py.u64_to_hex(cell_u64))
+                return
+
+            for child in a5py.cell_to_children(cell_u64, cell_res + 1):
+                _recurse(child, cell_res + 1)
+
+        for c in a5py.get_res0_cells():
+            _recurse(c, 0)
+
+        return result
+
     def cell_area_m2(self, resolution: int, lat: float, lon: float) -> float:
         # A5 is equal-area: 12 cells at resolution 0, each subdividing by 4
         return const.WGS84_SURFACE_AREA_M2 / (12 * 4**resolution)
 
     @staticmethod
+    def cells_to_lonlat_arrays(cells: pd.Series) -> tuple[np.ndarray, np.ndarray]:
+        # a5py.cell_to_lonlat returns (lon, lat) directly
+        pts = np.array([a5py.cell_to_lonlat(a5py.hex_to_u64(c)) for c in cells])
+        # a5py may return longitudes outside [-180, 180]; normalise to standard range.
+        lons = (pts[:, 0] + 180.0) % 360.0 - 180.0
+        lats = pts[:, 1]
+        return lons, lats
+
+    @staticmethod
     def cell_to_point(cell: str) -> shapely.geometry.Point:
-        cell = a5py.hex_to_u64(cell)
-        return shapely.Point(a5py.cell_to_lonlat(cell))
+        cell_u64 = a5py.hex_to_u64(cell)
+        lon, lat = a5py.cell_to_lonlat(cell_u64)
+        lon = (lon + 180.0) % 360.0 - 180.0  # normalise to [-180, 180]
+        return shapely.Point(lon, lat)
 
     @staticmethod
     def cell_to_polygon(cell: str) -> shapely.geometry.Polygon:

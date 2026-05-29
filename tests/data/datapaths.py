@@ -1,7 +1,3 @@
-"""
-@author: ndemaio
-"""
-
 from pathlib import Path
 
 _DATA_DIR = Path(__file__).parent

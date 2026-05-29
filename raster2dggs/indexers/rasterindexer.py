@@ -1,7 +1,3 @@
-"""
-@author: ndemaio
-"""
-
 from numbers import Number
 from typing import Any, Callable, List, Tuple, Union, Optional
 
@@ -89,6 +85,17 @@ class RasterIndexer(IRasterIndexer):
         """
         raise NotImplementedError
 
+    def single_parent_cells(self, cells, resolution) -> map:
+        """
+        Return exactly one parent cell ID per input cell, for partitioning.
+
+        The default delegates to parent_cells(), which returns one parent per
+        cell for most DGGS. Subclasses where parent_cells() may return multiple
+        parents per cell (e.g. ISEA3H vertex children have up to 3 parents per
+        level) must override this to return exactly one representative parent.
+        """
+        return self.parent_cells(cells, resolution)
+
     def expected_count(self, parent: str, resolution: int):
         """
         Needs to be implemented by child class
@@ -137,6 +144,17 @@ class RasterIndexer(IRasterIndexer):
             band_labels = tuple(str(b) for b in bands)
         wide = wide.rename(columns=dict(zip(bands, band_labels)))
         return pa.Table.from_pandas(wide, preserve_index=False)
+
+    def cells_to_lonlat_arrays(self, cells: pd.Series) -> tuple[np.ndarray, np.ndarray]:
+        """
+        Return (lons, lats) as numpy arrays for a Series of cell IDs.
+
+        Subclasses should override this to call their DGGS library directly and
+        avoid constructing shapely Point objects as intermediaries.
+        This fallback delegates to cell_to_point, which every subclass implements.
+        """
+        pts = [self.cell_to_point(c) for c in cells]
+        return np.array([p.x for p in pts]), np.array([p.y for p in pts])
 
     def _index_window(
         self,
@@ -215,6 +233,61 @@ class RasterIndexer(IRasterIndexer):
                     for idx in result.index
                 ]
             return result
+
+    def parent_groupby_nn(
+        self,
+        df: pd.DataFrame,
+        resolution: int,
+        parent_res: int,
+        decimals: Optional[int] = None,
+    ) -> pd.DataFrame:
+        """
+        For sample_nn transfer: deduplicate cells that appear in more than one
+        window partition. Because each cell's sample pixel belongs to exactly one
+        window, all duplicates carry identical values; .first() is sufficient.
+        Applies the same decimals rounding/casting as parent_groupby.
+        """
+        index_col = self.index_col(resolution)
+        partition_col = self.partition_col(parent_res)
+        df = df.set_index(index_col)
+        gb = df.groupby([partition_col, index_col], sort=False, observed=True).first()
+        if decimals is None:
+            pass
+        elif decimals > 0:
+            float32_cols = gb.select_dtypes(include="float32").columns
+            if len(float32_cols):
+                gb = gb.astype({c: "float64" for c in float32_cols})
+            gb = gb.round(decimals)
+        else:
+            gb = gb.round(decimals).astype("Int64")
+        gb = gb.reset_index(level=0)
+        gb.index.name = index_col
+        return gb
+
+    # ------------------------------------------------------------------ #
+    # Cell enumeration (required for sample_nn)                           #
+    # ------------------------------------------------------------------ #
+
+    #: Set to True in subclasses that implement cells_in_bbox.
+    SUPPORTS_CELL_ENUMERATION: bool = False
+
+    def cells_in_bbox(
+        self,
+        min_lon: float,
+        min_lat: float,
+        max_lon: float,
+        max_lat: float,
+        resolution: int,
+    ) -> set:
+        """
+        Return cell IDs whose centres fall within the WGS84 bounding box.
+
+        Must be overridden by subclasses that set SUPPORTS_CELL_ENUMERATION = True.
+        """
+        raise NotImplementedError(
+            f"{type(self).__name__} does not support spatial cell enumeration. "
+            "sample_nn requires cell enumeration; use a DGGS that supports it."
+        )
 
     def _collect_lists(
         self,

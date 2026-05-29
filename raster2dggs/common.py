@@ -30,11 +30,13 @@ from concurrent.futures import ThreadPoolExecutor
 
 from urllib.parse import urlparse
 from rasterio.warp import transform_bounds
+from rasterio.transform import rowcol
 
 import raster2dggs.constants as const
 import raster2dggs.indexerfactory as idxfactory
 
 from raster2dggs.interfaces import IRasterIndexer
+from raster2dggs.indexers.rasterindexer import _is_nan
 
 LOGGER = logging.getLogger(__name__)
 click_log.basic_config(LOGGER)
@@ -318,24 +320,13 @@ def address_boundary_issues(
     source_dtypes = {c: ddf[c].dtype for c in band_cols}
 
     out = kwargs.get("out", "value")
+    transfer = kwargs.get("transfer", const.Transfer.ASSIGN_CENTERS)
 
     decimals = kwargs.get("decimals")
 
     aggfuncs = kwargs.get("aggfuncs", [("mean", "mean")])
 
-    if out in ("list", "histogram") or (out == "value" and len(aggfuncs) > 1):
-        out_meta = pd.DataFrame(
-            {
-                partition_col: pd.Series([], dtype="string"),
-                **{c: pd.Series([], dtype="object") for c in band_cols},
-            }
-        )
-        tqdm_label = (
-            "Collecting"
-            if out != "value"
-            else f"Aggregating{'/compacting' if kwargs['compact'] else ''}"
-        )
-    else:
+    if transfer == const.Transfer.SAMPLE_NN or out == "value" and len(aggfuncs) == 1:
         out_meta = pd.DataFrame(
             {
                 partition_col: pd.Series([], dtype="string"),
@@ -360,12 +351,33 @@ def address_boundary_issues(
                 },
             }
         )
-        tqdm_label = f"Aggregating{'/compacting' if kwargs['compact'] else ''}"
+        _compacting = "/compacting" if kwargs["compact"] else ""
+        tqdm_label = (
+            f"Sampling (nearest neighbour){_compacting}"
+            if transfer == const.Transfer.SAMPLE_NN
+            else f"Aggregating{_compacting}"
+        )
+    else:
+        # list, histogram, or multi-agg value — object-typed columns
+        out_meta = pd.DataFrame(
+            {
+                partition_col: pd.Series([], dtype="string"),
+                **{c: pd.Series([], dtype="object") for c in band_cols},
+            }
+        )
+        tqdm_label = (
+            "Collecting"
+            if out != "value"
+            else f"Aggregating{'/compacting' if kwargs['compact'] else ''}"
+        )
 
     out_meta.index = pd.Index([], name=index_col, dtype="string")
 
     with TqdmCallback(desc=tqdm_label):
-        if out == "list":
+        if transfer == const.Transfer.SAMPLE_NN:
+            mp_func = indexer.parent_groupby_nn
+            mp_args = (resolution, parent_res, decimals)
+        elif out == "list":
             mp_func = indexer.parent_groupby_list
             mp_args = (resolution, parent_res, decimals)
         elif out == "histogram":
@@ -520,6 +532,16 @@ def initial_index(
     validate_transfer_config(kwargs["semantics"], kwargs["transfer"], kwargs["out"])
 
     indexer = idxfactory.indexer_instance(dggs)
+
+    if (
+        kwargs["transfer"] == const.Transfer.SAMPLE_NN
+        and not indexer.SUPPORTS_CELL_ENUMERATION
+    ):
+        raise click.UsageError(
+            f"--transfer sample_nn requires spatial cell enumeration, which is not "
+            f"supported by the {dggs!r} DGGS."
+        )
+
     LOGGER.info(
         "Indexing %s at %s resolution %d, parent resolution %d",
         raster_input,
@@ -573,6 +595,13 @@ def initial_index(
                     src.crs, "EPSG:4326", always_xy=True
                 )
                 LOGGER.debug("Coordinate transformer: %s → EPSG:4326", src.crs)
+                if kwargs["transfer"] == const.Transfer.SAMPLE_NN:
+                    inverse_transformer = pyproj.Transformer.from_crs(
+                        "EPSG:4326", src.crs, always_xy=True
+                    )
+                    LOGGER.debug("Inverse transformer: EPSG:4326 → %s", src.crs)
+                else:
+                    inverse_transformer = None
 
                 da: xr.Dataset = rioxarray.open_rasterio(
                     src,
@@ -600,20 +629,11 @@ def initial_index(
                 compression = kwargs["compression"]
                 nodata = src.nodata
 
-                def process(window):
-                    sdf = da.rio.isel_window(window)
-
-                    result = indexer.index_func(
-                        sdf,
-                        resolution,
-                        parent_res,
-                        nodata,
-                        band_labels=selected_labels,
-                        nodata_policy=nodata_policy,
-                        emit_nodata_value=emit_nodata_value,
-                        transformer=transformer,
-                    )
-
+                def _write_result(result, window):
+                    if result is None or (
+                        hasattr(result, "num_rows") and result.num_rows == 0
+                    ):
+                        return
                     partition_col = indexer.partition_col(parent_res)
                     pq.write_to_dataset(
                         result,
@@ -628,15 +648,142 @@ def initial_index(
                         compression=compression,
                     )
 
+                def process(window):
+                    sdf = da.rio.isel_window(window)
+                    result = indexer.index_func(
+                        sdf,
+                        resolution,
+                        parent_res,
+                        nodata,
+                        band_labels=selected_labels,
+                        nodata_policy=nodata_policy,
+                        emit_nodata_value=emit_nodata_value,
+                        transformer=transformer,
+                    )
+                    _write_result(result, window)
                     return None
 
+                def process_nn(window):
+                    """
+                    Cell-driven stage-1 for sample_nn / point_sample_field.
+
+                    Enumerates every DGGS cell whose centre falls within the
+                    window's geographic bbox, converts each centre to the
+                    nearest raster pixel in this window, reads the value, and
+                    writes one row per cell.  Because a pixel belongs to exactly
+                    one window, each cell is written once — stage-2 deduplication
+                    is a no-op in practice but still handles edge cases.
+                    """
+                    # bbox of this window in WGS84
+                    win_left, win_bottom, win_right, win_top = src.window_bounds(window)
+                    min_lon, min_lat, max_lon, max_lat = transform_bounds(
+                        src.crs, "EPSG:4326", win_left, win_bottom, win_right, win_top
+                    )
+
+                    cells = list(
+                        indexer.cells_in_bbox(
+                            min_lon, min_lat, max_lon, max_lat, resolution
+                        )
+                    )
+                    if not cells:
+                        return None
+
+                    # cell centres → raster pixel coords
+                    cell_lons, cell_lats = indexer.cells_to_lonlat_arrays(
+                        pd.Series(cells)
+                    )
+                    # Pass as Python lists to avoid pyproj trying float(array)
+                    # on 1-element numpy arrays, which triggers a NumPy
+                    # DeprecationWarning via the _transform_point fast path.
+                    _xs, _ys = inverse_transformer.transform(
+                        cell_lons.tolist(), cell_lats.tolist()
+                    )
+                    cell_xs = np.asarray(_xs)
+                    cell_ys = np.asarray(_ys)
+                    all_rows, all_cols = rowcol(src.transform, cell_xs, cell_ys)
+                    all_rows = np.asarray(all_rows)
+                    all_cols = np.asarray(all_cols)
+
+                    # Keep only cells whose sample pixel is in this window.
+                    # A pixel belongs to exactly one window, so each cell is
+                    # processed exactly once across all windows.
+                    local_rows = all_rows - window.row_off
+                    local_cols = all_cols - window.col_off
+                    in_win = (
+                        (local_rows >= 0)
+                        & (local_rows < window.height)
+                        & (local_cols >= 0)
+                        & (local_cols < window.width)
+                    )
+                    if not np.any(in_win):
+                        return None
+
+                    cells = [c for c, m in zip(cells, in_win) if m]
+                    local_rows = local_rows[in_win]
+                    local_cols = local_cols[in_win]
+
+                    # read window data and sample at cell-centre pixels:
+                    # da has dims (band, y, x); .values triggers Dask compute
+                    win_data = da.rio.isel_window(window).values
+                    samples = win_data[:, local_rows, local_cols].T
+                    # samples: (n_cells, n_bands)
+
+                    # nodata handling
+                    if nodata is None:
+                        nd_mask = np.zeros(len(cells), dtype=bool)
+                    elif _is_nan(nodata):
+                        nd_mask = np.any(np.isnan(samples.astype(float)), axis=1)
+                    else:
+                        nd_mask = np.any(samples == nodata, axis=1) | np.any(
+                            np.isnan(samples.astype(float)), axis=1
+                        )
+
+                    wide = pd.DataFrame(
+                        {
+                            label: samples[:, i]
+                            for i, label in enumerate(selected_labels)
+                        }
+                    )
+                    index_col = indexer.index_col(resolution)
+                    partition_col = indexer.partition_col(parent_res)
+                    wide[index_col] = cells
+                    wide[partition_col] = list(
+                        indexer.single_parent_cells(cells, parent_res)
+                    )
+
+                    if nodata_policy.lower() == "omit":
+                        wide = wide[~nd_mask].reset_index(drop=True)
+                    elif nodata_policy.lower() == "emit":
+                        fill = (
+                            emit_nodata_value
+                            if emit_nodata_value is not None
+                            else nodata
+                        )
+                        for label in selected_labels:
+                            if pd.isna(fill):
+                                wide.loc[nd_mask, label] = np.nan
+                            else:
+                                wide.loc[nd_mask, label] = fill
+
+                    if wide.empty:
+                        return None
+
+                    result = pa.Table.from_pandas(wide, preserve_index=False)
+                    _write_result(result, window)
+                    return None
+
+                stage1_func = (
+                    process_nn
+                    if kwargs["transfer"] == const.Transfer.SAMPLE_NN
+                    else process
+                )
                 try:
                     with ThreadPoolExecutor(
                         max_workers=kwargs["threads"]
                     ) as executor, tqdm(
                         total=len(windows), desc="Raster windows"
                     ) as pbar:
-                        for _ in executor.map(process, windows, chunksize=1):
+                        for _ in executor.map(stage1_func, windows, chunksize=1):
                             pbar.update(1)
                 finally:
                     da.close()
@@ -648,7 +795,7 @@ def initial_index(
                     # rather than at interpreter shutdown (which causes a
                     # silent "Error in sys.excepthook" crash for non-WGS84
                     # rasters).
-                    del da, transformer, process
+                    del da, transformer, process, process_nn, stage1_func
                     gc.collect()
             LOGGER.debug("Stage 1 (primary indexing) complete")
             return address_boundary_issues(
