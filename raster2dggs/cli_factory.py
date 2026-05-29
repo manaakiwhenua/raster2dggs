@@ -129,7 +129,7 @@ SPECS: List[DGGS_Spec] = [
     DGGS_Spec("ivea3h", "IVEA3H", const.MIN_IVEA3H, const.MAX_IVEA3H, 10),
     DGGS_Spec("ivea7h", "IVEA7H", const.MIN_IVEA7H, const.MAX_IVEA7H, 6),
     # DGGS_Spec("ivea7h_z7", "IVEA7H_Z7", const.MIN_IVEA7H_Z7, const.MAX_IVEA7H_Z7, 6),
-    DGGS_Spec("rtea4r", "RTEA9R", const.MIN_RTEA4R, const.MAX_RTEA4R, 8),
+    DGGS_Spec("rtea4r", "RTEA4R", const.MIN_RTEA4R, const.MAX_RTEA4R, 8),
     DGGS_Spec("rtea9r", "RTEA9R", const.MIN_RTEA9R, const.MAX_RTEA9R, 5),
     DGGS_Spec("rtea7h", "RTEA7H", const.MIN_RTEA7H, const.MAX_RTEA7H, 6),
     # DGGS_Spec("rtea7h_z7", "RTEA7H_Z7", const.MIN_RTEA7H_Z7, const.MAX_RTEA7H_Z7, 6),
@@ -278,7 +278,7 @@ def make_command(spec: DGGS_Spec):
         "-t",
         "--threads",
         default=const.DEFAULTS["threads"],
-        help="Number of threads to use when running in parallel. The default is determined based dynamically as the total number of available cores, minus one.",
+        help="Number of threads to use when running in parallel. The default is determined dynamically as the total number of available cores, minus one.",
     )
     @click.option(
         "-a",

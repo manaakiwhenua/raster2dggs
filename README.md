@@ -1,6 +1,6 @@
 # raster2dggs
 
-[![pypi](https://img.shields.io/pypi/v/raster2dggs?label=raster2ddgs)](https://pypi.org/project/raster2dggs/)
+[![pypi](https://img.shields.io/pypi/v/raster2dggs?label=raster2dggs)](https://pypi.org/project/raster2dggs/)
 
 Python-based CLI tool to index raster files to DGGS in parallel, writing out to Parquet.
 
@@ -80,7 +80,7 @@ Commands:
   ivea9r      Index raster data into the IVEA9R DGGS
   maidenhead  Index raster data into the Maidenhead DGGS
   rhp         Index raster data into the rHEALPix DGGS
-  rtea4r      Index raster data into the RTEA9R DGGS
+  rtea4r      Index raster data into the RTEA4R DGGS
   rtea7h      Index raster data into the RTEA7H DGGS
   rtea9r      Index raster data into the RTEA9R DGGS
   s2          Index raster data into the S2 DGGS
@@ -147,7 +147,7 @@ Options:
                                   'none' for no compression.  [default:
                                   snappy]
   -t, --threads INTEGER           Number of threads to use when running in
-                                  parallel. The default is determined based
+                                  parallel. The default is determined
                                   dynamically as the total number of available
                                   cores, minus one.
   -a, --agg AGGFUNC[,AGGFUNC...]  Aggregation function(s) applied when
@@ -297,7 +297,7 @@ Use ".open FILENAME" to reopen on a persistent database.
 D INSTALL spatial;
 D LOAD spatial;
 D SELECT * FROM read_parquet('se_island.pq') LIMIT 7;
-┌┌────────┬────────┬────────┬────────────────────────────────────────────────────────────────────────────────┬─────────────┬─────────┐
+┌────────┬────────┬────────┬────────────────────────────────────────────────────────────────────────────────┬─────────────┬─────────┐
 │ band_1 │ band_2 │ band_3 │                                    geometry                                    │    s2_19    │  s2_08  │
 │ float  │ float  │ float  │                                    geometry                                    │   varchar   │ varchar │
 ├────────┼────────┼────────┼────────────────────────────────────────────────────────────────────────────────┼─────────────┼─────────┤
@@ -311,7 +311,7 @@ D SELECT * FROM read_parquet('se_island.pq') LIMIT 7;
 └────────┴────────┴────────┴────────────────────────────────────────────────────────────────────────────────┴─────────────┴─────────┘
 ```
 
-Output value columns may also be arrays (`double[]` or `int64[]`) or structs, not just scalar values, depending on the options you pass to the tool (e.g. `--agg min,max` (multiple aggregations) or `--output list|histogram`) and the relative size of the DGGS cells and raster cells.
+Output value columns may also be arrays (`double[]` or `int64[]`) or structs, not just scalar values, depending on the options you pass to the tool (e.g. `--agg min,max` (multiple aggregations) or `--out list|histogram`) and the relative size of the DGGS cells and raster cells.
 
 In the case of struct outputs, it should be noted that there's no real consequence of using a struct (i.e. `band_1.min`, `band_1.max`) over a series of flat columns (i.e. `band_1_min`, `band_1_max`), since Parquet uses Dremel shredding for nested types: a `struct(min double, max double)` column is physically stored as two separate column chunks (`band_1.min`, `band_1.max`) with definition/repetition level metadata. So the on-disk layout is identical to flat columns. Consequences:
 
@@ -468,7 +468,7 @@ In brief, to get started:
 - Install [GDAL](https://gdal.org/)
     - If you're on Windows, `pip install gdal` may be necessary before running the subsequent commands.
     - On Linux, install GDAL 3.6+ according to your platform-specific instructions, including development headers, i.e. `libgdal-dev`.
-- Create the virtual environment with `poetry init`. This will install necessary dependencies.
+- Create the virtual environment with `poetry install`. This will install necessary dependencies.
 - Subsequently, the virtual environment can be re-activated with `poetry env activate`.
 
 If you run `poetry install -E all --with dev`, the CLI tool will be aliased so you can simply use `raster2dggs` rather than `poetry run raster2dggs`, which is the alternative if you do not `poetry install -E all --with dev`.
@@ -536,20 +536,60 @@ Two sample files have been uploaded to an S3 bucket with `s3:GetObject` public p
 
 You may use these for experimentation. However you can also use local files too, which will be faster. A good, small (5 MB) sample image is available [here](https://github.com/mommermi/geotiff_sample).
 
-A small test file is also available at [`tests/data/se-island.tif`] (tests/data/se-island.tif).
+A small test file is also available at [`tests/data/se-island.tif`](tests/data/se-island.tif).
+
+You can also generate a suite of synthetic rasters locally using [`make_samples.py`](make_samples.py) — see [Generating synthetic sample rasters](#generating-synthetic-sample-rasters) above.
 
 ## Example commands
 
+Index to H3 at resolution 11, integer output:
 ```bash
 raster2dggs h3 --resolution 11 -d 0 s3://raster2dggs-test-data/Sen2_Test.tif ./tests/data/output/11/Sen2_Test
 ```
 
+Same raster to rHEALPix:
 ```bash
 raster2dggs rhp --resolution 11 -d 0 s3://raster2dggs-test-data/Sen2_Test.tif ./tests/data/output/11/Sen2_Test_rhp
 ```
 
+DEM indexed to H3, median aggregation, GeoParquet polygon output:
 ```bash
-raster2dggs h3 --resolution 13 --compression zstd -a median -d 1 --geo polygon s3://raster2dggs-test-data/TestDEM.tif ./tests/data/output/13/TestDEM
+raster2dggs h3 --resolution 13 --compression zstd --agg median -d 1 --geo polygon s3://raster2dggs-test-data/TestDEM.tif ./tests/data/output/13/TestDEM
+```
+
+Auto-select resolution (first H3 resolution finer than the raster pixel size):
+```bash
+raster2dggs h3 --resolution smaller-than-pixel input.tif ./output
+```
+
+Multi-aggregation struct output — min, max, and mean per band in one pass:
+```bash
+raster2dggs h3 --resolution 9 --agg min,max,mean -d 1 input.tif ./output
+```
+
+Collect all contributing pixel values per cell as a sorted list:
+```bash
+raster2dggs h3 --resolution 7 --out list -d 2 input.tif ./output
+```
+
+Histogram of contributing pixel values per cell:
+```bash
+raster2dggs h3 --resolution 7 --out histogram -d 0 input.tif ./output
+```
+
+Nearest-neighbour sampling for a continuous field (e.g. DEM, temperature grid):
+```bash
+raster2dggs h3 --resolution 9 --semantics point_sample_field --transfer sample_nn input.tif ./output
+```
+
+Nearest-neighbour sampling for a categorical raster (e.g. landcover):
+```bash
+raster2dggs h3 --resolution 9 --semantics piecewise_constant --transfer sample_nn -d 0 landcover.tif ./output
+```
+
+Emit nodata cells rather than omitting them, replacing the nodata value with −1:
+```bash
+raster2dggs h3 --resolution 9 --nodata_policy emit --emit_nodata_value -1 input.tif ./output
 ```
 
 ## Citation
