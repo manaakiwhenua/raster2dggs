@@ -12,6 +12,7 @@ Currently this supports the following DGGSs:
 - [rHEALPix](https://datastore.landcareresearch.co.nz/dataset/rhealpix-discrete-global-grid-system)
 - [S2](http://s2geometry.io/)
 - [A5](https://a5geo.org/)
+- Via [DGGAL](https://github.com/IAAA-Lab/dggal): ISEA4R, ISEA9R, ISEA3H, ISEA7H, IVEA4R, IVEA9R, IVEA3H, IVEA7H, RTEA4R, RTEA9R, RTEA7H, HEALPix, rHEALPix
 
 And these geocode systems:
 
