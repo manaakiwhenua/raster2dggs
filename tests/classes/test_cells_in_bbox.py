@@ -27,14 +27,19 @@ _MIN_LON, _MIN_LAT, _MAX_LON, _MAX_LAT = 174.0, -37.0, 175.0, -36.0
 _DGGS_CASES = [
     # (dggs_name, resolution, module_path, class_name)
     # res chosen so ~5-30 cells fall inside the 1° × 1° bbox
-    ("h3",         5, "raster2dggs.indexers.h3rasterindexer",         "H3RasterIndexer"),
-    ("rhp",        6, "raster2dggs.indexers.rhprasterindexer",        "RHPRasterIndexer"),
-    ("geohash",    4, "raster2dggs.indexers.geohashrasterindexer",    "GeohashRasterIndexer"),
-    ("maidenhead", 3, "raster2dggs.indexers.maidenheadrasterindexer", "MaidenheadRasterIndexer"),
-    ("s2",         8, "raster2dggs.indexers.s2rasterindexer",         "S2RasterIndexer"),
-    ("a5",         8, "raster2dggs.indexers.a5rasterindexer",         "A5RasterIndexer"),
+    ("h3", 5, "raster2dggs.indexers.h3rasterindexer", "H3RasterIndexer"),
+    ("rhp", 6, "raster2dggs.indexers.rhprasterindexer", "RHPRasterIndexer"),
+    ("geohash", 4, "raster2dggs.indexers.geohashrasterindexer", "GeohashRasterIndexer"),
+    (
+        "maidenhead",
+        3,
+        "raster2dggs.indexers.maidenheadrasterindexer",
+        "MaidenheadRasterIndexer",
+    ),
+    ("s2", 8, "raster2dggs.indexers.s2rasterindexer", "S2RasterIndexer"),
+    ("a5", 8, "raster2dggs.indexers.a5rasterindexer", "A5RasterIndexer"),
     # DGGAL variants share the same cells_in_bbox implementation; one representative suffices
-    ("isea4r",     8, "raster2dggs.indexers.dggalrasterindexer",      "ISEA4RRasterIndexer"),
+    ("isea4r", 8, "raster2dggs.indexers.dggalrasterindexer", "ISEA4RRasterIndexer"),
 ]
 
 
@@ -74,7 +79,15 @@ class TestCellsInBbox:
         indexer, resolution = indexer_and_res
         cells = self._cells(indexer, resolution)
         lons, lats = indexer.cells_to_lonlat_arrays(pd.Series(sorted(cells)))
-        assert np.all(lons >= _MIN_LON), f"Centroid lon below min_lon: {lons[lons < _MIN_LON]}"
-        assert np.all(lons <= _MAX_LON), f"Centroid lon above max_lon: {lons[lons > _MAX_LON]}"
-        assert np.all(lats >= _MIN_LAT), f"Centroid lat below min_lat: {lats[lats < _MIN_LAT]}"
-        assert np.all(lats <= _MAX_LAT), f"Centroid lat above max_lat: {lats[lats > _MAX_LAT]}"
+        assert np.all(
+            lons >= _MIN_LON
+        ), f"Centroid lon below min_lon: {lons[lons < _MIN_LON]}"
+        assert np.all(
+            lons <= _MAX_LON
+        ), f"Centroid lon above max_lon: {lons[lons > _MAX_LON]}"
+        assert np.all(
+            lats >= _MIN_LAT
+        ), f"Centroid lat below min_lat: {lats[lats < _MIN_LAT]}"
+        assert np.all(
+            lats <= _MAX_LAT
+        ), f"Centroid lat above max_lat: {lats[lats > _MAX_LAT]}"

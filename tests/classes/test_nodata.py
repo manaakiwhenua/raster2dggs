@@ -18,7 +18,6 @@ def _make_test_raster(path: str, nodata: float = NODATA_SENTINEL) -> None:
     make_raster(path, RASTER_BOUNDS, RASTER_SIZE, pixel_value=42.0, nodata=nodata)
 
 
-
 class TestMaskIsNodata(TestCase):
     def test_nodata_none_returns_all_false(self):
         s = pd.Series([1.0, 2.0, np.nan])

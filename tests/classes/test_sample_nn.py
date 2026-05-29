@@ -57,9 +57,12 @@ class _SampleNNSmoke(TestRunthrough):
             self._raster,
             TEST_OUTPUT_PATH,
             self.resolution,
-            "--semantics", "point_sample_field",
-            "--transfer", "sample_nn",
-            "--out", "value",
+            "--semantics",
+            "point_sample_field",
+            "--transfer",
+            "sample_nn",
+            "--out",
+            "value",
             *extra_args,
         )
 

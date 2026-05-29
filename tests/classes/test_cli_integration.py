@@ -94,9 +94,9 @@ class TestAllDGGS:
             if compaction:
                 args += ["-co"]
             result = runner.invoke(cli, args, catch_exceptions=False)
-            assert result.exit_code == 0, (
-                f"{spec.name} {geo or 'none'} failed:\n{result.output}"
-            )
+            assert (
+                result.exit_code == 0
+            ), f"{spec.name} {geo or 'none'} failed:\n{result.output}"
         finally:
             timer.stop()
 

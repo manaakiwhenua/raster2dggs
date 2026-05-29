@@ -27,7 +27,6 @@ def _make_raster(path: str, nodata: float = None) -> None:
     make_raster(path, _BOUNDS, _SIZE, pixel_value=_PIXEL_VALUE, nodata=nodata)
 
 
-
 class TestOutList(TestRunthrough):
     def setUp(self):
         super().setUp()

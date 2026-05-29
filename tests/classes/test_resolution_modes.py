@@ -85,14 +85,10 @@ class TestResolveModeInvariants(TestRunthrough):
         super().setUp()
         self._tmp = self.make_temp_raster(_make_raster)
         self.indexer = H3RasterIndexer("h3")
-        self.pixel_area, self.clat, self.clon = common.compute_pixel_area_m2(
-            self._tmp
-        )
+        self.pixel_area, self.clat, self.clon = common.compute_pixel_area_m2(self._tmp)
 
     def _resolve(self, mode):
-        return common.resolve_resolution_mode(
-            mode, "h3", self._tmp, _H3_MIN, _H3_MAX
-        )
+        return common.resolve_resolution_mode(mode, "h3", self._tmp, _H3_MIN, _H3_MAX)
 
     def _cell_area(self, res):
         return self.indexer.cell_area_m2(res, self.clat, self.clon)
