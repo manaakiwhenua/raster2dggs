@@ -14,20 +14,13 @@ Resolutions are chosen so that ~5-30 DGGS cell centres fall inside the raster
 bbox, giving enough rows to exercise the pipeline without being slow.
 """
 
-import tempfile
 import unittest
-from pathlib import Path
 
 import numpy as np
 import pyarrow.parquet as pq
-import rasterio
-from rasterio.crs import CRS
-from rasterio.transform import from_bounds
-from click.testing import CliRunner
-
 from classes.base import TestRunthrough
+from classes.helpers import make_raster
 from data.datapaths import TEST_OUTPUT_PATH
-from raster2dggs.cli import cli
 
 _BOUNDS = (174.0, -37.0, 175.0, -36.0)  # 1° × 1° near Auckland
 _SIZE = 10
@@ -35,19 +28,7 @@ _PIXEL_VALUE = 42.0
 
 
 def _make_raster(path: str) -> None:
-    data = np.full((1, _SIZE, _SIZE), _PIXEL_VALUE, dtype=np.float32)
-    with rasterio.open(
-        path,
-        "w",
-        driver="GTiff",
-        height=_SIZE,
-        width=_SIZE,
-        count=1,
-        dtype="float32",
-        crs=CRS.from_epsg(4326),
-        transform=from_bounds(*_BOUNDS, _SIZE, _SIZE),
-    ) as dst:
-        dst.write(data)
+    make_raster(path, _BOUNDS, _SIZE, pixel_value=_PIXEL_VALUE)
 
 
 class _SampleNNSmoke(TestRunthrough):
@@ -68,35 +49,18 @@ class _SampleNNSmoke(TestRunthrough):
         if self.dggs is None:
             self.skipTest("Abstract base class — no DGGS configured")
         super().setUp()
-        self._raster = tempfile.NamedTemporaryFile(suffix=".tiff", delete=False)
-        _make_raster(self._raster.name)
-
-    def tearDown(self):
-        Path(self._raster.name).unlink(missing_ok=True)
-        super().tearDown()
+        self._raster = self.make_temp_raster(_make_raster)
 
     def _run(self, *extra_args):
-        if TEST_OUTPUT_PATH.exists():
-            self.clearOutFolder(TEST_OUTPUT_PATH)
-        TEST_OUTPUT_PATH.mkdir(exist_ok=True)
-        runner = CliRunner()
-        return runner.invoke(
-            cli,
-            [
-                self.dggs,
-                self._raster.name,
-                str(TEST_OUTPUT_PATH),
-                "-r",
-                str(self.resolution),
-                "--semantics",
-                "point_sample_field",
-                "--transfer",
-                "sample_nn",
-                "--out",
-                "value",
-            ]
-            + list(extra_args),
-            catch_exceptions=False,
+        return self.invoke_cli(
+            self.dggs,
+            self._raster,
+            TEST_OUTPUT_PATH,
+            self.resolution,
+            "--semantics", "point_sample_field",
+            "--transfer", "sample_nn",
+            "--out", "value",
+            *extra_args,
         )
 
     def test_exit_code_zero(self):

@@ -16,194 +16,65 @@ and enough cells at moderate resolutions to give meaningful coverage without
 being slow.
 """
 
-import unittest
+import importlib
 
 import numpy as np
 import pandas as pd
+import pytest
 
 _MIN_LON, _MIN_LAT, _MAX_LON, _MAX_LAT = 174.0, -37.0, 175.0, -36.0
 
-
-class _CellsInBboxTests:
-    """
-    Mixin providing the standard cells_in_bbox test suite.
-
-    Subclasses must set:
-      cls.indexer    — an instantiated RasterIndexer
-      cls.resolution — integer resolution to test at
-    or call cls.skipTest() from setUpClass if the dependency is absent.
-    """
-
-    indexer = None
-    resolution = None
-
-    def _cells(self):
-        return self.indexer.cells_in_bbox(
-            _MIN_LON, _MIN_LAT, _MAX_LON, _MAX_LAT, self.resolution
-        )
-
-    def test_supports_cell_enumeration_flag(self):
-        self.assertTrue(self.indexer.SUPPORTS_CELL_ENUMERATION)
-
-    def test_returns_set(self):
-        self.assertIsInstance(self._cells(), set)
-
-    def test_nonempty(self):
-        self.assertGreater(len(self._cells()), 0)
-
-    def test_cell_ids_are_strings(self):
-        for c in self._cells():
-            self.assertIsInstance(c, str, f"Cell ID {c!r} should be a string")
-
-    def test_all_centroids_inside_bbox(self):
-        cells = self._cells()
-        lons, lats = self.indexer.cells_to_lonlat_arrays(pd.Series(sorted(cells)))
-        self.assertTrue(
-            np.all(lons >= _MIN_LON),
-            f"Centroid lon below min_lon: {lons[lons < _MIN_LON]}",
-        )
-        self.assertTrue(
-            np.all(lons <= _MAX_LON),
-            f"Centroid lon above max_lon: {lons[lons > _MAX_LON]}",
-        )
-        self.assertTrue(
-            np.all(lats >= _MIN_LAT),
-            f"Centroid lat below min_lat: {lats[lats < _MIN_LAT]}",
-        )
-        self.assertTrue(
-            np.all(lats <= _MAX_LAT),
-            f"Centroid lat above max_lat: {lats[lats > _MAX_LAT]}",
-        )
+_DGGS_CASES = [
+    # (dggs_name, resolution, module_path, class_name)
+    # res chosen so ~5-30 cells fall inside the 1° × 1° bbox
+    ("h3",         5, "raster2dggs.indexers.h3rasterindexer",         "H3RasterIndexer"),
+    ("rhp",        6, "raster2dggs.indexers.rhprasterindexer",        "RHPRasterIndexer"),
+    ("geohash",    4, "raster2dggs.indexers.geohashrasterindexer",    "GeohashRasterIndexer"),
+    ("maidenhead", 3, "raster2dggs.indexers.maidenheadrasterindexer", "MaidenheadRasterIndexer"),
+    ("s2",         8, "raster2dggs.indexers.s2rasterindexer",         "S2RasterIndexer"),
+    ("a5",         8, "raster2dggs.indexers.a5rasterindexer",         "A5RasterIndexer"),
+    # DGGAL variants share the same cells_in_bbox implementation; one representative suffices
+    ("isea4r",     8, "raster2dggs.indexers.dggalrasterindexer",      "ISEA4RRasterIndexer"),
+]
 
 
-class TestH3CellsInBbox(_CellsInBboxTests, unittest.TestCase):
-    # res 5: ~252 km² cells → ~28 cells in a 1° × 1° bbox at -37° lat
-    resolution = 5
-
-    @classmethod
-    def setUpClass(cls):
-        try:
-            from raster2dggs.indexers.h3rasterindexer import H3RasterIndexer
-
-            cls.indexer = H3RasterIndexer("h3")
-        except ImportError:
-            cls.indexer = None
-
-    def setUp(self):
-        if self.indexer is None:
-            self.skipTest("h3 extra not installed")
+@pytest.fixture(params=_DGGS_CASES, ids=[c[0] for c in _DGGS_CASES])
+def indexer_and_res(request):
+    dggs, resolution, module_path, class_name = request.param
+    try:
+        mod = importlib.import_module(module_path)
+        cls = getattr(mod, class_name)
+        return cls(dggs), resolution
+    except ImportError:
+        pytest.skip(f"{dggs} extra not installed")
 
 
-class TestRHPCellsInBbox(_CellsInBboxTests, unittest.TestCase):
-    # res 6: ~1440 km² cells → ~5 cells in a 1° × 1° bbox
-    resolution = 6
+class TestCellsInBbox:
+    def _cells(self, indexer, resolution):
+        return indexer.cells_in_bbox(_MIN_LON, _MIN_LAT, _MAX_LON, _MAX_LAT, resolution)
 
-    @classmethod
-    def setUpClass(cls):
-        try:
-            from raster2dggs.indexers.rhprasterindexer import RHPRasterIndexer
+    def test_supports_cell_enumeration_flag(self, indexer_and_res):
+        indexer, _ = indexer_and_res
+        assert indexer.SUPPORTS_CELL_ENUMERATION
 
-            cls.indexer = RHPRasterIndexer("rhp")
-        except ImportError:
-            cls.indexer = None
+    def test_returns_set(self, indexer_and_res):
+        indexer, resolution = indexer_and_res
+        assert isinstance(self._cells(indexer, resolution), set)
 
-    def setUp(self):
-        if self.indexer is None:
-            self.skipTest("rhp extra not installed")
+    def test_nonempty(self, indexer_and_res):
+        indexer, resolution = indexer_and_res
+        assert len(self._cells(indexer, resolution)) > 0
 
+    def test_cell_ids_are_strings(self, indexer_and_res):
+        indexer, resolution = indexer_and_res
+        for c in self._cells(indexer, resolution):
+            assert isinstance(c, str), f"Cell ID {c!r} should be a string"
 
-class TestGeohashCellsInBbox(_CellsInBboxTests, unittest.TestCase):
-    # precision 4: lon_step ≈ 0.35°, lat_step ≈ 0.18° → ~16 cells in 1° × 1°
-    resolution = 4
-
-    @classmethod
-    def setUpClass(cls):
-        try:
-            from raster2dggs.indexers.geohashrasterindexer import GeohashRasterIndexer
-
-            cls.indexer = GeohashRasterIndexer("geohash")
-        except ImportError:
-            cls.indexer = None
-
-    def setUp(self):
-        if self.indexer is None:
-            self.skipTest("geohash extra not installed")
-
-
-class TestMaidenheadCellsInBbox(_CellsInBboxTests, unittest.TestCase):
-    # level 3: lon_step ≈ 0.083°, lat_step ≈ 0.042° → ~288 cells in 1° × 1°
-    resolution = 3
-
-    @classmethod
-    def setUpClass(cls):
-        try:
-            from raster2dggs.indexers.maidenheadrasterindexer import (
-                MaidenheadRasterIndexer,
-            )
-
-            cls.indexer = MaidenheadRasterIndexer("maidenhead")
-        except ImportError:
-            cls.indexer = None
-
-    def setUp(self):
-        if self.indexer is None:
-            self.skipTest("maidenhead extra not installed")
-
-
-class TestS2CellsInBbox(_CellsInBboxTests, unittest.TestCase):
-    # level 8: 6 × 4^8 = 393216 cells globally → ~1300 km² each → ~5 cells
-    resolution = 8
-
-    @classmethod
-    def setUpClass(cls):
-        try:
-            from raster2dggs.indexers.s2rasterindexer import S2RasterIndexer
-
-            cls.indexer = S2RasterIndexer("s2")
-        except ImportError:
-            cls.indexer = None
-
-    def setUp(self):
-        if self.indexer is None:
-            self.skipTest("s2 extra not installed")
-
-
-class TestA5CellsInBbox(_CellsInBboxTests, unittest.TestCase):
-    # level 8: 12 × 4^8 = 786432 cells globally → ~649 km² each → ~11 cells
-    resolution = 8
-
-    @classmethod
-    def setUpClass(cls):
-        try:
-            from raster2dggs.indexers.a5rasterindexer import A5RasterIndexer
-
-            cls.indexer = A5RasterIndexer("a5")
-        except ImportError:
-            cls.indexer = None
-
-    def setUp(self):
-        if self.indexer is None:
-            self.skipTest("a5 extra not installed")
-
-
-# DGGAL (ISEA4R as representative)
-# All DGGAL variants share the same cells_in_bbox implementation in
-# DGGALRasterIndexer via listZones(), so testing one is sufficient here.
-
-
-class TestISEA4RCellsInBbox(_CellsInBboxTests, unittest.TestCase):
-    # level 8: similar density to A5/S2 level 8 → ~10-15 cells
-    resolution = 8
-
-    @classmethod
-    def setUpClass(cls):
-        try:
-            from raster2dggs.indexers.dggalrasterindexer import ISEA4RRasterIndexer
-
-            cls.indexer = ISEA4RRasterIndexer("isea4r")
-        except ImportError:
-            cls.indexer = None
-
-    def setUp(self):
-        if self.indexer is None:
-            self.skipTest("dggal extra not installed")
+    def test_all_centroids_inside_bbox(self, indexer_and_res):
+        indexer, resolution = indexer_and_res
+        cells = self._cells(indexer, resolution)
+        lons, lats = indexer.cells_to_lonlat_arrays(pd.Series(sorted(cells)))
+        assert np.all(lons >= _MIN_LON), f"Centroid lon below min_lon: {lons[lons < _MIN_LON]}"
+        assert np.all(lons <= _MAX_LON), f"Centroid lon above max_lon: {lons[lons > _MAX_LON]}"
+        assert np.all(lats >= _MIN_LAT), f"Centroid lat below min_lat: {lats[lats < _MIN_LAT]}"
+        assert np.all(lats <= _MAX_LAT), f"Centroid lat above max_lat: {lats[lats > _MAX_LAT]}"

@@ -1,16 +1,11 @@
-import tempfile
-from pathlib import Path
-
 import numpy as np
 import pyarrow as pa
 import pyarrow.parquet as pq
 import pandas as pd
-import rasterio
-from rasterio.crs import CRS
-from rasterio.transform import from_bounds
 from click.testing import CliRunner
 
-from classes.base import TestRunthrough
+from classes.base import TestRunthrough, read_output
+from classes.helpers import make_raster
 from data.datapaths import TEST_OUTPUT_PATH
 from raster2dggs.cli import cli
 
@@ -29,51 +24,18 @@ _FINE_RES = 7
 
 
 def _make_raster(path: str, nodata: float = None) -> None:
-    data = np.full((1, _SIZE, _SIZE), _PIXEL_VALUE, dtype=np.float32)
-    if nodata is not None:
-        data[0, 0, 0] = nodata
-    with rasterio.open(
-        path,
-        "w",
-        driver="GTiff",
-        height=_SIZE,
-        width=_SIZE,
-        count=1,
-        dtype="float32",
-        crs=CRS.from_epsg(4326),
-        transform=from_bounds(*_BOUNDS, _SIZE, _SIZE),
-        nodata=nodata,
-    ) as dst:
-        dst.write(data)
+    make_raster(path, _BOUNDS, _SIZE, pixel_value=_PIXEL_VALUE, nodata=nodata)
 
-
-def _read_output(output_dir: Path) -> pa.Table:
-    return pq.read_table(str(output_dir))
 
 
 class TestOutList(TestRunthrough):
     def setUp(self):
         super().setUp()
-        self._raster = tempfile.NamedTemporaryFile(suffix=".tiff", delete=False)
-        _make_raster(self._raster.name)
-
-    def tearDown(self):
-        super().tearDown()
-        Path(self._raster.name).unlink(missing_ok=True)
+        self._raster = self.make_temp_raster(_make_raster)
 
     def _run(self, res, *extra_args):
-        if TEST_OUTPUT_PATH.exists():
-            self.clearOutFolder(TEST_OUTPUT_PATH)
-        TEST_OUTPUT_PATH.mkdir(exist_ok=True)
-        runner = CliRunner()
-        result = runner.invoke(
-            cli,
-            ["h3", self._raster.name, str(TEST_OUTPUT_PATH), "-r", str(res)]
-            + list(extra_args),
-            catch_exceptions=False,
-        )
-        self.assertEqual(result.exit_code, 0, result.output)
-        return _read_output(TEST_OUTPUT_PATH)
+        self.invoke_cli("h3", self._raster, TEST_OUTPUT_PATH, res, *extra_args)
+        return read_output(TEST_OUTPUT_PATH)
 
     def test_band_columns_are_list_typed(self):
         table = self._run(_COARSE_RES, "--out", "list")
@@ -146,7 +108,7 @@ class TestOutList(TestRunthrough):
             cli,
             [
                 "h3",
-                self._raster.name,
+                self._raster,
                 str(TEST_OUTPUT_PATH),
                 "-r",
                 str(_COARSE_RES),
@@ -164,26 +126,11 @@ class TestOutList(TestRunthrough):
 class TestOutListNodataExclusion(TestRunthrough):
     def setUp(self):
         super().setUp()
-        self._raster = tempfile.NamedTemporaryFile(suffix=".tiff", delete=False)
-        _make_raster(self._raster.name, nodata=_NODATA)
-
-    def tearDown(self):
-        super().tearDown()
-        Path(self._raster.name).unlink(missing_ok=True)
+        self._raster = self.make_temp_raster(lambda p: _make_raster(p, nodata=_NODATA))
 
     def _run(self, res, *extra_args):
-        if TEST_OUTPUT_PATH.exists():
-            self.clearOutFolder(TEST_OUTPUT_PATH)
-        TEST_OUTPUT_PATH.mkdir(exist_ok=True)
-        runner = CliRunner()
-        result = runner.invoke(
-            cli,
-            ["h3", self._raster.name, str(TEST_OUTPUT_PATH), "-r", str(res)]
-            + list(extra_args),
-            catch_exceptions=False,
-        )
-        self.assertEqual(result.exit_code, 0, result.output)
-        return _read_output(TEST_OUTPUT_PATH).to_pandas()
+        self.invoke_cli("h3", self._raster, TEST_OUTPUT_PATH, res, *extra_args)
+        return read_output(TEST_OUTPUT_PATH).to_pandas()
 
     def test_nodata_sentinel_excluded_from_lists(self):
         df = self._run(_COARSE_RES, "--out", "list")
@@ -205,26 +152,11 @@ class TestOutListNodataExclusion(TestRunthrough):
 class TestOutHistogram(TestRunthrough):
     def setUp(self):
         super().setUp()
-        self._raster = tempfile.NamedTemporaryFile(suffix=".tiff", delete=False)
-        _make_raster(self._raster.name)
-
-    def tearDown(self):
-        super().tearDown()
-        Path(self._raster.name).unlink(missing_ok=True)
+        self._raster = self.make_temp_raster(_make_raster)
 
     def _run(self, res, *extra_args):
-        if TEST_OUTPUT_PATH.exists():
-            self.clearOutFolder(TEST_OUTPUT_PATH)
-        TEST_OUTPUT_PATH.mkdir(exist_ok=True)
-        runner = CliRunner()
-        result = runner.invoke(
-            cli,
-            ["h3", self._raster.name, str(TEST_OUTPUT_PATH), "-r", str(res)]
-            + list(extra_args),
-            catch_exceptions=False,
-        )
-        self.assertEqual(result.exit_code, 0, result.output)
-        return _read_output(TEST_OUTPUT_PATH)
+        self.invoke_cli("h3", self._raster, TEST_OUTPUT_PATH, res, *extra_args)
+        return read_output(TEST_OUTPUT_PATH)
 
     def test_band_columns_are_struct_typed(self):
         table = self._run(_COARSE_RES, "--out", "histogram")
@@ -312,7 +244,7 @@ class TestOutHistogram(TestRunthrough):
             cli,
             [
                 "h3",
-                self._raster.name,
+                self._raster,
                 str(TEST_OUTPUT_PATH),
                 "-r",
                 str(_COARSE_RES),
@@ -330,26 +262,11 @@ class TestOutHistogram(TestRunthrough):
 class TestMultiAgg(TestRunthrough):
     def setUp(self):
         super().setUp()
-        self._raster = tempfile.NamedTemporaryFile(suffix=".tiff", delete=False)
-        _make_raster(self._raster.name)
-
-    def tearDown(self):
-        super().tearDown()
-        Path(self._raster.name).unlink(missing_ok=True)
+        self._raster = self.make_temp_raster(_make_raster)
 
     def _run(self, res, *extra_args):
-        if TEST_OUTPUT_PATH.exists():
-            self.clearOutFolder(TEST_OUTPUT_PATH)
-        TEST_OUTPUT_PATH.mkdir(exist_ok=True)
-        runner = CliRunner()
-        result = runner.invoke(
-            cli,
-            ["h3", self._raster.name, str(TEST_OUTPUT_PATH), "-r", str(res)]
-            + list(extra_args),
-            catch_exceptions=False,
-        )
-        self.assertEqual(result.exit_code, 0, result.output)
-        return _read_output(TEST_OUTPUT_PATH)
+        self.invoke_cli("h3", self._raster, TEST_OUTPUT_PATH, res, *extra_args)
+        return read_output(TEST_OUTPUT_PATH)
 
     def test_single_agg_produces_scalar_column(self):
         table = self._run(_COARSE_RES, "--agg", "mean")
@@ -415,7 +332,7 @@ class TestMultiAgg(TestRunthrough):
             cli,
             [
                 "h3",
-                self._raster.name,
+                self._raster,
                 str(TEST_OUTPUT_PATH),
                 "-r",
                 str(_COARSE_RES),
@@ -432,7 +349,7 @@ class TestMultiAgg(TestRunthrough):
             cli,
             [
                 "h3",
-                self._raster.name,
+                self._raster,
                 str(TEST_OUTPUT_PATH),
                 "-r",
                 str(_COARSE_RES),
@@ -448,12 +365,7 @@ class TestMultiAgg(TestRunthrough):
 class TestOutListValidation(TestRunthrough):
     def setUp(self):
         super().setUp()
-        self._raster = tempfile.NamedTemporaryFile(suffix=".tiff", delete=False)
-        _make_raster(self._raster.name)
-
-    def tearDown(self):
-        super().tearDown()
-        Path(self._raster.name).unlink(missing_ok=True)
+        self._raster = self.make_temp_raster(_make_raster)
 
     def test_inappropriate_combination_rejected(self):
         runner = CliRunner()
@@ -461,7 +373,7 @@ class TestOutListValidation(TestRunthrough):
             cli,
             [
                 "h3",
-                self._raster.name,
+                self._raster,
                 str(TEST_OUTPUT_PATH),
                 "-r",
                 str(_COARSE_RES),
@@ -485,7 +397,7 @@ class TestOutListValidation(TestRunthrough):
             cli,
             [
                 "h3",
-                self._raster.name,
+                self._raster,
                 str(TEST_OUTPUT_PATH),
                 "-r",
                 str(_COARSE_RES),
@@ -509,7 +421,7 @@ class TestOutListValidation(TestRunthrough):
             cli,
             [
                 "h3",
-                self._raster.name,
+                self._raster,
                 str(TEST_OUTPUT_PATH),
                 "-r",
                 str(_COARSE_RES),

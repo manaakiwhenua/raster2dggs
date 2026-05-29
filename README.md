@@ -466,11 +466,10 @@ Please run `black .` before committing.
 Tests are included. To run them, set up a poetry environment, then run from the project root:
 
 ```bash
-pytest -v -s --durations=10 --tb=short
+pytest -v --durations=10 --tb=short
 ```
 
 - `-v` — one line per test with pass/fail status
-- `-s` — disables output capture so the per-DGGS elapsed timers display in real time
 - `--durations=10` — reports the 10 slowest tests at the end
 - `--tb=short` — compact tracebacks on failure
 - Add `-x` to stop on the first failure when debugging

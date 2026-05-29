@@ -3,6 +3,7 @@ import time
 from threading import Event, Thread
 
 import pytest
+from classes.base import clear_folder
 from data.datapaths import *
 from click.testing import CliRunner
 
@@ -13,15 +14,6 @@ RES_BY_DGGS = {
     "maidenhead": 3,
 }
 DEFAULT_RES = 6
-
-
-def _clear_folder(folder):
-    for child in folder.iterdir():
-        if child.is_dir():
-            _clear_folder(child)
-            child.rmdir()
-        else:
-            child.unlink()
 
 
 def safe_resolution(spec):
@@ -78,7 +70,7 @@ class TestAllDGGS:
 
     def teardown_method(self):
         if TEST_OUTPUT_PATH.exists():
-            _clear_folder(TEST_OUTPUT_PATH)
+            clear_folder(TEST_OUTPUT_PATH)
             TEST_OUTPUT_PATH.rmdir()
 
     @pytest.mark.parametrize("spec,geo,compaction", _PARAMS, ids=_IDS)

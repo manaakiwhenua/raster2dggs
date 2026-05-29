@@ -1,14 +1,7 @@
-import tempfile
-from pathlib import Path
-from unittest import TestCase
-
-import numpy as np
-import rasterio
-from rasterio.crs import CRS
-from rasterio.transform import from_bounds
 from click.testing import CliRunner
 
-from classes.base import TestRunthrough
+from classes.base import TestRunthrough, TestCase
+from classes.helpers import make_raster
 from data.datapaths import TEST_OUTPUT_PATH
 from raster2dggs.cli import cli
 from raster2dggs.constants import ResolutionMode
@@ -22,20 +15,7 @@ _H3_MIN, _H3_MAX = 0, 15
 
 
 def _make_raster(path: str) -> None:
-    data = np.ones((1, _SIZE, _SIZE), dtype=np.float32)
-    with rasterio.open(
-        path,
-        "w",
-        driver="GTiff",
-        height=_SIZE,
-        width=_SIZE,
-        count=1,
-        dtype="float32",
-        crs=CRS.from_epsg(4326),
-        transform=from_bounds(*_BOUNDS, _SIZE, _SIZE),
-        nodata=None,
-    ) as dst:
-        dst.write(data)
+    make_raster(path, _BOUNDS, _SIZE, pixel_value=1.0)
 
 
 class TestCellAreaM2(TestCase):
@@ -68,23 +48,20 @@ class TestCellAreaM2(TestCase):
         self.assertGreater(coarsest, finest)
 
 
-class TestComputePixelAreaM2(TestCase):
+class TestComputePixelAreaM2(TestRunthrough):
     """compute_pixel_area_m2 returns a positive area and plausible centre."""
 
     def setUp(self):
-        self._tmp = tempfile.NamedTemporaryFile(suffix=".tiff", delete=False)
-        _make_raster(self._tmp.name)
-
-    def tearDown(self):
-        Path(self._tmp.name).unlink(missing_ok=True)
+        super().setUp()
+        self._tmp = self.make_temp_raster(_make_raster)
 
     def test_returns_positive_area(self):
-        area, _, _ = common.compute_pixel_area_m2(self._tmp.name)
+        area, _, _ = common.compute_pixel_area_m2(self._tmp)
         self.assertGreater(area, 0)
 
     def test_centre_within_bounds(self):
         left, bottom, right, top = _BOUNDS
-        _, clat, clon = common.compute_pixel_area_m2(self._tmp.name)
+        _, clat, clon = common.compute_pixel_area_m2(self._tmp)
         self.assertGreaterEqual(clat, bottom)
         self.assertLessEqual(clat, top)
         self.assertGreaterEqual(clon, left)
@@ -92,12 +69,12 @@ class TestComputePixelAreaM2(TestCase):
 
     def test_area_plausible_for_pixel_size(self):
         # 0.01° × 0.01° at ~41°S → roughly 600 000 – 1 200 000 m²
-        area, _, _ = common.compute_pixel_area_m2(self._tmp.name)
+        area, _, _ = common.compute_pixel_area_m2(self._tmp)
         self.assertGreater(area, 5e5)
         self.assertLess(area, 2e6)
 
 
-class TestResolveModeInvariants(TestCase):
+class TestResolveModeInvariants(TestRunthrough):
     """
     Each mode must satisfy its defining property against the pixel area of the
     test raster.  We check invariants rather than hard-coded resolutions so the
@@ -105,19 +82,16 @@ class TestResolveModeInvariants(TestCase):
     """
 
     def setUp(self):
-        self._tmp = tempfile.NamedTemporaryFile(suffix=".tiff", delete=False)
-        _make_raster(self._tmp.name)
+        super().setUp()
+        self._tmp = self.make_temp_raster(_make_raster)
         self.indexer = H3RasterIndexer("h3")
         self.pixel_area, self.clat, self.clon = common.compute_pixel_area_m2(
-            self._tmp.name
+            self._tmp
         )
-
-    def tearDown(self):
-        Path(self._tmp.name).unlink(missing_ok=True)
 
     def _resolve(self, mode):
         return common.resolve_resolution_mode(
-            mode, "h3", self._tmp.name, _H3_MIN, _H3_MAX
+            mode, "h3", self._tmp, _H3_MIN, _H3_MAX
         )
 
     def _cell_area(self, res):
@@ -192,40 +166,21 @@ class TestResolutionModeCLI(TestRunthrough):
 
     def setUp(self):
         super().setUp()
-        self._tmp = tempfile.NamedTemporaryFile(suffix=".tiff", delete=False)
-        _make_raster(self._tmp.name)
-
-    def tearDown(self):
-        super().tearDown()
-        Path(self._tmp.name).unlink(missing_ok=True)
+        self._tmp = self.make_temp_raster(_make_raster)
 
     def _run(self, mode):
-        runner = CliRunner()
-        result = runner.invoke(
-            cli,
-            ["h3", self._tmp.name, str(TEST_OUTPUT_PATH), "-r", mode],
-            catch_exceptions=False,
-        )
-        return result
+        return self.invoke_cli("h3", self._tmp, TEST_OUTPUT_PATH, mode)
 
     def test_all_modes_exit_zero(self):
         for mode in ResolutionMode:
-            if TEST_OUTPUT_PATH.exists():
-                self.clearOutFolder(TEST_OUTPUT_PATH)
-            TEST_OUTPUT_PATH.mkdir(exist_ok=True)
             with self.subTest(mode=mode):
-                result = self._run(mode)
-                self.assertEqual(
-                    result.exit_code,
-                    0,
-                    f"mode '{mode}' failed:\n{result.output}",
-                )
+                self._run(mode)
 
     def test_invalid_mode_string_exits_nonzero(self):
         runner = CliRunner()
         result = runner.invoke(
             cli,
-            ["h3", self._tmp.name, str(TEST_OUTPUT_PATH), "-r", "not-a-mode"],
+            ["h3", self._tmp, str(TEST_OUTPUT_PATH), "-r", "not-a-mode"],
         )
         self.assertNotEqual(result.exit_code, 0)
 
@@ -233,6 +188,6 @@ class TestResolutionModeCLI(TestRunthrough):
         runner = CliRunner()
         result = runner.invoke(
             cli,
-            ["h3", self._tmp.name, str(TEST_OUTPUT_PATH), "-r", "99"],
+            ["h3", self._tmp, str(TEST_OUTPUT_PATH), "-r", "99"],
         )
         self.assertNotEqual(result.exit_code, 0)

@@ -1,19 +1,10 @@
-import tempfile
-from pathlib import Path
 from unittest import TestCase
 
 import numpy as np
 import pandas as pd
-import pyarrow.parquet as pq
-import rasterio
-from rasterio.crs import CRS
-from rasterio.transform import from_bounds
-
-from click.testing import CliRunner
-
-from classes.base import TestRunthrough
+from classes.base import TestRunthrough, read_output
+from classes.helpers import make_raster
 from data.datapaths import TEST_OUTPUT_PATH
-from raster2dggs.cli import cli
 from raster2dggs.indexers.rasterindexer import _mask_is_nodata
 
 NODATA_SENTINEL = -9999.0
@@ -24,26 +15,8 @@ H3_RES = 7  # fine enough that each pixel maps to its own cell
 
 
 def _make_test_raster(path: str, nodata: float = NODATA_SENTINEL) -> None:
-    data = np.full((1, RASTER_SIZE, RASTER_SIZE), 42.0, dtype=np.float32)
-    data[0, 0, 0] = nodata  # one isolated nodata pixel
-    transform = from_bounds(*RASTER_BOUNDS, RASTER_SIZE, RASTER_SIZE)
-    with rasterio.open(
-        path,
-        "w",
-        driver="GTiff",
-        height=RASTER_SIZE,
-        width=RASTER_SIZE,
-        count=1,
-        dtype="float32",
-        crs=CRS.from_epsg(4326),
-        transform=transform,
-        nodata=nodata,
-    ) as dst:
-        dst.write(data)
+    make_raster(path, RASTER_BOUNDS, RASTER_SIZE, pixel_value=42.0, nodata=nodata)
 
-
-def _read_output(output_dir: Path) -> pd.DataFrame:
-    return pq.read_table(str(output_dir)).to_pandas()
 
 
 class TestMaskIsNodata(TestCase):
@@ -78,28 +51,11 @@ class TestMaskIsNodata(TestCase):
 class TestNodataPolicy(TestRunthrough):
     def setUp(self):
         super().setUp()
-        self._raster = tempfile.NamedTemporaryFile(suffix=".tiff", delete=False)
-        _make_test_raster(self._raster.name)
-
-    def tearDown(self):
-        super().tearDown()
-        Path(self._raster.name).unlink(missing_ok=True)
+        self._raster = self.make_temp_raster(_make_test_raster)
 
     def _run(self, *extra_args):
-        if TEST_OUTPUT_PATH.exists():
-            self.clearOutFolder(TEST_OUTPUT_PATH)
-        TEST_OUTPUT_PATH.mkdir(exist_ok=True)
-        runner = CliRunner()
-        args = [
-            "h3",
-            self._raster.name,
-            str(TEST_OUTPUT_PATH),
-            "-r",
-            str(H3_RES),
-        ] + list(extra_args)
-        result = runner.invoke(cli, args, catch_exceptions=False)
-        self.assertEqual(result.exit_code, 0, result.output)
-        return _read_output(TEST_OUTPUT_PATH)
+        self.invoke_cli("h3", self._raster, TEST_OUTPUT_PATH, H3_RES, *extra_args)
+        return read_output(TEST_OUTPUT_PATH).to_pandas()
 
     def test_omit_excludes_nodata_cells(self):
         df = self._run("--nodata_policy", "omit")
