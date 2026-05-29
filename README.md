@@ -207,10 +207,7 @@ Support for additional semantics × transfer combinations is being added increme
 
 ### Semantics × transfer compatibility
 
-Legend: **✓** appropriate/common · **△** possible (with caveats) · **✗** inappropriate (breaks semantics) · **—** not yet implemented
-
-> [!NOTE]
-> The following table was produced with LLM assistance and may contain errors.
+Legend: **✓** appropriate/common · **△** possible (with caveats) · **✗** inappropriate (breaks semantics)
 
 | `--semantics` | `assign_centers` | `sample_nn` | `sample_interp` | `overlay_weighted` | `overlay_mode` | `mass_preserve` | Typical `--out` / `--agg` |
 |---|:---:|:---:|:---:|:---:|:---:|:---:|---|
@@ -240,6 +237,7 @@ Legend: **✓** appropriate/common · **△** possible (with caveats) · **✗**
 | `point_center_strict` | `assign_centers` | `list` | Sorted list of all contributing pixel values per cell. `--agg` is ignored. |
 | `point_center_strict` | `assign_centers` | `histogram` | Value-count struct per cell. `--agg` is ignored. |
 | `point_sample_field` | `sample_nn` | `value` | Nearest-neighbour sample at each DGGS cell centre. `--agg` is ignored. Supports `--compact`. |
+| `piecewise_constant` | `sample_nn` | `value` | Nearest-neighbour sample at each DGGS cell centre. Suitable for categorical rasters (landcover, zone IDs, soil class). `--agg` is ignored. Supports `--compact`. |
 
 All other valid combinations will raise a `NotImplementedError` with a descriptive message until they are added.
 
