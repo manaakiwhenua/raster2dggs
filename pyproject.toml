@@ -17,7 +17,7 @@ classifiers = [
 
 [tool.poetry.dependencies]
 python = "^3.11"
-gdal = "<3.13"
+gdal = ">=3.8"
 geopandas = "^1.0"
 rioxarray = "^0.19"
 dask-geopandas = "^0.5"
