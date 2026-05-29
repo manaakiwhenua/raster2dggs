@@ -414,26 +414,18 @@ class TestOutListValidation(TestRunthrough):
             "point_sample_field + sample_interp is valid but not yet implemented",
         )
 
-    def test_sample_nn_runs(self):
-        runner = CliRunner()
-        result = runner.invoke(
-            cli,
-            [
-                "h3",
-                self._raster,
-                str(TEST_OUTPUT_PATH),
-                "-r",
-                str(_COARSE_RES),
-                "--semantics",
-                "point_sample_field",
-                "--transfer",
-                "sample_nn",
-                "--out",
-                "value",
-            ],
+    def test_sample_nn_point_sample_field_runs(self):
+        self.invoke_cli(
+            "h3", self._raster, TEST_OUTPUT_PATH, _COARSE_RES,
+            "--semantics", "point_sample_field",
+            "--transfer", "sample_nn",
+            "--out", "value",
         )
-        self.assertEqual(
-            result.exit_code,
-            0,
-            f"point_sample_field + sample_nn should succeed: {result.output}",
+
+    def test_sample_nn_piecewise_constant_runs(self):
+        self.invoke_cli(
+            "h3", self._raster, TEST_OUTPUT_PATH, _COARSE_RES,
+            "--semantics", "piecewise_constant",
+            "--transfer", "sample_nn",
+            "--out", "value",
         )

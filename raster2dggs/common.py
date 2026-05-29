@@ -665,7 +665,7 @@ def initial_index(
 
                 def process_nn(window):
                     """
-                    Cell-driven stage-1 for sample_nn / point_sample_field.
+                    Cell-driven stage-1 for sample_nn.
 
                     Enumerates every DGGS cell whose centre falls within the
                     window's geographic bbox, converts each centre to the

@@ -202,6 +202,7 @@ IMPLEMENTED: set = {
     ("point_center_strict", "assign_centers", "list"),
     ("point_center_strict", "assign_centers", "histogram"),
     ("point_sample_field", "sample_nn", "value"),
+    ("piecewise_constant", "sample_nn", "value"),
 }
 
 
