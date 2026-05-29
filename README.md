@@ -22,6 +22,28 @@ Contributions (particularly for additional DGGSs), suggestions, bug reports and 
 
 ![Example use case for raster2dggs, showing how an input raster can be indexed at different DGGS resolutions, while retaining information in separate, named bands](docs/imgs/raster2dggs-example.png "Example use case for raster2dggs, showing how an input raster can be indexed at different H3 resolutions, while retaining information in separate, named bands")
 
+## Contents
+
+- [Installation](#installation)
+- [Usage](#usage)
+- [Raster semantics and transfer operators](#raster-semantics-and-transfer-operators)
+  - [Semantics](#semantics---semantics)
+  - [Transfer operators](#transfer-operators---transfer)
+  - [Semantics × transfer compatibility](#semantics--transfer-compatibility)
+  - [Output schemas](#output-schemas---out)
+  - [Currently implemented combinations](#currently-implemented-combinations)
+- [Visualising output](#visualising-output)
+  - [DuckDB](#duckdb)
+  - [GDAL](#gdal)
+  - [QGIS](#qgis)
+- [Installation (detailed)](#installation-detailed)
+  - [For development](#for-development)
+  - [Tests](#tests)
+  - [Generating synthetic sample rasters](#generating-synthetic-sample-rasters)
+  - [Experimenting](#experimenting)
+- [Example commands](#example-commands)
+- [Citation](#citation)
+
 ## Installation
 
 This tool makes use of optional extras to allow you to install a limited subset of DGGSs.
@@ -412,7 +434,7 @@ With some styling applied:
 
 ![Example output shown in QGIS](image.png)
 
-## Installation
+## Installation (detailed)
 
 PyPi:
 
