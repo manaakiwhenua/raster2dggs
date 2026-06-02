@@ -196,6 +196,7 @@ def assemble_kwargs(
     geo: str,
     semantics: str = const.Semantics.POINT_CENTER_STRICT,
     transfer: str = const.Transfer.ASSIGN_CENTERS,
+    interp: str = const.Interp.NN,
     out: str = const.OutputSchema.VALUE,
 ) -> dict:
     return {
@@ -208,6 +209,7 @@ def assemble_kwargs(
         "geo": geo if geo != "none" else None,
         "semantics": semantics,
         "transfer": transfer,
+        "interp": interp,
         "out": out,
     }
 
@@ -326,7 +328,7 @@ def address_boundary_issues(
 
     aggfuncs = kwargs.get("aggfuncs", [("mean", "mean")])
 
-    if transfer == const.Transfer.SAMPLE_NN or out == "value" and len(aggfuncs) == 1:
+    if transfer == const.Transfer.SAMPLE or out == "value" and len(aggfuncs) == 1:
         out_meta = pd.DataFrame(
             {
                 partition_col: pd.Series([], dtype="string"),
@@ -349,7 +351,7 @@ def address_boundary_issues(
         _compacting = "/compacting" if kwargs["compact"] else ""
         tqdm_label = (
             f"Sampling (nearest neighbour){_compacting}"
-            if transfer == const.Transfer.SAMPLE_NN
+            if transfer == const.Transfer.SAMPLE
             else f"Aggregating{_compacting}"
         )
     else:
@@ -369,7 +371,7 @@ def address_boundary_issues(
     out_meta.index = pd.Index([], name=index_col, dtype="string")
 
     with TqdmCallback(desc=tqdm_label):
-        if transfer == const.Transfer.SAMPLE_NN:
+        if transfer == const.Transfer.SAMPLE:
             mp_func = indexer.parent_groupby_nn
             mp_args = (resolution, parent_res, decimals)
         elif out == "list":
@@ -529,11 +531,11 @@ def initial_index(
     indexer = idxfactory.indexer_instance(dggs)
 
     if (
-        kwargs["transfer"] == const.Transfer.SAMPLE_NN
+        kwargs["transfer"] == const.Transfer.SAMPLE
         and not indexer.SUPPORTS_CELL_ENUMERATION
     ):
         raise click.UsageError(
-            f"--transfer sample_nn requires spatial cell enumeration, which is not "
+            f"--transfer sample requires spatial cell enumeration, which is not "
             f"supported by the {dggs!r} DGGS."
         )
 
@@ -590,7 +592,7 @@ def initial_index(
                     src.crs, "EPSG:4326", always_xy=True
                 )
                 LOGGER.debug("Coordinate transformer: %s → EPSG:4326", src.crs)
-                if kwargs["transfer"] == const.Transfer.SAMPLE_NN:
+                if kwargs["transfer"] == const.Transfer.SAMPLE:
                     inverse_transformer = pyproj.Transformer.from_crs(
                         "EPSG:4326", src.crs, always_xy=True
                     )
@@ -658,18 +660,16 @@ def initial_index(
                     _write_result(result, window)
                     return None
 
-                def process_nn(window):
+                def _enumerate_cells(window):
                     """
-                    Cell-driven stage-1 for sample_nn.
+                    Return (cells, local_rows, local_cols) for all DGGS cells
+                    whose nearest-neighbour pixel falls inside *window*, or
+                    (None, None, None) if no cells qualify.
 
-                    Enumerates every DGGS cell whose centre falls within the
-                    window's geographic bbox, converts each centre to the
-                    nearest raster pixel in this window, reads the value, and
-                    writes one row per cell.  Because a pixel belongs to exactly
-                    one window, each cell is written once — stage-2 deduplication
-                    is a no-op in practice but still handles edge cases.
+                    local_rows and local_cols are relative to window.row_off /
+                    window.col_off, so they index directly into an array read
+                    with da.rio.isel_window(window).
                     """
-                    # bbox of this window in WGS84
                     win_left, win_bottom, win_right, win_top = src.window_bounds(window)
                     min_lon, min_lat, max_lon, max_lat = transform_bounds(
                         src.crs, "EPSG:4326", win_left, win_bottom, win_right, win_top
@@ -681,9 +681,8 @@ def initial_index(
                         )
                     )
                     if not cells:
-                        return None
+                        return None, None, None
 
-                    # cell centres → raster pixel coords
                     cell_lons, cell_lats = indexer.cells_to_lonlat_arrays(
                         pd.Series(cells)
                     )
@@ -693,13 +692,13 @@ def initial_index(
                     _xs, _ys = inverse_transformer.transform(
                         cell_lons.tolist(), cell_lats.tolist()
                     )
-                    cell_xs = np.asarray(_xs)
-                    cell_ys = np.asarray(_ys)
-                    all_rows, all_cols = rowcol(src.transform, cell_xs, cell_ys)
+                    all_rows, all_cols = rowcol(
+                        src.transform, np.asarray(_xs), np.asarray(_ys)
+                    )
                     all_rows = np.asarray(all_rows)
                     all_cols = np.asarray(all_cols)
 
-                    # Keep only cells whose sample pixel is in this window.
+                    # Keep only cells whose nearest pixel is in this window.
                     # A pixel belongs to exactly one window, so each cell is
                     # processed exactly once across all windows.
                     local_rows = all_rows - window.row_off
@@ -711,13 +710,19 @@ def initial_index(
                         & (local_cols < window.width)
                     )
                     if not np.any(in_win):
+                        return None, None, None
+
+                    return (
+                        [c for c, m in zip(cells, in_win) if m],
+                        local_rows[in_win],
+                        local_cols[in_win],
+                    )
+
+                def process_nn(window):
+                    cells, local_rows, local_cols = _enumerate_cells(window)
+                    if cells is None:
                         return None
 
-                    cells = [c for c, m in zip(cells, in_win) if m]
-                    local_rows = local_rows[in_win]
-                    local_cols = local_cols[in_win]
-
-                    # read window data and sample at cell-centre pixels:
                     # da has dims (band, y, x); .values triggers Dask compute
                     win_data = da.rio.isel_window(window).values
                     samples = win_data[:, local_rows, local_cols].T
@@ -769,7 +774,7 @@ def initial_index(
 
                 stage1_func = (
                     process_nn
-                    if kwargs["transfer"] == const.Transfer.SAMPLE_NN
+                    if kwargs["transfer"] == const.Transfer.SAMPLE
                     else process
                 )
                 try:
@@ -790,7 +795,7 @@ def initial_index(
                     # rather than at interpreter shutdown (which causes a
                     # silent "Error in sys.excepthook" crash for non-WGS84
                     # rasters).
-                    del da, transformer, process, process_nn, stage1_func
+                    del da, transformer, process, _enumerate_cells, process_nn, stage1_func
                     gc.collect()
             LOGGER.debug("Stage 1 (primary indexing) complete")
             return address_boundary_issues(

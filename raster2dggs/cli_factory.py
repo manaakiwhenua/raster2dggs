@@ -164,6 +164,7 @@ def run_index(
     tempdir,
     semantics: str,
     transfer: str,
+    interp: str,
     out: str,
 ):
     tempfile.tempdir = tempdir if tempdir is not None else tempfile.tempdir
@@ -182,6 +183,7 @@ def run_index(
         geo,
         semantics,
         transfer,
+        interp,
         out,
     )
 
@@ -305,6 +307,13 @@ def make_command(spec: DGGS_Spec):
         help="How values are mapped from raster pixels to DGGS cells.",
     )
     @click.option(
+        "--interp",
+        default=const.Interp.NN.value,
+        type=click.Choice([i.value for i in const.Interp]),
+        show_default=True,
+        help="Interpolation method used with --transfer sample. Ignored for other transfer operators.",
+    )
+    @click.option(
         "--out",
         default=const.OutputSchema.VALUE.value,
         type=click.Choice([o.value for o in const.OutputSchema]),
@@ -357,6 +366,7 @@ def make_command(spec: DGGS_Spec):
         tempdir,
         semantics,
         transfer,
+        interp,
         out,
     ):
         if isinstance(resolution, str):
@@ -381,9 +391,9 @@ def make_command(spec: DGGS_Spec):
             common.LOGGER.warning(
                 f"--out {out!r}: --agg has no effect (all contributing values are collected)"
             )
-        if transfer == const.Transfer.SAMPLE_NN.value and agg_from_cli:
+        if transfer == const.Transfer.SAMPLE.value and agg_from_cli:
             common.LOGGER.warning(
-                "--transfer sample_nn: --agg has no effect (one sample per DGGS cell)"
+                "--transfer sample: --agg has no effect (one sample per DGGS cell)"
             )
         return run_index(
             spec.name,
@@ -404,6 +414,7 @@ def make_command(spec: DGGS_Spec):
             tempdir,
             semantics,
             transfer,
+            interp,
             out,
         )
 

@@ -153,18 +153,22 @@ Options:
                                   cores, minus one.
   -a, --agg AGGFUNC[,AGGFUNC...]  Aggregation function(s) applied when
                                   multiple raster pixels map to the same DGGS
-                                  cell. Options: count, mean, sum, prod, std,
-                                  var, min, max, median, mode, majority,
-                                  nunique, range. Comma-separate multiple
-                                  names (e.g. min,max) to produce a struct
-                                  column per band.  [default: mean]
+                                  cell (only relevant for --transfer
+                                  assign_centers). Options: count, mean, sum,
+                                  prod, std, var, min, max, median, mode,
+                                  majority, nunique, range. Comma-separate
+                                  multiple names (e.g. min,max) to produce a
+                                  struct column per band.  [default: mean]
   --semantics [point_center_strict|point_sample_field|cell_average|piecewise_constant|fraction_cover|count_total|density|event_indicator]
                                   What a raster cell value means (determines
                                   valid transfer operators).  [default:
                                   point_center_strict]
-  --transfer [assign_centers|sample_nn|sample_interp|overlay_weighted|overlay_mode|mass_preserve]
+  --transfer [assign_centers|sample|overlay_weighted|overlay_mode|mass_preserve]
                                   How values are mapped from raster pixels to
                                   DGGS cells.  [default: assign_centers]
+  --interp [nn]                   Interpolation method used with --transfer
+                                  sample. Ignored for other transfer
+                                  operators.  [default: nn]
   --out [value|fractions|histogram|list]
                                   Output schema: scalar value, class
                                   fractions, histogram, or sorted sample list.
@@ -172,8 +176,9 @@ Options:
                                   values per cell in ascending order
                                   (deterministic); use -d/--decimals to
                                   control precision.  [default: value]
-  -d, --decimals INTEGER|none     Decimal places to round output values. Use 0
-                                  for integer output, 'none' to disable
+  -d, --decimals INTEGER|none     Decimal places to round output values. 0 =
+                                  integer; negative values round to tens (-1),
+                                  hundreds (-2), etc. Use 'none' to disable
                                   rounding.  [default: 1]
   -o, --overwrite
   -co, --compact                  Compact the cells up to the parent
@@ -188,7 +193,6 @@ Options:
                                   allows you to control where this data will
                                   be written.
   --version                       Show the version and exit.
-  --help                          Show this message and exit.
 ```
 
 ## Raster semantics and transfer operators
@@ -222,8 +226,7 @@ Support for additional semantics × transfer combinations is being added increme
 | Value | Description |
 |---|---|
 | `assign_centers` | For each raster pixel, index its **centre coordinate** to a DGGS cell. Produces sparse output (gaps) when the DGGS resolution is finer than the raster. |
-| `sample_nn` | For each DGGS cell, sample the raster at the **DGGS cell centre** using nearest-neighbour. |
-| `sample_interp` | For each DGGS cell, sample the raster at the DGGS cell centre with interpolation (e.g. bilinear). Suitable for continuous fields. |
+| `sample` | For each DGGS cell, sample the raster at the **DGGS cell centre**. Use `--interp` to choose the method (default: `nn`). |
 | `overlay_weighted` | For each DGGS cell, compute overlap-weighted outputs (means, fractions, histograms). Requires an area model. |
 | `overlay_mode` | For each DGGS cell, assign the class with the greatest overlap area. Typically paired with `--valid-coverage-threshold`. |
 | `mass_preserve` | Redistribute each raster cell total into DGGS cells proportional to overlap area. Conserves sums. |
@@ -232,13 +235,13 @@ Support for additional semantics × transfer combinations is being added increme
 
 Legend: **✓** appropriate/common · **△** possible (with caveats) · **✗** inappropriate (breaks semantics)
 
-| `--semantics` | `assign_centers` | `sample_nn` | `sample_interp` | `overlay_weighted` | `overlay_mode` | `mass_preserve` | Typical `--out` / `--agg` |
+| `--semantics` | `assign_centers` | `sample` (nn) | `sample` (bilinear+) | `overlay_weighted` | `overlay_mode` | `mass_preserve` | Typical `--out` / `--agg` |
 |---|:---:|:---:|:---:|:---:|:---:|:---:|---|
 | `point_center_strict` | **✓** | ✗ | ✗ | ✗ | ✗ | ✗ | `value` with `--agg mean\|min\|max\|…`; `--agg min,max` for struct; `--out list\|histogram` |
 | `point_sample_field` | △ | **✓** | **✓** | △ | ✗ | ✗ | `value` |
 | `cell_average` | ✗ | △ | ✗ | **✓** | ✗ | ✗ | `value --agg mean` |
-| `piecewise_constant` | ✗ | △ | ✗ | **✓** | **✓** | ✗ | `value --agg mode` or `fractions` |
-| `fraction_cover` | ✗ | △ | △ | **✓** | ✗ | ✗ | `value --agg mean` |
+| `piecewise_constant` | ✗ | **✓** | ✗ | **✓** | **✓** | ✗ | `value --agg mode` or `fractions` |
+| `fraction_cover` | ✗ | ✗ | ✗ | **✓** | ✗ | ✗ | `value --agg mean` |
 | `count_total` | ✗ | ✗ | ✗ | △ | ✗ | **✓** | `value --agg sum` |
 | `density` | ✗ | △ | △ | **✓** | ✗ | △ | `value --agg mean` |
 | `event_indicator` | △ | △ | ✗ | △ | △ | **✓** | Presence: `fractions`; Counts: `value --agg sum` |
@@ -259,8 +262,8 @@ Legend: **✓** appropriate/common · **△** possible (with caveats) · **✗**
 | `point_center_strict` | `assign_centers` | `value` | Single `--agg` → scalar; multiple `--agg` (e.g. `min,max`) → struct per band. |
 | `point_center_strict` | `assign_centers` | `list` | Sorted list of all contributing pixel values per cell. `--agg` is ignored. |
 | `point_center_strict` | `assign_centers` | `histogram` | Value-count struct per cell. `--agg` is ignored. |
-| `point_sample_field` | `sample_nn` | `value` | Nearest-neighbour sample at each DGGS cell centre. `--agg` is ignored. Supports `--compact`. |
-| `piecewise_constant` | `sample_nn` | `value` | Nearest-neighbour sample at each DGGS cell centre. Suitable for categorical rasters (landcover, zone IDs, soil class). `--agg` is ignored. Supports `--compact`. |
+| `point_sample_field` | `sample` | `value` | Nearest-neighbour sample at each DGGS cell centre (`--interp nn`). `--agg` is ignored. Supports `--compact`. |
+| `piecewise_constant` | `sample` | `value` | Nearest-neighbour sample at each DGGS cell centre (`--interp nn`). Suitable for categorical rasters (landcover, zone IDs, soil class). `--agg` is ignored. Supports `--compact`. |
 
 All other valid combinations will raise a `NotImplementedError` with a descriptive message until they are added.
 
@@ -500,8 +503,8 @@ To run a subset of tests:
 ```bash
 pytest -k h3                        # all tests whose ID contains "h3"
 pytest -k "h3 or rhp"
-pytest -k "sample_nn and rhp"
-pytest tests/classes/test_sample_nn.py          # single file
+pytest -k "sample and rhp"
+pytest tests/classes/test_sample_nn.py          # sample transfer smoke tests
 pytest "tests/classes/test_cli_integration.py::TestAllDGGS::test_command[h3-polygon-co]"  # exact parametrized case
 ```
 
@@ -583,12 +586,12 @@ raster2dggs h3 --resolution 7 --out histogram -d 0 input.tif ./output
 
 Nearest-neighbour sampling for a continuous field (e.g. DEM, temperature grid):
 ```bash
-raster2dggs h3 --resolution 9 --semantics point_sample_field --transfer sample_nn input.tif ./output
+raster2dggs h3 --resolution 9 --semantics point_sample_field --transfer sample input.tif ./output
 ```
 
 Nearest-neighbour sampling for a categorical raster (e.g. landcover):
 ```bash
-raster2dggs h3 --resolution 9 --semantics piecewise_constant --transfer sample_nn -d 0 landcover.tif ./output
+raster2dggs h3 --resolution 9 --semantics piecewise_constant --transfer sample -d 0 landcover.tif ./output
 ```
 
 Emit nodata cells rather than omitting them, replacing the nodata value with −1:

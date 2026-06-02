@@ -96,7 +96,7 @@ class IRasterIndexer:
         decimals: Optional[int] = None,
     ) -> pd.DataFrame:
         """
-        For sample_nn transfer: deduplicate cells that appear in more than one
+        For --transfer sample: deduplicate cells that appear in more than one
         window partition. Applies decimals rounding/casting when provided.
         """
         raise NotImplementedError
