@@ -1,5 +1,5 @@
 from numbers import Number
-from typing import Any, Callable, List, Tuple, Union, Optional
+from typing import Callable, List, Tuple, Union, Optional
 
 import pandas as pd
 import pyarrow as pa
@@ -218,12 +218,16 @@ class RasterIndexer(IRasterIndexer):
                 ).agg(func)
                 if decimals is not None:
                     if decimals > 0:
-                        to_promote = r.select_dtypes(include=["float32", "integer"]).columns
+                        to_promote = r.select_dtypes(
+                            include=["float32", "integer"]
+                        ).columns
                         if len(to_promote):
                             r = r.astype({c: "float64" for c in to_promote})
                     r = r.round(decimals)
                     if decimals <= 0:
-                        r = r.astype({c: "Int64" for c in r.columns if c != partition_col})
+                        r = r.astype(
+                            {c: "Int64" for c in r.columns if c != partition_col}
+                        )
                 per_agg[agg_name] = r.reset_index(level=0)
 
             base = next(iter(per_agg.values()))

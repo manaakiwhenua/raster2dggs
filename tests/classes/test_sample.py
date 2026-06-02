@@ -179,3 +179,105 @@ class TestHEALPixSample(_SampleSmoke, unittest.TestCase):
     dggs = "healpix"
     resolution = 8
     extra = "dggal"
+
+
+class _SampleBilinearSmoke(_SampleSmoke):
+    """
+    Base class for --transfer sample --interp bilinear smoke tests.
+
+    Inherits all _SampleSmoke tests; overrides _run to add --interp bilinear.
+    Because the raster is uniform, bilinear and NN produce identical values,
+    so the same value assertions apply.
+    """
+
+    def _run(self, *extra_args):
+        return self.invoke_cli(
+            self.dggs,
+            self._raster,
+            TEST_OUTPUT_PATH,
+            self.resolution,
+            "--semantics",
+            "point_sample_field",
+            "--transfer",
+            "sample",
+            "--interp",
+            "bilinear",
+            "--out",
+            "value",
+            *extra_args,
+        )
+
+
+class TestH3SampleBilinear(_SampleBilinearSmoke, unittest.TestCase):
+    # Bilinear is implemented in common.py, not per-DGGS; one representative is enough.
+    dggs = "h3"
+    resolution = 5
+    extra = "h3"
+
+
+class _SampleBicubicSmoke(_SampleSmoke):
+    """
+    Base class for --transfer sample --interp cubic smoke tests.
+
+    Inherits all _SampleSmoke tests; overrides _run to add --interp cubic.
+    Because the raster is uniform, cubic and NN produce identical values,
+    so the same value assertions apply.
+    """
+
+    def _run(self, *extra_args):
+        return self.invoke_cli(
+            self.dggs,
+            self._raster,
+            TEST_OUTPUT_PATH,
+            self.resolution,
+            "--semantics",
+            "point_sample_field",
+            "--transfer",
+            "sample",
+            "--interp",
+            "bicubic",
+            "--out",
+            "value",
+            *extra_args,
+        )
+
+
+class TestH3SampleBicubic(_SampleBicubicSmoke, unittest.TestCase):
+    # Bicubic is implemented in common.py, not per-DGGS; one representative is enough.
+    dggs = "h3"
+    resolution = 5
+    extra = "h3"
+
+
+class _SampleLanczosSmoke(_SampleSmoke):
+    """
+    Base class for --transfer sample --interp lanczos smoke tests.
+
+    Inherits all _SampleSmoke tests; overrides _run to add --interp lanczos.
+    Because the raster is uniform, Lanczos and NN produce identical values,
+    so the same value assertions apply.
+    """
+
+    def _run(self, *extra_args):
+        return self.invoke_cli(
+            self.dggs,
+            self._raster,
+            TEST_OUTPUT_PATH,
+            self.resolution,
+            "--semantics",
+            "point_sample_field",
+            "--transfer",
+            "sample",
+            "--interp",
+            "lanczos",
+            "--out",
+            "value",
+            *extra_args,
+        )
+
+
+class TestH3SampleLanczos(_SampleLanczosSmoke, unittest.TestCase):
+    # Lanczos is implemented in common.py, not per-DGGS; one representative is enough.
+    dggs = "h3"
+    resolution = 5
+    extra = "h3"

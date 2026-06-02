@@ -1,7 +1,5 @@
 import numpy as np
 import pyarrow as pa
-import pyarrow.parquet as pq
-import pandas as pd
 from click.testing import CliRunner
 
 from classes.base import TestRunthrough, read_output
@@ -416,18 +414,156 @@ class TestOutListValidation(TestRunthrough):
 
     def test_sample_point_sample_field_runs(self):
         self.invoke_cli(
-            "h3", self._raster, TEST_OUTPUT_PATH, _COARSE_RES,
-            "--semantics", "point_sample_field",
-            "--transfer", "sample",
-            "--out", "value",
+            "h3",
+            self._raster,
+            TEST_OUTPUT_PATH,
+            _COARSE_RES,
+            "--semantics",
+            "point_sample_field",
+            "--transfer",
+            "sample",
+            "--out",
+            "value",
         )
 
     def test_sample_piecewise_constant_runs(self):
         self.invoke_cli(
-            "h3", self._raster, TEST_OUTPUT_PATH, _COARSE_RES,
-            "--semantics", "piecewise_constant",
-            "--transfer", "sample",
-            "--out", "value",
+            "h3",
+            self._raster,
+            TEST_OUTPUT_PATH,
+            _COARSE_RES,
+            "--semantics",
+            "piecewise_constant",
+            "--transfer",
+            "sample",
+            "--out",
+            "value",
+        )
+
+    def test_sample_bilinear_point_sample_field_runs(self):
+        self.invoke_cli(
+            "h3",
+            self._raster,
+            TEST_OUTPUT_PATH,
+            _COARSE_RES,
+            "--semantics",
+            "point_sample_field",
+            "--transfer",
+            "sample",
+            "--interp",
+            "bilinear",
+            "--out",
+            "value",
+        )
+
+    def test_sample_bilinear_piecewise_constant_rejected(self):
+        runner = CliRunner()
+        result = runner.invoke(
+            cli,
+            [
+                "h3",
+                self._raster,
+                str(TEST_OUTPUT_PATH),
+                "-r",
+                str(_COARSE_RES),
+                "--semantics",
+                "piecewise_constant",
+                "--transfer",
+                "sample",
+                "--interp",
+                "bilinear",
+                "--out",
+                "value",
+            ],
+        )
+        self.assertNotEqual(
+            result.exit_code,
+            0,
+            "piecewise_constant + bilinear should be rejected",
+        )
+
+    def test_sample_bicubic_point_sample_field_runs(self):
+        self.invoke_cli(
+            "h3",
+            self._raster,
+            TEST_OUTPUT_PATH,
+            _COARSE_RES,
+            "--semantics",
+            "point_sample_field",
+            "--transfer",
+            "sample",
+            "--interp",
+            "bicubic",
+            "--out",
+            "value",
+        )
+
+    def test_sample_bicubic_piecewise_constant_rejected(self):
+        runner = CliRunner()
+        result = runner.invoke(
+            cli,
+            [
+                "h3",
+                self._raster,
+                str(TEST_OUTPUT_PATH),
+                "-r",
+                str(_COARSE_RES),
+                "--semantics",
+                "piecewise_constant",
+                "--transfer",
+                "sample",
+                "--interp",
+                "bicubic",
+                "--out",
+                "value",
+            ],
+        )
+        self.assertNotEqual(
+            result.exit_code,
+            0,
+            "piecewise_constant + bicubic should be rejected",
+        )
+
+    def test_sample_lanczos_point_sample_field_runs(self):
+        self.invoke_cli(
+            "h3",
+            self._raster,
+            TEST_OUTPUT_PATH,
+            _COARSE_RES,
+            "--semantics",
+            "point_sample_field",
+            "--transfer",
+            "sample",
+            "--interp",
+            "lanczos",
+            "--out",
+            "value",
+        )
+
+    def test_sample_lanczos_piecewise_constant_rejected(self):
+        runner = CliRunner()
+        result = runner.invoke(
+            cli,
+            [
+                "h3",
+                self._raster,
+                str(TEST_OUTPUT_PATH),
+                "-r",
+                str(_COARSE_RES),
+                "--semantics",
+                "piecewise_constant",
+                "--transfer",
+                "sample",
+                "--interp",
+                "lanczos",
+                "--out",
+                "value",
+            ],
+        )
+        self.assertNotEqual(
+            result.exit_code,
+            0,
+            "piecewise_constant + lanczos should be rejected",
         )
 
 

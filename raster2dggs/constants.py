@@ -153,6 +153,9 @@ class Transfer(StrEnum):
 
 class Interp(StrEnum):
     NN = "nn"
+    BILINEAR = "bilinear"
+    BICUBIC = "bicubic"
+    LANCZOS = "lanczos"
 
 
 class OutputSchema(StrEnum):
@@ -196,12 +199,27 @@ INAPPROPRIATE: set = {
     ("density", "mass_preserve"),
 }
 
+INAPPROPRIATE_INTERP: set = {
+    # piecewise_constant: smooth interpolation between categorical values is meaningless
+    ("piecewise_constant", "sample", "bilinear"),
+    ("piecewise_constant", "sample", "bicubic"),
+    ("piecewise_constant", "sample", "lanczos"),
+    # event_indicator: smooth interpolation of discrete events produces fractional nonsense
+    ("event_indicator", "sample", "bilinear"),
+    ("event_indicator", "sample", "bicubic"),
+    ("event_indicator", "sample", "lanczos"),
+}
+
 IMPLEMENTED: set = {
     ("point_center_strict", "assign_centers", "value"),
     ("point_center_strict", "assign_centers", "list"),
     ("point_center_strict", "assign_centers", "histogram"),
-    ("point_sample_field", "sample", "value"),
-    ("piecewise_constant", "sample", "value"),
+    # sample transfer uses 4-tuples: (semantics, transfer, interp, out)
+    ("point_sample_field", "sample", "nn", "value"),
+    ("piecewise_constant", "sample", "nn", "value"),
+    ("point_sample_field", "sample", "bilinear", "value"),
+    ("point_sample_field", "sample", "bicubic", "value"),
+    ("point_sample_field", "sample", "lanczos", "value"),
 }
 
 

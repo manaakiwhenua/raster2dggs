@@ -41,6 +41,8 @@ from raster2dggs.indexers.rasterindexer import _is_nan
 LOGGER = logging.getLogger(__name__)
 click_log.basic_config(LOGGER)
 
+from raster2dggs.interpolation import _SampleIndexer
+
 
 class ParentResolutionException(Exception):
     pass
@@ -228,7 +230,7 @@ def write_partition_as_geoparquet(
     # Compute GeoParquet 1.1.0 extras
     valid = [g for g in geoms if (g is not None and not g.is_empty)]
     if len(valid):
-        arr = np.asarray(shapely.bounds(geoms))  # Shapely 2.x vectorized
+        arr = np.asarray(shapely.bounds(geoms))  # Shapely 2.x vectorised
         m = ~np.isnan(arr).any(axis=1)
         bbox_vals = arr[m]
         bbox = [
@@ -279,6 +281,174 @@ def write_partition_as_geoparquet(
     )
 
 
+def _element_type(src_dtype, decimals) -> pa.DataType:
+    if decimals is not None and decimals <= 0:
+        return pa.int64()
+    if decimals is not None:  # decimals > 0: always float64
+        return pa.float64()
+    return pa.from_numpy_dtype(src_dtype)
+
+
+def _build_output_meta(
+    *,
+    transfer: str,
+    out: str,
+    aggfuncs: list,
+    decimals,
+    source_dtypes: dict,
+    band_cols: list,
+    partition_col: str,
+    index_col: str,
+    compact: bool,
+    interp: str,
+) -> tuple[pd.DataFrame, str]:
+    if transfer == const.Transfer.SAMPLE or (out == "value" and len(aggfuncs) == 1):
+        out_meta = pd.DataFrame(
+            {
+                partition_col: pd.Series([], dtype="string"),
+                **{
+                    c: pd.Series(
+                        [],
+                        dtype=(
+                            "Int64"
+                            if decimals is not None and decimals <= 0
+                            # decimals > 0: always float64 regardless of source
+                            # dtype — aggregations on integer rasters (e.g. mean)
+                            # produce floats, and rounding to dp implies a float result
+                            else "float64" if decimals is not None else source_dtypes[c]
+                        ),
+                    )
+                    for c in band_cols
+                },
+            }
+        )
+        _compacting = "/compacting" if compact else ""
+        if transfer == const.Transfer.SAMPLE:
+            tqdm_label = f"Sampling ({interp}){_compacting}"
+        else:
+            tqdm_label = f"Aggregating{_compacting}"
+    else:
+        # list, histogram, or multi-agg value — object-typed columns
+        out_meta = pd.DataFrame(
+            {
+                partition_col: pd.Series([], dtype="string"),
+                **{c: pd.Series([], dtype="object") for c in band_cols},
+            }
+        )
+        tqdm_label = (
+            "Collecting"
+            if out != "value"
+            else f"Aggregating{'/compacting' if compact else ''}"
+        )
+    out_meta.index = pd.Index([], name=index_col, dtype="string")
+    return out_meta, tqdm_label
+
+
+def _build_write_schema(
+    *,
+    out: str,
+    aggfuncs: list,
+    band_cols: list,
+    decimals,
+    source_dtypes: dict,
+    index_col: str,
+    partition_col: str,
+    out_meta: pd.DataFrame,
+) -> pa.Schema:
+    common_fields = [
+        pa.field(index_col, pa.string()),
+        pa.field(partition_col, pa.string()),
+    ]
+    if out == "list":
+        return pa.schema(
+            common_fields
+            + [
+                pa.field(c, pa.list_(_element_type(source_dtypes[c], decimals)))
+                for c in band_cols
+            ]
+        )
+    if out == "histogram":
+        return pa.schema(
+            common_fields
+            + [
+                pa.field(
+                    c,
+                    pa.struct(
+                        [
+                            pa.field(
+                                "values",
+                                pa.list_(_element_type(source_dtypes[c], decimals)),
+                            ),
+                            pa.field("counts", pa.list_(pa.int64())),
+                        ]
+                    ),
+                )
+                for c in band_cols
+            ]
+        )
+    if len(aggfuncs) > 1:
+        return pa.schema(
+            common_fields
+            + [
+                pa.field(
+                    c,
+                    pa.struct(
+                        [
+                            pa.field(
+                                agg_name, _element_type(source_dtypes[c], decimals)
+                            )
+                            for agg_name, _ in aggfuncs
+                        ]
+                    ),
+                )
+                for c in band_cols
+            ]
+        )
+    return pa.Schema.from_pandas(out_meta, preserve_index=True)
+
+
+def _write_output(
+    ddf,
+    *,
+    output: Path,
+    geo,
+    compression: str,
+    partition_col: str,
+    overwrite: bool,
+    write_schema: pa.Schema,
+    indexer: IRasterIndexer,
+) -> None:
+    if geo:
+        delayed_parts = ddf.to_delayed()
+        geo_serialisation_method = (
+            indexer.cell_to_polygon if geo == "polygon" else indexer.cell_to_point
+        )
+        write_tasks = [
+            dask.delayed(write_partition_as_geoparquet)(
+                part,
+                geo_serialisation_method,
+                output,
+                partition_col,
+                compression,
+                write_schema,
+            )
+            for part in delayed_parts
+        ]
+        with TqdmCallback(desc="Writing GeoParquet"):
+            dask.compute(*write_tasks)
+    else:
+        ddf.to_parquet(
+            output,
+            engine="pyarrow",
+            partition_on=[partition_col],
+            overwrite=overwrite,
+            write_index=True,
+            append=False,
+            compression=compression,
+            schema=write_schema,
+        )
+
+
 def address_boundary_issues(
     indexer: IRasterIndexer,
     pq_input: tempfile.TemporaryDirectory,
@@ -306,69 +476,36 @@ def address_boundary_issues(
     index_col = indexer.index_col(resolution)
     partition_col = indexer.partition_col(parent_res)
 
-    part_schema = pa.schema(
-        [(partition_col, pa.string())]
-    )  # Don't let this be inferred; e.g. geohash levels can be inferred variously as int or string
-    # Keep hive partitions; coalese files per partition
+    # Don't let partition schema be inferred; e.g. geohash levels can be
+    # inferred variously as int or string.
+    part_schema = pa.schema([(partition_col, pa.string())])
     ddf = dd.read_parquet(
         pq_input,
         engine="pyarrow",
         aggregate_files=True,
         dataset={"partitioning": ds.partitioning(part_schema, flavor="hive")},
     )
-    # Cols to aggregate (bands only)
     band_cols = [c for c in ddf.columns if not c.startswith(f"{indexer.dggs}_")]
-    # Capture source dtypes before map_partitions changes them
+    # Capture source dtypes before map_partitions changes them.
     source_dtypes = {c: ddf[c].dtype for c in band_cols}
 
     out = kwargs.get("out", "value")
     transfer = kwargs.get("transfer", const.Transfer.ASSIGN_CENTERS)
-
     decimals = kwargs.get("decimals")
-
     aggfuncs = kwargs.get("aggfuncs", [("mean", "mean")])
 
-    if transfer == const.Transfer.SAMPLE or out == "value" and len(aggfuncs) == 1:
-        out_meta = pd.DataFrame(
-            {
-                partition_col: pd.Series([], dtype="string"),
-                **{
-                    c: pd.Series(
-                        [],
-                        dtype=(
-                            "Int64" if decimals is not None and decimals <= 0
-                            # decimals > 0: always float64 regardless of source
-                            # dtype — aggregations on integer rasters (e.g. mean)
-                            # produce floats, and rounding to dp implies a float result
-                            else "float64" if decimals is not None
-                            else source_dtypes[c]
-                        ),
-                    )
-                    for c in band_cols
-                },
-            }
-        )
-        _compacting = "/compacting" if kwargs["compact"] else ""
-        tqdm_label = (
-            f"Sampling (nearest neighbour){_compacting}"
-            if transfer == const.Transfer.SAMPLE
-            else f"Aggregating{_compacting}"
-        )
-    else:
-        # list, histogram, or multi-agg value — object-typed columns
-        out_meta = pd.DataFrame(
-            {
-                partition_col: pd.Series([], dtype="string"),
-                **{c: pd.Series([], dtype="object") for c in band_cols},
-            }
-        )
-        tqdm_label = (
-            "Collecting"
-            if out != "value"
-            else f"Aggregating{'/compacting' if kwargs['compact'] else ''}"
-        )
-
-    out_meta.index = pd.Index([], name=index_col, dtype="string")
+    out_meta, tqdm_label = _build_output_meta(
+        transfer=transfer,
+        out=out,
+        aggfuncs=aggfuncs,
+        decimals=decimals,
+        source_dtypes=source_dtypes,
+        band_cols=band_cols,
+        partition_col=partition_col,
+        index_col=index_col,
+        compact=kwargs["compact"],
+        interp=kwargs.get("interp", const.Interp.NN),
+    )
 
     with TqdmCallback(desc=tqdm_label):
         if transfer == const.Transfer.SAMPLE:
@@ -391,117 +528,56 @@ def address_boundary_issues(
                 indexer.compaction, resolution, parent_res, meta=out_meta
             )
 
-        def _element_type(src_dtype):
-            if decimals is not None and decimals <= 0:
-                return pa.int64()
-            if decimals is not None:  # decimals > 0: always float64
-                return pa.float64()
-            return pa.from_numpy_dtype(src_dtype)
+        write_schema = _build_write_schema(
+            out=out,
+            aggfuncs=aggfuncs,
+            band_cols=band_cols,
+            decimals=decimals,
+            source_dtypes=source_dtypes,
+            index_col=index_col,
+            partition_col=partition_col,
+            out_meta=out_meta,
+        )
 
-        common_fields = [
-            pa.field(index_col, pa.string()),
-            pa.field(partition_col, pa.string()),
-        ]
-        if out == "list":
-            write_schema = pa.schema(
-                common_fields
-                + [
-                    pa.field(c, pa.list_(_element_type(source_dtypes[c])))
-                    for c in band_cols
-                ]
-            )
-        elif out == "histogram":
-            write_schema = pa.schema(
-                common_fields
-                + [
-                    pa.field(
-                        c,
-                        pa.struct(
-                            [
-                                pa.field(
-                                    "values",
-                                    pa.list_(_element_type(source_dtypes[c])),
-                                ),
-                                pa.field("counts", pa.list_(pa.int64())),
-                            ]
-                        ),
-                    )
-                    for c in band_cols
-                ]
-            )
-        elif len(aggfuncs) > 1:
-            write_schema = pa.schema(
-                common_fields
-                + [
-                    pa.field(
-                        c,
-                        pa.struct(
-                            [
-                                pa.field(agg_name, _element_type(source_dtypes[c]))
-                                for agg_name, _ in aggfuncs
-                            ]
-                        ),
-                    )
-                    for c in band_cols
-                ]
-            )
-        else:
-            write_schema = pa.Schema.from_pandas(out_meta, preserve_index=True)
-
-        if kwargs["geo"]:
-
-            # Create one delayed write task per Dask partition
-            delayed_parts = ddf.to_delayed()
-
-            geo_serialisation_method = (
-                indexer.cell_to_polygon
-                if kwargs["geo"] == "polygon"
-                else indexer.cell_to_point
-            )
-
-            write_tasks = [
-                dask.delayed(write_partition_as_geoparquet)(
-                    part,
-                    geo_serialisation_method,
-                    output,
-                    partition_col,
-                    kwargs["compression"],
-                    write_schema,
-                )
-                for part in delayed_parts
-            ]
-
-            # Execute writes with progress
-            with TqdmCallback(desc="Writing GeoParquet"):
-                dask.compute(*write_tasks)
-
-        else:
-            ddf.to_parquet(
-                output,
-                engine="pyarrow",
-                partition_on=[partition_col],
-                overwrite=kwargs["overwrite"],
-                write_index=True,
-                append=False,
-                compression=kwargs["compression"],
-                schema=write_schema,
-            )
+        _write_output(
+            ddf,
+            output=output,
+            geo=kwargs["geo"],
+            compression=kwargs["compression"],
+            partition_col=partition_col,
+            overwrite=kwargs["overwrite"],
+            write_schema=write_schema,
+            indexer=indexer,
+        )
 
     LOGGER.debug("Stage 2 (aggregation) complete")
-
     return output
 
 
-def validate_transfer_config(semantics: str, transfer: str, out: str) -> None:
+def validate_transfer_config(
+    semantics: str, transfer: str, interp: str, out: str
+) -> None:
     if (semantics, transfer) in const.INAPPROPRIATE:
         raise click.UsageError(
             f"--transfer {transfer!r} is inappropriate for --semantics {semantics!r}. "
             f"See the semantics × transfer matrix in the documentation."
         )
-    if (semantics, transfer, out) not in const.IMPLEMENTED:
+    if (semantics, transfer, interp) in const.INAPPROPRIATE_INTERP:
+        raise click.UsageError(
+            f"--transfer {transfer!r} --interp {interp!r} is inappropriate for "
+            f"--semantics {semantics!r}. "
+            f"See the semantics × transfer matrix in the documentation."
+        )
+    lookup = (
+        (semantics, transfer, interp, out)
+        if transfer == const.Transfer.SAMPLE
+        else (semantics, transfer, out)
+    )
+    if lookup not in const.IMPLEMENTED:
         raise NotImplementedError(
-            f"--semantics {semantics!r} / --transfer {transfer!r} / --out {out!r} "
-            f"is a valid combination but is not yet implemented."
+            f"--semantics {semantics!r} / --transfer {transfer!r}"
+            + (f" / --interp {interp!r}" if transfer == const.Transfer.SAMPLE else "")
+            + f" / --out {out!r} is a valid combination but is not yet implemented."
         )
 
 
@@ -523,10 +599,15 @@ def initial_index(
     pyproj.Transformer, preserving original raster values without resampling.
 
     This function passes a path to a temporary directory (which contains
-        the output of this "stage 1" processing) to a secondary function
-        that addresses issues at the boundaries of raster windows.
+    the output of this "stage 1" processing) to a secondary function
+    that addresses issues at the boundaries of raster windows.
     """
-    validate_transfer_config(kwargs["semantics"], kwargs["transfer"], kwargs["out"])
+    validate_transfer_config(
+        kwargs["semantics"],
+        kwargs["transfer"],
+        kwargs.get("interp", const.Interp.NN),
+        kwargs["out"],
+    )
 
     indexer = idxfactory.indexer_instance(dggs)
 
@@ -660,123 +741,34 @@ def initial_index(
                     _write_result(result, window)
                     return None
 
-                def _enumerate_cells(window):
-                    """
-                    Return (cells, local_rows, local_cols) for all DGGS cells
-                    whose nearest-neighbour pixel falls inside *window*, or
-                    (None, None, None) if no cells qualify.
-
-                    local_rows and local_cols are relative to window.row_off /
-                    window.col_off, so they index directly into an array read
-                    with da.rio.isel_window(window).
-                    """
-                    win_left, win_bottom, win_right, win_top = src.window_bounds(window)
-                    min_lon, min_lat, max_lon, max_lat = transform_bounds(
-                        src.crs, "EPSG:4326", win_left, win_bottom, win_right, win_top
+                ctx = None
+                if kwargs["transfer"] == const.Transfer.SAMPLE:
+                    ctx = _SampleIndexer(
+                        src=src,
+                        da=da,
+                        inverse_transformer=inverse_transformer,
+                        nodata=nodata,
+                        indexer=indexer,
+                        resolution=resolution,
+                        parent_res=parent_res,
+                        selected_labels=selected_labels,
+                        nodata_policy=nodata_policy,
+                        emit_nodata_value=emit_nodata_value,
+                        write_result=_write_result,
                     )
 
-                    cells = list(
-                        indexer.cells_in_bbox(
-                            min_lon, min_lat, max_lon, max_lat, resolution
-                        )
-                    )
-                    if not cells:
-                        return None, None, None
-
-                    cell_lons, cell_lats = indexer.cells_to_lonlat_arrays(
-                        pd.Series(cells)
-                    )
-                    # Pass as Python lists to avoid pyproj trying float(array)
-                    # on 1-element numpy arrays, which triggers a NumPy
-                    # DeprecationWarning via the _transform_point fast path.
-                    _xs, _ys = inverse_transformer.transform(
-                        cell_lons.tolist(), cell_lats.tolist()
-                    )
-                    all_rows, all_cols = rowcol(
-                        src.transform, np.asarray(_xs), np.asarray(_ys)
-                    )
-                    all_rows = np.asarray(all_rows)
-                    all_cols = np.asarray(all_cols)
-
-                    # Keep only cells whose nearest pixel is in this window.
-                    # A pixel belongs to exactly one window, so each cell is
-                    # processed exactly once across all windows.
-                    local_rows = all_rows - window.row_off
-                    local_cols = all_cols - window.col_off
-                    in_win = (
-                        (local_rows >= 0)
-                        & (local_rows < window.height)
-                        & (local_cols >= 0)
-                        & (local_cols < window.width)
-                    )
-                    if not np.any(in_win):
-                        return None, None, None
-
-                    return (
-                        [c for c, m in zip(cells, in_win) if m],
-                        local_rows[in_win],
-                        local_cols[in_win],
-                    )
-
-                def process_nn(window):
-                    cells, local_rows, local_cols = _enumerate_cells(window)
-                    if cells is None:
-                        return None
-
-                    # da has dims (band, y, x); .values triggers Dask compute
-                    win_data = da.rio.isel_window(window).values
-                    samples = win_data[:, local_rows, local_cols].T
-                    # samples: (n_cells, n_bands)
-
-                    # nodata handling
-                    if nodata is None:
-                        nd_mask = np.zeros(len(cells), dtype=bool)
-                    elif _is_nan(nodata):
-                        nd_mask = np.any(np.isnan(samples.astype(float)), axis=1)
+                if kwargs["transfer"] == const.Transfer.SAMPLE:
+                    interp = kwargs.get("interp", const.Interp.NN)
+                    if interp == const.Interp.BILINEAR:
+                        stage1_func = ctx.process_bilinear
+                    elif interp == const.Interp.BICUBIC:
+                        stage1_func = ctx.process_bicubic
+                    elif interp == const.Interp.LANCZOS:
+                        stage1_func = ctx.process_lanczos
                     else:
-                        nd_mask = np.any(samples == nodata, axis=1) | np.any(
-                            np.isnan(samples.astype(float)), axis=1
-                        )
-
-                    wide = pd.DataFrame(
-                        {
-                            label: samples[:, i]
-                            for i, label in enumerate(selected_labels)
-                        }
-                    )
-                    index_col = indexer.index_col(resolution)
-                    partition_col = indexer.partition_col(parent_res)
-                    wide[index_col] = cells
-                    wide[partition_col] = list(
-                        indexer.single_parent_cells(cells, parent_res)
-                    )
-
-                    if nodata_policy.lower() == "omit":
-                        wide = wide[~nd_mask].reset_index(drop=True)
-                    elif nodata_policy.lower() == "emit":
-                        fill = (
-                            emit_nodata_value
-                            if emit_nodata_value is not None
-                            else nodata
-                        )
-                        for label in selected_labels:
-                            if pd.isna(fill):
-                                wide.loc[nd_mask, label] = np.nan
-                            else:
-                                wide.loc[nd_mask, label] = fill
-
-                    if wide.empty:
-                        return None
-
-                    result = pa.Table.from_pandas(wide, preserve_index=False)
-                    _write_result(result, window)
-                    return None
-
-                stage1_func = (
-                    process_nn
-                    if kwargs["transfer"] == const.Transfer.SAMPLE
-                    else process
-                )
+                        stage1_func = ctx.process_nn
+                else:
+                    stage1_func = process
                 try:
                     with ThreadPoolExecutor(
                         max_workers=kwargs["threads"]
@@ -795,7 +787,7 @@ def initial_index(
                     # rather than at interpreter shutdown (which causes a
                     # silent "Error in sys.excepthook" crash for non-WGS84
                     # rasters).
-                    del da, transformer, process, _enumerate_cells, process_nn, stage1_func
+                    del da, transformer, process, ctx, stage1_func
                     gc.collect()
             LOGGER.debug("Stage 1 (primary indexing) complete")
             return address_boundary_issues(

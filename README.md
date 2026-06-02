@@ -166,7 +166,8 @@ Options:
   --transfer [assign_centers|sample|overlay_weighted|overlay_mode|mass_preserve]
                                   How values are mapped from raster pixels to
                                   DGGS cells.  [default: assign_centers]
-  --interp [nn]                   Interpolation method used with --transfer
+  --interp [nn|bilinear|bicubic|lanczos]
+                                  Interpolation method used with --transfer
                                   sample. Ignored for other transfer
                                   operators.  [default: nn]
   --out [value|fractions|histogram|list]
@@ -193,6 +194,7 @@ Options:
                                   allows you to control where this data will
                                   be written.
   --version                       Show the version and exit.
+  --help                          Show this message and exit.
 ```
 
 ## Raster semantics and transfer operators
@@ -262,8 +264,9 @@ Legend: **✓** appropriate/common · **△** possible (with caveats) · **✗**
 | `point_center_strict` | `assign_centers` | `value` | Single `--agg` → scalar; multiple `--agg` (e.g. `min,max`) → struct per band. |
 | `point_center_strict` | `assign_centers` | `list` | Sorted list of all contributing pixel values per cell. `--agg` is ignored. |
 | `point_center_strict` | `assign_centers` | `histogram` | Value-count struct per cell. `--agg` is ignored. |
-| `point_sample_field` | `sample` | `value` | Nearest-neighbour sample at each DGGS cell centre (`--interp nn`). `--agg` is ignored. Supports `--compact`. |
-| `piecewise_constant` | `sample` | `value` | Nearest-neighbour sample at each DGGS cell centre (`--interp nn`). Suitable for categorical rasters (landcover, zone IDs, soil class). `--agg` is ignored. Supports `--compact`. |
+| `point_sample_field` | `sample` (`--interp nn`) | `value` | Nearest-neighbour sample at each DGGS cell centre. `--agg` is ignored. Supports `--compact`. |
+| `piecewise_constant` | `sample` (`--interp nn`) | `value` | Nearest-neighbour sample at each DGGS cell centre. Suitable for categorical rasters (landcover, zone IDs, soil class). `--agg` is ignored. Supports `--compact`. |
+| `point_sample_field` | `sample` (`--interp bilinear`) | `value` | Bilinear interpolation at each DGGS cell centre. `--agg` is ignored. Supports `--compact`. |
 
 All other valid combinations will raise a `NotImplementedError` with a descriptive message until they are added.
 
@@ -505,7 +508,7 @@ pytest -k h3                        # all tests whose ID contains "h3"
 pytest -k "h3 or rhp"
 pytest -k "sample and rhp"
 pytest tests/classes/test_sample_nn.py          # sample transfer smoke tests
-pytest "tests/classes/test_cli_integration.py::TestAllDGGS::test_command[h3-polygon-co]"  # exact parametrized case
+pytest "tests/classes/test_cli_integration.py::TestAllDGGS::test_command[h3-polygon-co]"  # exact parametrised case
 ```
 
 Test data are included at `tests/data/`.
@@ -587,6 +590,11 @@ raster2dggs h3 --resolution 7 --out histogram -d 0 input.tif ./output
 Nearest-neighbour sampling for a continuous field (e.g. DEM, temperature grid):
 ```bash
 raster2dggs h3 --resolution 9 --semantics point_sample_field --transfer sample input.tif ./output
+```
+
+Bilinear sampling for a continuous field:
+```bash
+raster2dggs h3 --resolution 9 --semantics point_sample_field --transfer sample --interp bilinear input.tif ./output
 ```
 
 Nearest-neighbour sampling for a categorical raster (e.g. landcover):
