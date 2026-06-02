@@ -196,12 +196,13 @@ class RasterIndexer(IRasterIndexer):
             if decimals is None:
                 gb = agg
             elif decimals > 0:
-                # float32 cannot represent most decimal fractions exactly, so
-                # rounding in float32 leaves artefacts like 0.4000000059604645.
-                # Promote to float64 first so the rounded values are exact.
-                float32_cols = agg.select_dtypes(include="float32").columns
-                if len(float32_cols):
-                    agg = agg.astype({c: "float64" for c in float32_cols})
+                # Promote to float64 before rounding: float32 cannot represent
+                # most decimal fractions exactly, and integer agg results (e.g.
+                # sum/min/max on integer rasters) must also become float when
+                # decimal rounding is requested so the data matches the schema.
+                to_promote = agg.select_dtypes(include=["float32", "integer"]).columns
+                if len(to_promote):
+                    agg = agg.astype({c: "float64" for c in to_promote})
                 gb = agg.round(decimals)
             else:
                 gb = agg.round(decimals).astype("Int64")
@@ -216,10 +217,13 @@ class RasterIndexer(IRasterIndexer):
                     [partition_col, index_col], sort=False, observed=True
                 ).agg(func)
                 if decimals is not None:
-                    float32_cols = r.select_dtypes(include="float32").columns
-                    if len(float32_cols):
-                        r = r.astype({c: "float64" for c in float32_cols})
+                    if decimals > 0:
+                        to_promote = r.select_dtypes(include=["float32", "integer"]).columns
+                        if len(to_promote):
+                            r = r.astype({c: "float64" for c in to_promote})
                     r = r.round(decimals)
+                    if decimals <= 0:
+                        r = r.astype({c: "Int64" for c in r.columns if c != partition_col})
                 per_agg[agg_name] = r.reset_index(level=0)
 
             base = next(iter(per_agg.values()))
@@ -254,9 +258,9 @@ class RasterIndexer(IRasterIndexer):
         if decimals is None:
             pass
         elif decimals > 0:
-            float32_cols = gb.select_dtypes(include="float32").columns
-            if len(float32_cols):
-                gb = gb.astype({c: "float64" for c in float32_cols})
+            to_promote = gb.select_dtypes(include=["float32", "integer"]).columns
+            if len(to_promote):
+                gb = gb.astype({c: "float64" for c in to_promote})
             gb = gb.round(decimals)
         else:
             gb = gb.round(decimals).astype("Int64")
@@ -317,9 +321,9 @@ class RasterIndexer(IRasterIndexer):
         """
         gb = self._collect_lists(df, resolution, parent_res)
         for col in self.band_cols(gb):
-            if decimals == 0:
+            if decimals is not None and decimals <= 0:
                 gb[col] = gb[col].map(
-                    lambda lst: sorted(int(round(float(v))) for v in lst)
+                    lambda lst: sorted(int(round(float(v), decimals)) for v in lst)
                 )
             elif decimals is not None:
                 gb[col] = gb[col].map(
@@ -345,8 +349,8 @@ class RasterIndexer(IRasterIndexer):
         for col in self.band_cols(gb):
 
             def _to_hist(lst, _decimals=decimals):
-                if _decimals == 0:
-                    vals = [int(round(float(v))) for v in lst]
+                if _decimals is not None and _decimals <= 0:
+                    vals = [int(round(float(v), _decimals)) for v in lst]
                 elif _decimals is not None:
                     vals = [round(float(v), _decimals) for v in lst]
                 else:

@@ -334,17 +334,12 @@ def address_boundary_issues(
                     c: pd.Series(
                         [],
                         dtype=(
-                            # decimals=0 means integer output
-                            "Int64"
-                            if decimals == 0
-                            # float32 is promoted to float64 before rounding so
-                            # that decimal values are exactly representable
-                            else (
-                                "float64"
-                                if decimals is not None
-                                and source_dtypes[c] == np.float32
-                                else source_dtypes[c]
-                            )
+                            "Int64" if decimals is not None and decimals <= 0
+                            # decimals > 0: always float64 regardless of source
+                            # dtype — aggregations on integer rasters (e.g. mean)
+                            # produce floats, and rounding to dp implies a float result
+                            else "float64" if decimals is not None
+                            else source_dtypes[c]
                         ),
                     )
                     for c in band_cols
@@ -395,9 +390,9 @@ def address_boundary_issues(
             )
 
         def _element_type(src_dtype):
-            if decimals == 0:
+            if decimals is not None and decimals <= 0:
                 return pa.int64()
-            if decimals is not None and src_dtype == np.float32:
+            if decimals is not None:  # decimals > 0: always float64
                 return pa.float64()
             return pa.from_numpy_dtype(src_dtype)
 
