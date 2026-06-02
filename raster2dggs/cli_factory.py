@@ -47,10 +47,7 @@ class DecimalsParamType(click.ParamType):
         if isinstance(value, str) and value.lower() == "none":
             return None
         try:
-            i = int(value)
-            if i < 0:
-                self.fail(f"{i}: decimals must be >= 0", param, ctx)
-            return i
+            return int(value)
         except (ValueError, TypeError):
             self.fail(
                 f"'{value}': expected a non-negative integer or 'none'", param, ctx
@@ -319,7 +316,7 @@ def make_command(spec: DGGS_Spec):
         "--decimals",
         default=const.DEFAULTS["decimals"],
         type=DecimalsParamType(),
-        help="Decimal places to round output values. Use 0 for integer output, 'none' to disable rounding.",
+        help="Decimal places to round output values. 0 = integer; negative values round to tens (-1), hundreds (-2), etc. Use 'none' to disable rounding.",
     )
     @click.option("-o", "--overwrite", is_flag=True)
     @click.option(

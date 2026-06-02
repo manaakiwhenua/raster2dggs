@@ -429,3 +429,62 @@ class TestOutListValidation(TestRunthrough):
             "--transfer", "sample_nn",
             "--out", "value",
         )
+
+
+class TestNegativeDecimals(TestRunthrough):
+    """Negative -d values round to nearest 10 (-1), 100 (-2), etc.
+    Output schema must be Int64, matching the behaviour of -d 0."""
+
+    def setUp(self):
+        super().setUp()
+        self._raster = self.make_temp_raster(_make_raster)
+
+    def _run(self, *extra_args):
+        self.invoke_cli("h3", self._raster, TEST_OUTPUT_PATH, _COARSE_RES, *extra_args)
+        return read_output(TEST_OUTPUT_PATH)
+
+    def test_d_neg1_schema_is_int64(self):
+        # -d -1 rounds to nearest 10 → whole number → Int64 schema
+        table = self._run("-d", "-1")
+        self.assertEqual(table.schema.field("band_1").type, pa.int64())
+
+    def test_d_neg1_values_rounded_to_tens(self):
+        # pixel value 42.0 → round(-1) = 40
+        table = self._run("-d", "-1")
+        df = table.to_pandas()
+        self.assertTrue(
+            (df["band_1"] == 40).all(),
+            f"Expected 40 (42 rounded to nearest 10), got: {df['band_1'].unique()}",
+        )
+
+    def test_d_neg2_schema_is_int64(self):
+        table = self._run("-d", "-2")
+        self.assertEqual(table.schema.field("band_1").type, pa.int64())
+
+    def test_d_neg2_values_rounded_to_hundreds(self):
+        # 42 rounded to nearest 100 = 0
+        table = self._run("-d", "-2")
+        df = table.to_pandas()
+        self.assertTrue(
+            (df["band_1"] == 0).all(),
+            f"Expected 0 (42 rounded to nearest 100), got: {df['band_1'].unique()}",
+        )
+
+    def test_d_neg1_list_element_type_is_int64(self):
+        table = self._run("--out", "list", "-d", "-1")
+        element_type = table.schema.field("band_1").type.value_type
+        self.assertEqual(element_type, pa.int64())
+
+    def test_d_neg1_list_values_rounded_to_tens(self):
+        table = self._run("--out", "list", "-d", "-1")
+        df = table.to_pandas()
+        all_values = [v for lst in df["band_1"] for v in lst]
+        self.assertTrue(
+            all(v == 40 for v in all_values),
+            f"Expected all list elements to be 40, got: {set(all_values)}",
+        )
+
+    def test_d_neg1_histogram_values_type_is_int64(self):
+        table = self._run("--out", "histogram", "-d", "-1")
+        hist_type = table.schema.field("band_1").type
+        self.assertEqual(hist_type.field("values").type.value_type, pa.int64())
