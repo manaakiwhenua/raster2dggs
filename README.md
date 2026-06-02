@@ -525,6 +525,9 @@ This writes six rasters to `sample_rasters/`:
 | `temp_mean_wgs84.tif` | `cell_average` — continuous temperature | Edge band + scattered pixels | WGS84 |
 | `zone_ids_laea.tif` | `piecewise_constant` — Voronoi zone IDs | Islands + sliver patches | Europe LAEA |
 | `multiband_per_band_nodata_wgs84.tif` | 4-band float32 | Nodata at *different* pixels per band | WGS84 |
+| `swath_wgs84.tif` | `point_center_strict` — 3-band simulated swath | ~85% nodata outside diagonal strip; bbox ~6× larger than data footprint | WGS84 (diagonal NE–SW strip within 120–160°E, 20–60°N; swath widens northward via geodesic cross-track mask) |
+| `swath_polar_stereo.tif` | `point_center_strict` — 3-band simulated swath | Thin nodata margins at swath edges | Arctic polar stereographic (custom CRS); rectangular grid in CRS appears as a curved arc across ~38–80°N, ~148–172°E in WGS84 — exercises CRS reprojection code path |
+| `swath_u_shape.tif` | `point_center_strict` — 1-band continuous | No nodata | EPSG:3031 (Antarctic polar stereo); all four corners at ~21–26°N in WGS84, but the bottom edge centre is at ~11°N — a naive corner-only bbox misses ~10° of southward extent |
 
 The multi-band raster is specifically designed to exercise per-band nodata handling: a pixel that is nodata in one band can be valid in another.
 
