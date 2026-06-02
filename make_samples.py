@@ -9,6 +9,10 @@ Outputs (by default in ./sample_rasters):
   3) popcount_webmerc.tif         (count_total, mass-in-cell, skewed totals, nodata polygon)
   4) temp_mean_wgs84.tif          (cell_average-like continuous, geographic CRS, nodata band)
   5) zone_ids_laea.tif            (categorical zones, large polygons + small islands, nodata)
+  6) multiband_per_band_nodata_wgs84.tif  (4-band, per-band nodata at different pixels)
+  7) swath_wgs84.tif              (WGS84 diagonal strip; bbox stress test via geodesic nodata mask)
+  8) swath_polar_stereo.tif       (polar-stereographic CRS; rectangular grid appears as curved arc in WGS84)
+  9) swath_u_shape.tif            (U-shape bbox stress test; corner-only bbox misses ~10° of southward extent)
 
 Neutral landscape models (NLMs): uses smoothed noise (fractal-ish via multi-octave
 upsampling + Gaussian smoothing) to create spatial autocorrelation.
@@ -389,6 +393,220 @@ def make_multiband_per_band_nodata(outdir, rng):
     )
 
 
+def make_satellite_swath(outdir, rng):
+    """
+    Simulated 3-band satellite swath in WGS84.
+
+    The swath mask is computed using geodesic cross-track distance from a
+    great-circle centreline, so the strip widens in longitude towards higher
+    latitudes — matching the appearance of real polar-orbiting satellite swaths.
+    Edge positions have gentle low-frequency noise to avoid perfectly straight
+    margins.
+
+    Coverage: 120°E–160°E, 20°N–60°N.  Pixel size: 0.05° (~5 km at equator).
+    Swath half-width: 220 km.  Only ~15% of pixels contain valid data, making
+    this a good stress-test for bbox-based DGGS cell enumeration.
+    """
+    import pyproj
+
+    crs = CRS.from_epsg(4326)
+    px = 0.05
+    left, top_lat = 120.0, 60.0
+    w, h = 800, 800  # 40° × 40°
+    transform = from_origin(left, top_lat, px, px)
+
+    # 3-band spatially autocorrelated data
+    bands = [
+        (nlm_fractal((h, w), rng, octaves=5, persistence=0.55) * 3000).astype(
+            np.float32
+        )
+        for _ in range(3)
+    ]
+    data = np.stack(bands, axis=0)
+    nodata = np.float32(-9999.0)
+
+    # Pixel centre coordinates
+    lons = left + (np.arange(w) + 0.5) * px
+    lats = top_lat - (np.arange(h) + 0.5) * px
+    lons_grid, lats_grid = np.meshgrid(lons, lats)
+
+    # Swath centreline: great circle from SW corner to NE corner
+    lon_A, lat_A = 120.0, 20.0
+    lon_B, lat_B = 160.0, 60.0
+
+    geod = pyproj.Geod(ellps="WGS84")
+    az_AB, _, _ = geod.inv(lon_A, lat_A, lon_B, lat_B)
+
+    # Azimuth and distance from centreline start to every pixel
+    az_AP, _, dist_AP = geod.inv(
+        np.full(lons_grid.shape, lon_A),
+        np.full(lats_grid.shape, lat_A),
+        lons_grid,
+        lats_grid,
+    )
+
+    # Geodesic cross-track distance (metres); positive = right of centreline
+    R = 6_371_000.0
+    cross_track_m = (
+        np.arcsin(
+            np.clip(
+                np.sin(dist_AP / R) * np.sin(np.radians(az_AP - az_AB)), -1.0, 1.0
+            )
+        )
+        * R
+    )
+
+    # Swath half-width in metres + gentle along-track edge noise
+    half_w_m = 220_000.0
+    edge_noise_l = (smooth(rng.random((h, w), dtype=np.float32), 20) * 40_000 - 20_000)
+    edge_noise_r = (smooth(rng.random((h, w), dtype=np.float32), 20) * 40_000 - 20_000)
+
+    inside = (
+        (cross_track_m > -half_w_m + edge_noise_l)
+        & (cross_track_m < half_w_m + edge_noise_r)
+    )
+    data[:, ~inside] = nodata
+
+    path = os.path.join(outdir, "swath_wgs84.tif")
+    write_geotiff(
+        path,
+        data,
+        crs,
+        transform,
+        nodata=nodata,
+        dtype="float32",
+        tags={
+            "SEMANTICS": "point_center_strict",
+            "NOTE": "Simulated 3-band satellite swath; rectangular in swath coords, curved in WGS84",
+        },
+    )
+
+
+def make_u_shape_swath(outdir, rng):
+    """
+    Bounding-box stress test: a wide raster in Antarctic polar stereographic
+    (EPSG:3031) positioned in the northern hemisphere.
+
+    The raster is rectangular in the projected CRS, but its WGS84 footprint
+    is a U-shape — the centre of the bottom edge dips ~10° further south than
+    the four corners because constant-y lines in polar stereographic are arcs
+    whose mid-point is closest to the opposite pole.
+
+    Any algorithm that derives the WGS84 bounding box from only the four
+    corner coordinates will report min_lat ≈ 20°N, missing real data at ~12°N.
+
+    Raster: 20 000 km wide × 2 000 km tall, 10 km pixels (2000 × 200).
+    Corners in WGS84: ~21–26°N.  Centre of bottom edge: ~11°N (~10° gap).
+    """
+    import pyproj
+
+    crs = pyproj.CRS.from_epsg(3031)
+
+    px = 10_000.0    # 10 km — coarse is fine; this is a geometry stress test
+    w, h = 2_000, 200  # 20 000 km wide × 2 000 km tall
+    cx, cy = 0, 16_000_000  # centre: 16 000 km from south pole, mid-latitudes N
+
+    transform = from_origin(
+        cx - w / 2 * px,   # left edge
+        cy + h / 2 * px,   # top edge (northernmost y in EPSG:3031)
+        px,
+        px,
+    )
+
+    # Single-band continuous data
+    data = (
+        (nlm_fractal((h, w), rng, octaves=4, persistence=0.55) * 3000)
+        .astype(np.float32)[np.newaxis, ...]
+    )
+
+    path = os.path.join(outdir, "swath_u_shape.tif")
+    write_geotiff(
+        path,
+        data,
+        crs,
+        transform,
+        nodata=None,
+        dtype="float32",
+        tags={
+            "SEMANTICS": "point_center_strict",
+            "NOTE": (
+                "U-shape bbox stress test: corners ~22-25°N, "
+                "bottom edge centre ~12°N — naive corner bbox misses ~10° of data"
+            ),
+        },
+    )
+
+
+def make_satellite_swath_projected(outdir, rng):
+    """
+    Simulated 3-band satellite swath in Arctic polar stereographic CRS.
+
+    The raster is a simple rectangle in the projected CRS, positioned off the
+    central axis so it appears as a curved arc when raster2dggs transforms the
+    pixel centroids to WGS84.  This exercises the CRS reprojection code path
+    rather than the nodata-mask bbox stress test of swath_wgs84.tif.
+
+    CRS: polar stereographic (North Pole, standard parallel 70°N, central
+    meridian 145°E).  Strip is offset ~400 km east of the pole axis so it
+    curves naturally across ~38°N–80°N, ~148°E–172°E in WGS84.
+    Pixel size: 2 km.  Dimensions: 100 × 2 500 pixels (200 km × 5 000 km).
+    """
+    import pyproj
+    # Use pyproj to construct the CRS so it generates proper WKT2 with a
+    # named datum — rasterio's CRS.from_proj4 only embeds an ellipsoid,
+    # which QGIS cannot resolve to a known CRS.
+    crs = pyproj.CRS.from_dict({
+        "proj": "stere",
+        "lat_0": 90,
+        "lat_ts": 70,
+        "lon_0": 145,
+        "x_0": 0,
+        "y_0": 0,
+        "datum": "WGS84",
+        "units": "m",
+    })
+
+    px = 2_000.0
+    w, h = 100, 2_500   # 200 km across-track × 5 000 km along-track
+
+    # Offset 400 km east of the central meridian so the strip curves in WGS84
+    # without crossing the antimeridian.
+    # Upper-left corner is the near-pole end (less negative y = closer to pole).
+    transform = from_origin(300_000.0, -1_000_000.0, px, px)
+
+    # 3-band spatially autocorrelated data
+    bands = [
+        (nlm_fractal((h, w), rng, octaves=5, persistence=0.55) * 3000).astype(
+            np.float32
+        )
+        for _ in range(3)
+    ]
+    data = np.stack(bands, axis=0)
+
+    # Thin nodata margins at each swath edge (simulate sensor edge vignetting)
+    nodata = np.float32(-9999.0)
+    margin = 3
+    data[:, :, :margin] = nodata
+    data[:, :, -margin:] = nodata
+
+    path = os.path.join(outdir, "swath_polar_stereo.tif")
+    write_geotiff(
+        path,
+        data,
+        crs,
+        transform,
+        nodata=nodata,
+        dtype="float32",
+        tags={
+            "SEMANTICS": "point_center_strict",
+            "NOTE": (
+                "Polar stereographic swath; rectangle in CRS, "
+                "curved arc in WGS84 (~40-75°N, ~150-175°E)"
+            ),
+        },
+    )
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--outdir", default="sample_rasters", help="Output directory")
@@ -403,6 +621,9 @@ def main():
     make_temp_cell_average_geographic(args.outdir, rng)
     make_zone_ids_laea(args.outdir, rng)
     make_multiband_per_band_nodata(args.outdir, rng)
+    make_satellite_swath(args.outdir, rng)
+    make_satellite_swath_projected(args.outdir, rng)
+    make_u_shape_swath(args.outdir, rng)
 
     print(f"Wrote rasters to: {args.outdir}")
     print(
