@@ -14,7 +14,7 @@ classifiers = [
     "Topic :: Scientific/Engineering :: Image Processing",
     "Topic :: Scientific/Engineering :: Information Analysis"
 ]
-
+packages = [{include = "raster2dggs"}]
 [tool.poetry.dependencies]
 python = "^3.11"
 gdal = ">=3.8"
