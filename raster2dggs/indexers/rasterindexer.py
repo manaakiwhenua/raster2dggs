@@ -1,5 +1,5 @@
 from numbers import Number
-from typing import Any, Callable, List, Tuple, Union, Optional
+from typing import Callable, List, Tuple, Union, Optional
 
 import pandas as pd
 import pyarrow as pa
@@ -218,12 +218,16 @@ class RasterIndexer(IRasterIndexer):
                 ).agg(func)
                 if decimals is not None:
                     if decimals > 0:
-                        to_promote = r.select_dtypes(include=["float32", "integer"]).columns
+                        to_promote = r.select_dtypes(
+                            include=["float32", "integer"]
+                        ).columns
                         if len(to_promote):
                             r = r.astype({c: "float64" for c in to_promote})
                     r = r.round(decimals)
                     if decimals <= 0:
-                        r = r.astype({c: "Int64" for c in r.columns if c != partition_col})
+                        r = r.astype(
+                            {c: "Int64" for c in r.columns if c != partition_col}
+                        )
                 per_agg[agg_name] = r.reset_index(level=0)
 
             base = next(iter(per_agg.values()))
@@ -246,7 +250,7 @@ class RasterIndexer(IRasterIndexer):
         decimals: Optional[int] = None,
     ) -> pd.DataFrame:
         """
-        For sample_nn transfer: deduplicate cells that appear in more than one
+        For --transfer sample: deduplicate cells that appear in more than one
         window partition. Because each cell's sample pixel belongs to exactly one
         window, all duplicates carry identical values; .first() is sufficient.
         Applies the same decimals rounding/casting as parent_groupby.
@@ -268,10 +272,6 @@ class RasterIndexer(IRasterIndexer):
         gb.index.name = index_col
         return gb
 
-    # ------------------------------------------------------------------ #
-    # Cell enumeration (required for sample_nn)                           #
-    # ------------------------------------------------------------------ #
-
     #: Set to True in subclasses that implement cells_in_bbox.
     SUPPORTS_CELL_ENUMERATION: bool = False
 
@@ -290,7 +290,7 @@ class RasterIndexer(IRasterIndexer):
         """
         raise NotImplementedError(
             f"{type(self).__name__} does not support spatial cell enumeration. "
-            "sample_nn requires cell enumeration; use a DGGS that supports it."
+            "--transfer sample requires cell enumeration; use a DGGS that supports it."
         )
 
     def _collect_lists(

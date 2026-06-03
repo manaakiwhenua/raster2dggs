@@ -145,11 +145,17 @@ class Semantics(StrEnum):
 
 class Transfer(StrEnum):
     ASSIGN_CENTERS = "assign_centers"
-    SAMPLE_NN = "sample_nn"
-    SAMPLE_INTERP = "sample_interp"
+    SAMPLE = "sample"
     OVERLAY_WEIGHTED = "overlay_weighted"
     OVERLAY_MODE = "overlay_mode"
     MASS_PRESERVE = "mass_preserve"
+
+
+class Interp(StrEnum):
+    NN = "nn"
+    BILINEAR = "bilinear"
+    BICUBIC = "bicubic"
+    LANCZOS = "lanczos"
 
 
 class OutputSchema(StrEnum):
@@ -161,8 +167,7 @@ class OutputSchema(StrEnum):
 
 INAPPROPRIATE: set = {
     # point_center_strict: only assign_centers is appropriate
-    ("point_center_strict", "sample_nn"),
-    ("point_center_strict", "sample_interp"),
+    ("point_center_strict", "sample"),
     ("point_center_strict", "overlay_weighted"),
     ("point_center_strict", "overlay_mode"),
     ("point_center_strict", "mass_preserve"),
@@ -170,39 +175,51 @@ INAPPROPRIATE: set = {
     ("point_sample_field", "assign_centers"),
     # cell_average: must use area-weighted overlay
     ("cell_average", "assign_centers"),
-    ("cell_average", "sample_nn"),
-    ("cell_average", "sample_interp"),
+    ("cell_average", "sample"),
     ("cell_average", "overlay_mode"),
     ("cell_average", "mass_preserve"),
-    # piecewise_constant: assign_centers ignores pixel area; interp and mass wrong
+    # piecewise_constant: assign_centers ignores pixel area; mass wrong
+    # Note: sample --interp nn is valid; sample --interp bilinear/bicubic is not.
+    # Interp-specific restrictions are enforced separately when non-nn interp is added.
     ("piecewise_constant", "assign_centers"),
-    ("piecewise_constant", "sample_interp"),
     ("piecewise_constant", "mass_preserve"),
     # fraction_cover: values are areal fractions; point-based methods are wrong
     ("fraction_cover", "assign_centers"),
-    ("fraction_cover", "sample_nn"),
+    ("fraction_cover", "sample"),
     ("fraction_cover", "overlay_mode"),
     ("fraction_cover", "mass_preserve"),
     # count_total: totals require mass preservation; sampling breaks conservation
     ("count_total", "assign_centers"),
-    ("count_total", "sample_nn"),
-    ("count_total", "sample_interp"),
+    ("count_total", "sample"),
     ("count_total", "overlay_weighted"),
     ("count_total", "overlay_mode"),
     # density: per-area intensity; assign_centers and overlay_mode are wrong
     ("density", "assign_centers"),
     ("density", "overlay_mode"),
     ("density", "mass_preserve"),
-    # event_indicator: interpolation is meaningless for discrete events
-    ("event_indicator", "sample_interp"),
+}
+
+INAPPROPRIATE_INTERP: set = {
+    # piecewise_constant: smooth interpolation between categorical values is meaningless
+    ("piecewise_constant", "sample", "bilinear"),
+    ("piecewise_constant", "sample", "bicubic"),
+    ("piecewise_constant", "sample", "lanczos"),
+    # event_indicator: smooth interpolation of discrete events produces fractional nonsense
+    ("event_indicator", "sample", "bilinear"),
+    ("event_indicator", "sample", "bicubic"),
+    ("event_indicator", "sample", "lanczos"),
 }
 
 IMPLEMENTED: set = {
     ("point_center_strict", "assign_centers", "value"),
     ("point_center_strict", "assign_centers", "list"),
     ("point_center_strict", "assign_centers", "histogram"),
-    ("point_sample_field", "sample_nn", "value"),
-    ("piecewise_constant", "sample_nn", "value"),
+    # sample transfer uses 4-tuples: (semantics, transfer, interp, out)
+    ("point_sample_field", "sample", "nn", "value"),
+    ("piecewise_constant", "sample", "nn", "value"),
+    ("point_sample_field", "sample", "bilinear", "value"),
+    ("point_sample_field", "sample", "bicubic", "value"),
+    ("point_sample_field", "sample", "lanczos", "value"),
 }
 
 

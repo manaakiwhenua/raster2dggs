@@ -449,21 +449,18 @@ def make_satellite_swath(outdir, rng):
     R = 6_371_000.0
     cross_track_m = (
         np.arcsin(
-            np.clip(
-                np.sin(dist_AP / R) * np.sin(np.radians(az_AP - az_AB)), -1.0, 1.0
-            )
+            np.clip(np.sin(dist_AP / R) * np.sin(np.radians(az_AP - az_AB)), -1.0, 1.0)
         )
         * R
     )
 
     # Swath half-width in metres + gentle along-track edge noise
     half_w_m = 220_000.0
-    edge_noise_l = (smooth(rng.random((h, w), dtype=np.float32), 20) * 40_000 - 20_000)
-    edge_noise_r = (smooth(rng.random((h, w), dtype=np.float32), 20) * 40_000 - 20_000)
+    edge_noise_l = smooth(rng.random((h, w), dtype=np.float32), 20) * 40_000 - 20_000
+    edge_noise_r = smooth(rng.random((h, w), dtype=np.float32), 20) * 40_000 - 20_000
 
-    inside = (
-        (cross_track_m > -half_w_m + edge_noise_l)
-        & (cross_track_m < half_w_m + edge_noise_r)
+    inside = (cross_track_m > -half_w_m + edge_noise_l) & (
+        cross_track_m < half_w_m + edge_noise_r
     )
     data[:, ~inside] = nodata
 
@@ -502,22 +499,21 @@ def make_u_shape_swath(outdir, rng):
 
     crs = pyproj.CRS.from_epsg(3031)
 
-    px = 10_000.0    # 10 km — coarse is fine; this is a geometry stress test
+    px = 10_000.0  # 10 km — coarse is fine; this is a geometry stress test
     w, h = 2_000, 200  # 20 000 km wide × 2 000 km tall
     cx, cy = 0, 16_000_000  # centre: 16 000 km from south pole, mid-latitudes N
 
     transform = from_origin(
-        cx - w / 2 * px,   # left edge
-        cy + h / 2 * px,   # top edge (northernmost y in EPSG:3031)
+        cx - w / 2 * px,  # left edge
+        cy + h / 2 * px,  # top edge (northernmost y in EPSG:3031)
         px,
         px,
     )
 
     # Single-band continuous data
-    data = (
-        (nlm_fractal((h, w), rng, octaves=4, persistence=0.55) * 3000)
-        .astype(np.float32)[np.newaxis, ...]
-    )
+    data = (nlm_fractal((h, w), rng, octaves=4, persistence=0.55) * 3000).astype(
+        np.float32
+    )[np.newaxis, ...]
 
     path = os.path.join(outdir, "swath_u_shape.tif")
     write_geotiff(
@@ -552,22 +548,25 @@ def make_satellite_swath_projected(outdir, rng):
     Pixel size: 2 km.  Dimensions: 100 × 2 500 pixels (200 km × 5 000 km).
     """
     import pyproj
+
     # Use pyproj to construct the CRS so it generates proper WKT2 with a
     # named datum — rasterio's CRS.from_proj4 only embeds an ellipsoid,
     # which QGIS cannot resolve to a known CRS.
-    crs = pyproj.CRS.from_dict({
-        "proj": "stere",
-        "lat_0": 90,
-        "lat_ts": 70,
-        "lon_0": 145,
-        "x_0": 0,
-        "y_0": 0,
-        "datum": "WGS84",
-        "units": "m",
-    })
+    crs = pyproj.CRS.from_dict(
+        {
+            "proj": "stere",
+            "lat_0": 90,
+            "lat_ts": 70,
+            "lon_0": 145,
+            "x_0": 0,
+            "y_0": 0,
+            "datum": "WGS84",
+            "units": "m",
+        }
+    )
 
     px = 2_000.0
-    w, h = 100, 2_500   # 200 km across-track × 5 000 km along-track
+    w, h = 100, 2_500  # 200 km across-track × 5 000 km along-track
 
     # Offset 400 km east of the central meridian so the strip curves in WGS84
     # without crossing the antimeridian.

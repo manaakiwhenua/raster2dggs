@@ -123,7 +123,7 @@ class DGGALRasterIndexer(RasterIndexer):
         Override: always return exactly one parent per cell.
 
         For 3H grids, parent_cells() returns all ancestors (up to 3^depth per
-        cell) to support compaction. For partitioning in sample_nn we only need
+        cell) to support compaction. For partitioning in --transfer sample we only need
         one representative parent — the centroid-parent path, which is what
         _get_ancestor already uses for all DGGAL grids.
         """

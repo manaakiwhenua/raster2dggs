@@ -1,5 +1,5 @@
 """
-CLI smoke tests for --transfer sample_nn across all DGGS implementations.
+CLI smoke tests for --transfer sample across all DGGS implementations.
 
 Each DGGS has a different cells_in_bbox / cells_to_lonlat_arrays
 implementation. These end-to-end tests verify the full pipeline produces valid
@@ -31,9 +31,9 @@ def _make_raster(path: str) -> None:
     make_raster(path, _BOUNDS, _SIZE, pixel_value=_PIXEL_VALUE)
 
 
-class _SampleNNSmoke(TestRunthrough):
+class _SampleSmoke(TestRunthrough):
     """
-    Base class for per-DGGS sample_nn smoke tests.
+    Base class for per-DGGS --transfer sample smoke tests.
 
     Subclasses set:
       dggs       — CLI subcommand name (e.g. "h3")
@@ -60,7 +60,7 @@ class _SampleNNSmoke(TestRunthrough):
             "--semantics",
             "point_sample_field",
             "--transfer",
-            "sample_nn",
+            "sample",
             "--out",
             "value",
             *extra_args,
@@ -74,7 +74,7 @@ class _SampleNNSmoke(TestRunthrough):
         result = self._run()
         self.assertEqual(result.exit_code, 0, result.output)
         table = pq.read_table(str(TEST_OUTPUT_PATH))
-        self.assertGreater(len(table), 0, "sample_nn produced no output rows")
+        self.assertGreater(len(table), 0, "--transfer sample produced no output rows")
 
     def test_output_values_match_pixel(self):
         result = self._run()
@@ -87,52 +87,52 @@ class _SampleNNSmoke(TestRunthrough):
             f"Expected all values ≈ {_PIXEL_VALUE}, got: {vals.unique()}",
         )
 
-    def test_agg_warning_emitted_for_sample_nn(self):
+    def test_agg_warning_emitted_for_sample(self):
         result = self._run("--agg", "sum")
         self.assertEqual(result.exit_code, 0, result.output)
         self.assertIn(
             "--agg",
             result.output,
-            "--agg warning should be emitted when combined with --transfer sample_nn",
+            "--agg warning should be emitted when combined with --transfer sample",
         )
 
 
-class TestH3SampleNN(_SampleNNSmoke, unittest.TestCase):
+class TestH3Sample(_SampleSmoke, unittest.TestCase):
     # res 5: ~252 km² cells → ~28 cells in a 1° × 1° bbox
     dggs = "h3"
     resolution = 5
     extra = "h3"
 
 
-class TestRHPSampleNN(_SampleNNSmoke, unittest.TestCase):
+class TestRHPSample(_SampleSmoke, unittest.TestCase):
     # res 6: ~1440 km² cells → ~5 cells in a 1° × 1° bbox
     dggs = "rhp"
     resolution = 6
     extra = "rhp"
 
 
-class TestGeohashSampleNN(_SampleNNSmoke, unittest.TestCase):
+class TestGeohashSample(_SampleSmoke, unittest.TestCase):
     # precision 4: lon_step ≈ 0.35°, lat_step ≈ 0.18° → ~16 cells
     dggs = "geohash"
     resolution = 4
     extra = "geohash"
 
 
-class TestMaidenheadSampleNN(_SampleNNSmoke, unittest.TestCase):
+class TestMaidenheadSample(_SampleSmoke, unittest.TestCase):
     # level 3: lon_step ≈ 0.083°, lat_step ≈ 0.042° → ~288 cells
     dggs = "maidenhead"
     resolution = 3
     extra = "maidenhead"
 
 
-class TestS2SampleNN(_SampleNNSmoke, unittest.TestCase):
+class TestS2Sample(_SampleSmoke, unittest.TestCase):
     # level 8: ~1300 km² cells → ~5 cells in a 1° × 1° bbox
     dggs = "s2"
     resolution = 8
     extra = "s2"
 
 
-class TestA5SampleNN(_SampleNNSmoke, unittest.TestCase):
+class TestA5Sample(_SampleSmoke, unittest.TestCase):
     # level 8: ~649 km² cells → ~11 cells in a 1° × 1° bbox
     dggs = "a5"
     resolution = 8
@@ -145,14 +145,14 @@ class TestA5SampleNN(_SampleNNSmoke, unittest.TestCase):
 # catch any family-specific issues (refinement ratio, coordinate handling, etc.)
 
 
-class TestISEA4RSampleNN(_SampleNNSmoke, unittest.TestCase):
+class TestISEA4RSample(_SampleSmoke, unittest.TestCase):
     # level 8: ~1300 km² cells → ~5 cells in a 1° × 1° bbox
     dggs = "isea4r"
     resolution = 8
     extra = "dggal"
 
 
-class TestISEA9RSampleNN(_SampleNNSmoke, unittest.TestCase):
+class TestISEA9RSample(_SampleSmoke, unittest.TestCase):
     # level 5: 6 × 9^(5-1)?  No — ISEA9R is a 9R grid; pick a level that gives ~5-10 cells.
     # At level 5: ~5 cells based on empirical testing.
     dggs = "isea9r"
@@ -160,22 +160,124 @@ class TestISEA9RSampleNN(_SampleNNSmoke, unittest.TestCase):
     extra = "dggal"
 
 
-class TestISEA3HSampleNN(_SampleNNSmoke, unittest.TestCase):
+class TestISEA3HSample(_SampleSmoke, unittest.TestCase):
     # Hexagonal 3H; level 9 needed for cells to be small enough to land in bbox.
     dggs = "isea3h"
     resolution = 9
     extra = "dggal"
 
 
-class TestISEA7HSampleNN(_SampleNNSmoke, unittest.TestCase):
+class TestISEA7HSample(_SampleSmoke, unittest.TestCase):
     # Hexagonal 7H; level 6 gives ~3-6 cells in a 1° × 1° bbox.
     dggs = "isea7h"
     resolution = 6
     extra = "dggal"
 
 
-class TestHEALPixSampleNN(_SampleNNSmoke, unittest.TestCase):
+class TestHEALPixSample(_SampleSmoke, unittest.TestCase):
     # HEALPix; level 8 gives ~15 cells in a 1° × 1° bbox (from earlier testing).
     dggs = "healpix"
     resolution = 8
     extra = "dggal"
+
+
+class _SampleBilinearSmoke(_SampleSmoke):
+    """
+    Base class for --transfer sample --interp bilinear smoke tests.
+
+    Inherits all _SampleSmoke tests; overrides _run to add --interp bilinear.
+    Because the raster is uniform, bilinear and NN produce identical values,
+    so the same value assertions apply.
+    """
+
+    def _run(self, *extra_args):
+        return self.invoke_cli(
+            self.dggs,
+            self._raster,
+            TEST_OUTPUT_PATH,
+            self.resolution,
+            "--semantics",
+            "point_sample_field",
+            "--transfer",
+            "sample",
+            "--interp",
+            "bilinear",
+            "--out",
+            "value",
+            *extra_args,
+        )
+
+
+class TestH3SampleBilinear(_SampleBilinearSmoke, unittest.TestCase):
+    # Bilinear is implemented in common.py, not per-DGGS; one representative is enough.
+    dggs = "h3"
+    resolution = 5
+    extra = "h3"
+
+
+class _SampleBicubicSmoke(_SampleSmoke):
+    """
+    Base class for --transfer sample --interp cubic smoke tests.
+
+    Inherits all _SampleSmoke tests; overrides _run to add --interp cubic.
+    Because the raster is uniform, cubic and NN produce identical values,
+    so the same value assertions apply.
+    """
+
+    def _run(self, *extra_args):
+        return self.invoke_cli(
+            self.dggs,
+            self._raster,
+            TEST_OUTPUT_PATH,
+            self.resolution,
+            "--semantics",
+            "point_sample_field",
+            "--transfer",
+            "sample",
+            "--interp",
+            "bicubic",
+            "--out",
+            "value",
+            *extra_args,
+        )
+
+
+class TestH3SampleBicubic(_SampleBicubicSmoke, unittest.TestCase):
+    # Bicubic is implemented in common.py, not per-DGGS; one representative is enough.
+    dggs = "h3"
+    resolution = 5
+    extra = "h3"
+
+
+class _SampleLanczosSmoke(_SampleSmoke):
+    """
+    Base class for --transfer sample --interp lanczos smoke tests.
+
+    Inherits all _SampleSmoke tests; overrides _run to add --interp lanczos.
+    Because the raster is uniform, Lanczos and NN produce identical values,
+    so the same value assertions apply.
+    """
+
+    def _run(self, *extra_args):
+        return self.invoke_cli(
+            self.dggs,
+            self._raster,
+            TEST_OUTPUT_PATH,
+            self.resolution,
+            "--semantics",
+            "point_sample_field",
+            "--transfer",
+            "sample",
+            "--interp",
+            "lanczos",
+            "--out",
+            "value",
+            *extra_args,
+        )
+
+
+class TestH3SampleLanczos(_SampleLanczosSmoke, unittest.TestCase):
+    # Lanczos is implemented in common.py, not per-DGGS; one representative is enough.
+    dggs = "h3"
+    resolution = 5
+    extra = "h3"
