@@ -389,6 +389,7 @@ class TestOutListValidation(TestRunthrough):
         )
 
     def test_unimplemented_valid_combination_rejected(self):
+        # cell_average + overlay_weighted is valid but not yet implemented
         runner = CliRunner()
         result = runner.invoke(
             cli,
@@ -399,9 +400,9 @@ class TestOutListValidation(TestRunthrough):
                 "-r",
                 str(_COARSE_RES),
                 "--semantics",
-                "density",
+                "cell_average",
                 "--transfer",
-                "sample",
+                "overlay_weighted",
                 "--out",
                 "value",
             ],
@@ -409,7 +410,7 @@ class TestOutListValidation(TestRunthrough):
         self.assertNotEqual(
             result.exit_code,
             0,
-            "density + sample is valid but not yet implemented",
+            "cell_average + overlay_weighted is valid but not yet implemented",
         )
 
     def test_sample_point_sample_field_runs(self):
