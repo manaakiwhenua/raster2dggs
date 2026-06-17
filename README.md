@@ -264,9 +264,13 @@ Legend: **✓** appropriate/common · **△** possible (with caveats) · **✗**
 | `point_center_strict` | `assign_centers` | `value` | Single `--agg` → scalar; multiple `--agg` (e.g. `min,max`) → struct per band. |
 | `point_center_strict` | `assign_centers` | `list` | Sorted list of all contributing pixel values per cell. `--agg` is ignored. |
 | `point_center_strict` | `assign_centers` | `histogram` | Value-count struct per cell. `--agg` is ignored. |
-| `point_sample_field` | `sample` (`--interp nn`) | `value` | Nearest-neighbour sample at each DGGS cell centre. `--agg` is ignored. Supports `--compact`. |
-| `piecewise_constant` | `sample` (`--interp nn`) | `value` | Nearest-neighbour sample at each DGGS cell centre. Suitable for categorical rasters (landcover, zone IDs, soil class). `--agg` is ignored. Supports `--compact`. |
-| `point_sample_field` | `sample` (`--interp bilinear`) | `value` | Bilinear interpolation at each DGGS cell centre. `--agg` is ignored. Supports `--compact`. |
+| `event_indicator` | `assign_centers` | `value` | Index each event pixel to its DGGS cell. Use `--agg sum` for total event count per cell, `--agg mean` for event rate, or `--agg mode` for majority presence/absence. |
+| `event_indicator` | `assign_centers` | `list` | Sorted list of all event values (0/1 or counts) contributing to each cell. `--agg` is ignored. |
+| `event_indicator` | `assign_centers` | `histogram` | Value-count struct per cell — useful for summarising the distribution of event counts. `--agg` is ignored. |
+| `point_sample_field` | `sample` (`--interp nn\|bilinear\|bicubic\|lanczos`) | `value` | Point sample at each DGGS cell centre. `--interp` selects the method: `nn` (nearest-neighbour), `bilinear` (2×2 stencil), `bicubic` (Keys, 4×4), `lanczos` (Lanczos-3, 6×6). `--agg` is ignored. Supports `--compact`. |
+| `density` | `sample` (`--interp nn\|bilinear\|bicubic\|lanczos`) | `value` | Point sample of a per-area intensity raster (e.g. population density, rainfall rate) at each DGGS cell centre. Same interp options as `point_sample_field`. `--agg` is ignored. Supports `--compact`. |
+| `piecewise_constant` | `sample` (`--interp nn` only) | `value` | Nearest-neighbour sample at each DGGS cell centre. Suitable for categorical rasters (landcover, zone IDs, soil class). Smooth interpolation options are rejected as meaningless for categorical data. `--agg` is ignored. Supports `--compact`. |
+| `event_indicator` | `sample` (`--interp nn` only) | `value` | Nearest-neighbour sample at each DGGS cell centre. Answers "did the event occur at this cell centre?" for presence/absence or occurrence-count rasters (fire scars, flood inundation, species detections). Smooth interpolation is rejected (fractional values are not event indicators). `--agg` is ignored. Supports `--compact`. |
 
 All other valid combinations will raise a `NotImplementedError` with a descriptive message until they are added.
 
