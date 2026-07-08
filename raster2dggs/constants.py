@@ -210,6 +210,19 @@ INAPPROPRIATE_INTERP: set = {
     ("event_indicator", "sample", "lanczos"),
 }
 
+OVERLAY_TRANSFERS: set = {Transfer.OVERLAY_WEIGHTED, Transfer.OVERLAY_MODE, Transfer.MASS_PRESERVE}
+
+# Maps semantics → the exactextract statistic used for --transfer overlay_*.
+# Drives op selection in common.py so semantics fully determines the algorithm.
+OVERLAY_OP: dict[str, str] = {
+    Semantics.CELL_AVERAGE:       "mean",
+    Semantics.DENSITY:            "mean",
+    Semantics.FRACTION_COVER:     "frac",
+    Semantics.PIECEWISE_CONSTANT: "majority",
+    Semantics.EVENT_INDICATOR:    "majority",
+    Semantics.COUNT_TOTAL:        "sum",
+}
+
 IMPLEMENTED: set = {
     ("point_center_strict", "assign_centers", "value"),
     ("point_center_strict", "assign_centers", "list"),
@@ -228,6 +241,13 @@ IMPLEMENTED: set = {
     ("point_sample_field", "sample", "bilinear", "value"),
     ("point_sample_field", "sample", "bicubic", "value"),
     ("point_sample_field", "sample", "lanczos", "value"),
+    # overlay transfer uses 3-tuples: (semantics, transfer, out)
+    ("cell_average", "overlay_weighted", "value"),
+    ("density", "overlay_weighted", "value"),
+    ("piecewise_constant", "overlay_mode", "value"),
+    ("event_indicator", "overlay_mode", "value"),
+    ("count_total", "mass_preserve", "value"),
+    ("fraction_cover", "overlay_weighted", "fractions"),
 }
 
 

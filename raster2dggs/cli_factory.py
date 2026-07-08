@@ -166,6 +166,7 @@ def run_index(
     transfer: str,
     interp: str,
     out: str,
+    valid_coverage_threshold: float = 0.0,
 ):
     tempfile.tempdir = tempdir if tempdir is not None else tempfile.tempdir
 
@@ -185,6 +186,7 @@ def run_index(
         transfer,
         interp,
         out,
+        valid_coverage_threshold,
     )
 
     common.initial_index(
@@ -314,6 +316,22 @@ def make_command(spec: DGGS_Spec):
         help="Interpolation method used with --transfer sample. Ignored for other transfer operators.",
     )
     @click.option(
+        "-vct",
+        "--valid-coverage-threshold",
+        "valid_coverage_threshold",
+        default=0.0,
+        type=click.FloatRange(0.0, 1.0),
+        show_default=True,
+        help=(
+            "Minimum fraction of each DGGS cell's overlapping raster area that must contain "
+            "valid (non-nodata) pixels for the cell to receive a value. Applied per band. "
+            "0.0 (default) keeps all cells with any valid data. "
+            "Only meaningful for --transfer overlay_weighted and overlay_mode; "
+            "ignored for mass_preserve (partial sums are correct values — "
+            "filtering them would break mass conservation)."
+        ),
+    )
+    @click.option(
         "--out",
         default=const.OutputSchema.VALUE.value,
         type=click.Choice([o.value for o in const.OutputSchema]),
@@ -367,6 +385,7 @@ def make_command(spec: DGGS_Spec):
         semantics,
         transfer,
         interp,
+        valid_coverage_threshold,
         out,
     ):
         if isinstance(resolution, str):
@@ -395,6 +414,11 @@ def make_command(spec: DGGS_Spec):
             common.LOGGER.warning(
                 "--transfer sample: --agg has no effect (one sample per DGGS cell)"
             )
+        if emit_nodata_value is not None and nodata_policy == "omit":
+            common.LOGGER.warning(
+                "--emit_nodata_value has no effect when --nodata_policy=omit (the default). "
+                "Add --nodata_policy emit to write the specified value for nodata cells."
+            )
         return run_index(
             spec.name,
             raster_input,
@@ -416,6 +440,7 @@ def make_command(spec: DGGS_Spec):
             transfer,
             interp,
             out,
+            valid_coverage_threshold,
         )
 
     return cmd

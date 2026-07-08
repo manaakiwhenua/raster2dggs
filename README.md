@@ -170,6 +170,17 @@ Options:
                                   Interpolation method used with --transfer
                                   sample. Ignored for other transfer
                                   operators.  [default: nn]
+  -vct, --valid-coverage-threshold FLOAT RANGE
+                                  Minimum fraction of each DGGS cell's
+                                  overlapping raster area that must contain
+                                  valid (non-nodata) pixels for the cell to
+                                  receive a value. Applied per band. 0.0
+                                  (default) keeps all cells with any valid
+                                  data. Only meaningful for --transfer
+                                  overlay_weighted and overlay_mode; ignored
+                                  for mass_preserve (partial sums are correct
+                                  values — filtering them would break mass
+                                  conservation).  [default: 0.0]
   --out [value|fractions|histogram|list]
                                   Output schema: scalar value, class
                                   fractions, histogram, or sorted sample list.
@@ -230,7 +241,7 @@ Support for additional semantics × transfer combinations is being added increme
 | `assign_centers` | For each raster pixel, index its **centre coordinate** to a DGGS cell. Produces sparse output (gaps) when the DGGS resolution is finer than the raster. |
 | `sample` | For each DGGS cell, sample the raster at the **DGGS cell centre**. Use `--interp` to choose the method (default: `nn`). |
 | `overlay_weighted` | For each DGGS cell, compute overlap-weighted outputs (means, fractions, histograms). Requires an area model. |
-| `overlay_mode` | For each DGGS cell, assign the class with the greatest overlap area. Typically paired with `--valid-coverage-threshold`. |
+| `overlay_mode` | For each DGGS cell, assign the class with the greatest overlap area. Use `--valid-coverage-threshold` (`-vct`) to discard cells with insufficient valid-data coverage. |
 | `mass_preserve` | Redistribute each raster cell total into DGGS cells proportional to overlap area. Conserves sums. |
 
 ### Semantics × transfer compatibility
@@ -253,7 +264,7 @@ Legend: **✓** appropriate/common · **△** possible (with caveats) · **✗**
 | Value | Schema | Description |
 |---|---|---|
 | `value` | Scalar `T`, or `struct<name: T, …>` with multi-`--agg` | One value per DGGS cell per band (default). Pass a single `--agg` for a scalar; pass comma-separated names (e.g. `--agg min,max`) for a struct. |
-| `fractions` | *(not yet implemented)* | Area fractions per class per DGGS cell, for categorical rasters. |
+| `fractions` | *(not yet implemented)* | Area fractions per class per DGGS cell, for categorical rasters. piecewise_constant|
 | `histogram` | `struct<values: list<T>, counts: list<int64>>` | Value-count pairs for all contributing pixels, in ascending value order. |
 | `list` | `list<T>` | All contributing pixel values in ascending order (deterministic). Useful for `point_center_strict` coarsening workflows. `--agg` has no effect. |
 
@@ -271,8 +282,38 @@ Legend: **✓** appropriate/common · **△** possible (with caveats) · **✗**
 | `density` | `sample` (`--interp nn\|bilinear\|bicubic\|lanczos`) | `value` | Point sample of a per-area intensity raster (e.g. population density, rainfall rate) at each DGGS cell centre. Same interp options as `point_sample_field`. `--agg` is ignored. Supports `--compact`. |
 | `piecewise_constant` | `sample` (`--interp nn` only) | `value` | Nearest-neighbour sample at each DGGS cell centre. Suitable for categorical rasters (landcover, zone IDs, soil class). Smooth interpolation options are rejected as meaningless for categorical data. `--agg` is ignored. Supports `--compact`. |
 | `event_indicator` | `sample` (`--interp nn` only) | `value` | Nearest-neighbour sample at each DGGS cell centre. Answers "did the event occur at this cell centre?" for presence/absence or occurrence-count rasters (fire scars, flood inundation, species detections). Smooth interpolation is rejected (fractional values are not event indicators). `--agg` is ignored. Supports `--compact`. |
+| `cell_average` | `overlay_weighted` | `value` | Area-weighted mean of all raster pixels overlapping each DGGS cell (coverage-weighted by pixel–cell intersection area). Correct for intensive quantities (temperature, concentration, elevation). `--agg` is ignored. |
+| `density` | `overlay_weighted` | `value` | Area-weighted mean of a per-area intensity raster (population density, rainfall rate, etc.) across each DGGS cell. Appropriate when the raster already encodes a density. `--agg` is ignored. |
+| `piecewise_constant` | `overlay_mode` | `value` | Assigns each DGGS cell the raster class with the greatest total overlap area (coverage-weighted majority). Correct for categorical rasters (land cover, soil type, zone IDs). `--agg` is ignored. |
+| `event_indicator` | `overlay_mode` | `value` | Assigns each DGGS cell the event value with the greatest overlap area. Useful when event presence/absence is recorded as a raster and area dominance is the desired summary. `--agg` is ignored. |
+| `count_total` | `mass_preserve` | `value` | Redistributes each raster pixel's total count into overlapping DGGS cells proportional to intersection area (coverage-weighted sum). Conserves the raster's total count. `--agg` is ignored. |
 
 All other valid combinations will raise a `NotImplementedError` with a descriptive message until they are added.
+
+#### Performance note for overlay transfers
+
+Overlay transfers (`overlay_weighted`, `overlay_mode`, `mass_preserve`) use [exactextract](https://github.com/isciences/exactextract) to compute pixel–cell area intersections. For each raster window, exactextract reads only the raster blocks needed to cover that window's DGGS cells. If the raster fits in memory, increasing GDAL's block cache allows blocks read for early windows to remain cached for later ones, reducing redundant I/O:
+
+```bash
+GDAL_CACHEMAX=512 raster2dggs h3 input.tif output/ -r 8 --semantics cell_average --transfer overlay_weighted
+```
+
+The value is in megabytes. The default is 64 MB. For large rasters or high DGGS resolutions where each window covers many cells, a larger cache can significantly reduce processing time.
+
+#### Valid-data coverage threshold (`-vct` / `--valid-coverage-threshold`)
+
+By default (`-vct 0.0`) any cell with at least one valid pixel in its overlap area receives a value. Use `--valid-coverage-threshold` to require a minimum fraction of the cell's raster-overlapping area to have valid (non-nodata) data:
+
+```bash
+# Discard cells where fewer than 50% of overlapping pixels are valid
+raster2dggs h3 input.tif output/ -r 8 \
+    --semantics piecewise_constant --transfer overlay_mode \
+    -vct 0.5
+```
+
+The threshold is applied **per band**: a cell may receive a valid value for one band and be nulled for another if that band has sparser nodata. Nulled values are then handled by `--nodata_policy` — the default `omit` drops rows where any band is null; `emit` keeps them as NaN (or `--emit_nodata_value` if set).
+
+This option has no effect for `--transfer mass_preserve`. Partial sums produced by `mass_preserve` are correct values representing the fraction of mass within the cell–raster intersection; filtering them out would break the mass-conservation guarantee.
 
 ## Visualising output
 

@@ -41,7 +41,9 @@ from raster2dggs.indexers.rasterindexer import _is_nan
 LOGGER = logging.getLogger(__name__)
 click_log.basic_config(LOGGER)
 
-from raster2dggs.interpolation import _SampleIndexer
+from raster2dggs.transfers.assign_centers import _AssignCentersIndexer
+from raster2dggs.transfers.interpolation import _SampleIndexer
+from raster2dggs.transfers.overlay import _OverlayIndexer
 
 
 class ParentResolutionException(Exception):
@@ -200,6 +202,7 @@ def assemble_kwargs(
     transfer: str = const.Transfer.ASSIGN_CENTERS,
     interp: str = const.Interp.NN,
     out: str = const.OutputSchema.VALUE,
+    valid_coverage_threshold: float = 0.0,
 ) -> dict:
     return {
         "compression": compression,
@@ -213,6 +216,7 @@ def assemble_kwargs(
         "transfer": transfer,
         "interp": interp,
         "out": out,
+        "valid_coverage_threshold": valid_coverage_threshold,
     }
 
 
@@ -302,7 +306,11 @@ def _build_output_meta(
     compact: bool,
     interp: str,
 ) -> tuple[pd.DataFrame, str]:
-    if transfer == const.Transfer.SAMPLE or (out == "value" and len(aggfuncs) == 1):
+    if (
+        transfer == const.Transfer.SAMPLE
+        or (transfer in const.OVERLAY_TRANSFERS and out != const.OutputSchema.FRACTIONS)
+        or (out == "value" and len(aggfuncs) == 1)
+    ):
         out_meta = pd.DataFrame(
             {
                 partition_col: pd.Series([], dtype="string"),
@@ -325,6 +333,8 @@ def _build_output_meta(
         _compacting = "/compacting" if compact else ""
         if transfer == const.Transfer.SAMPLE:
             tqdm_label = f"Sampling ({interp}){_compacting}"
+        elif transfer in const.OVERLAY_TRANSFERS:
+            tqdm_label = f"Overlay ({transfer}){_compacting}"
         else:
             tqdm_label = f"Aggregating{_compacting}"
     else:
@@ -359,6 +369,15 @@ def _build_write_schema(
         pa.field(index_col, pa.string()),
         pa.field(partition_col, pa.string()),
     ]
+    if out == const.OutputSchema.FRACTIONS:
+        frac_struct = pa.struct([
+            pa.field("classes", pa.list_(pa.int64())),
+            pa.field("fractions", pa.list_(pa.float64())),
+        ])
+        return pa.schema(
+            common_fields
+            + [pa.field(c, frac_struct) for c in band_cols]
+        )
     if out == "list":
         return pa.schema(
             common_fields
@@ -508,7 +527,7 @@ def address_boundary_issues(
     )
 
     with TqdmCallback(desc=tqdm_label):
-        if transfer == const.Transfer.SAMPLE:
+        if transfer == const.Transfer.SAMPLE or transfer in const.OVERLAY_TRANSFERS:
             mp_func = indexer.parent_groupby_nn
             mp_args = (resolution, parent_res, decimals)
         elif out == "list":
@@ -611,13 +630,10 @@ def initial_index(
 
     indexer = idxfactory.indexer_instance(dggs)
 
-    if (
-        kwargs["transfer"] == const.Transfer.SAMPLE
-        and not indexer.SUPPORTS_CELL_ENUMERATION
-    ):
+    if kwargs["transfer"] in {const.Transfer.SAMPLE, *const.OVERLAY_TRANSFERS} and not indexer.SUPPORTS_CELL_ENUMERATION:
         raise click.UsageError(
-            f"--transfer sample requires spatial cell enumeration, which is not "
-            f"supported by the {dggs!r} DGGS."
+            f"--transfer {kwargs['transfer']!r} requires spatial cell enumeration, "
+            f"which is not supported by the {dggs!r} DGGS."
         )
 
     LOGGER.info(
@@ -726,22 +742,6 @@ def initial_index(
                         compression=compression,
                     )
 
-                def process(window):
-                    sdf = da.rio.isel_window(window)
-                    result = indexer.index_func(
-                        sdf,
-                        resolution,
-                        parent_res,
-                        nodata,
-                        band_labels=selected_labels,
-                        nodata_policy=nodata_policy,
-                        emit_nodata_value=emit_nodata_value,
-                        transformer=transformer,
-                    )
-                    _write_result(result, window)
-                    return None
-
-                ctx = None
                 if kwargs["transfer"] == const.Transfer.SAMPLE:
                     ctx = _SampleIndexer(
                         src=src,
@@ -756,8 +756,6 @@ def initial_index(
                         emit_nodata_value=emit_nodata_value,
                         write_result=_write_result,
                     )
-
-                if kwargs["transfer"] == const.Transfer.SAMPLE:
                     interp = kwargs.get("interp", const.Interp.NN)
                     if interp == const.Interp.BILINEAR:
                         stage1_func = ctx.process_bilinear
@@ -767,8 +765,36 @@ def initial_index(
                         stage1_func = ctx.process_lanczos
                     else:
                         stage1_func = ctx.process_nn
+                elif kwargs["transfer"] in const.OVERLAY_TRANSFERS:
+                    ctx = _OverlayIndexer(
+                        raster_input=str(raster_input),
+                        indexer=indexer,
+                        resolution=resolution,
+                        parent_res=parent_res,
+                        selected_labels=selected_labels,
+                        selected_indices=tuple(selected_indices),
+                        nodata_policy=nodata_policy,
+                        emit_nodata_value=emit_nodata_value,
+                        write_result=_write_result,
+                        op=const.OVERLAY_OP[kwargs["semantics"]],
+                        min_valid_coverage=kwargs.get("valid_coverage_threshold", 0.0),
+                        decimals=kwargs.get("decimals"),
+                    )
+                    stage1_func = ctx.process_window
                 else:
-                    stage1_func = process
+                    ctx = _AssignCentersIndexer(
+                        da=da,
+                        indexer=indexer,
+                        resolution=resolution,
+                        parent_res=parent_res,
+                        nodata=nodata,
+                        selected_labels=selected_labels,
+                        nodata_policy=nodata_policy,
+                        emit_nodata_value=emit_nodata_value,
+                        transformer=transformer,
+                        write_result=_write_result,
+                    )
+                    stage1_func = ctx.process_window
                 try:
                     with ThreadPoolExecutor(
                         max_workers=kwargs["threads"]
@@ -779,15 +805,14 @@ def initial_index(
                             pbar.update(1)
                 finally:
                     da.close()
-                    # da, transformer, and process are closure cells and won't
-                    # be freed by reference counting alone if they're in a dask
-                    # task-graph cycle.  Explicitly delete all three and collect
-                    # now, while still inside rio.open(), so the GDAL/PROJ
-                    # objects they hold are torn down during normal execution
-                    # rather than at interpreter shutdown (which causes a
-                    # silent "Error in sys.excepthook" crash for non-WGS84
-                    # rasters).
-                    del da, transformer, process, ctx, stage1_func
+                    # da and transformer are held by ctx as dataclass fields and
+                    # won't be freed by reference counting alone if they're in a
+                    # dask task-graph cycle.  Explicitly delete the locals and ctx
+                    # now, while still inside rio.open(), so the GDAL/PROJ objects
+                    # they hold are torn down during normal execution rather than at
+                    # interpreter shutdown (which causes a silent "Error in
+                    # sys.excepthook" crash for non-WGS84 rasters).
+                    del da, transformer, ctx, stage1_func
                     gc.collect()
             LOGGER.debug("Stage 1 (primary indexing) complete")
             return address_boundary_issues(
