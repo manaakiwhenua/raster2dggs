@@ -139,6 +139,34 @@ class Interp(StrEnum):
     LANCZOS = "lanczos"
 
 
+class OverlayMode(StrEnum):
+    WEIGHTED = "weighted"
+    MODE = "mode"
+    MASS_PRESERVE = "mass-preserve"
+    DENSITY_PRESERVE = "density-preserve"
+    FRACTIONS = "fractions"
+    LIST = "list"
+    HISTOGRAM = "histogram"
+
+
+class Transfer(StrEnum):
+    ASSIGN_CENTERS = "assign_centers"
+    SAMPLE = "sample"
+    OVERLAY_WEIGHTED = "overlay_weighted"
+    OVERLAY_MODE = "overlay_mode"
+    MASS_PRESERVE = "mass_preserve"
+    OVERLAY_COLLECT = "overlay_collect"
+
+
+class Op(StrEnum):
+    MEAN = "mean"
+    MAJORITY = "majority"
+    SUM = "sum"
+    WSUM = "wsum"
+    FRAC = "frac"
+    VALUES = "values"
+
+
 class OutputSchema(StrEnum):
     VALUE = "value"
     FRACTIONS = "fractions"
@@ -146,9 +174,20 @@ class OutputSchema(StrEnum):
     LIST = "list"
 
 
-_OVERLAY_TRANSFER_KEYS: frozenset = frozenset({
-    "overlay_weighted", "overlay_mode", "mass_preserve", "overlay_collect",
-})
+# The four distinct internal transfer implementations for overlay.
+# Multiple OverlayMode values can map to the same Transfer (e.g. 'weighted',
+# 'density-preserve', and 'fractions' all use OVERLAY_WEIGHTED; 'list' and
+# 'histogram' both use OVERLAY_COLLECT). A positive set so that adding a new
+# transfer type requires an explicit decision here rather than updating every
+# negative check against Transfer.SAMPLE / Transfer.ASSIGN_CENTERS.
+_OVERLAY_TRANSFER_KEYS: frozenset = frozenset(
+    {
+        Transfer.OVERLAY_WEIGHTED,
+        Transfer.OVERLAY_MODE,
+        Transfer.MASS_PRESERVE,
+        Transfer.OVERLAY_COLLECT,
+    }
+)
 
 
 # Surface area of the WGS84 oblate spheroid in m²

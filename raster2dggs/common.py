@@ -33,6 +33,7 @@ from rasterio.warp import transform_bounds
 from rasterio.transform import rowcol
 
 import raster2dggs.constants as const
+from raster2dggs.constants import Transfer, Op, OutputSchema, OverlayMode
 import raster2dggs.indexerfactory as idxfactory
 
 from raster2dggs.interfaces import IRasterIndexer
@@ -198,18 +199,52 @@ def resolve_to_internal(
     """Map CLI flags to the internal (transfer_key, op, out_key) triple."""
     if overlay is not None:
         return {
-            "weighted":      {"transfer": "overlay_weighted", "op": "mean",     "out": "value"},
-            "mode":          {"transfer": "overlay_mode",     "op": "majority", "out": "value"},
-            "mass-preserve": {"transfer": "mass_preserve",    "op": "sum",      "out": "value"},
-            "fractions":     {"transfer": "overlay_weighted", "op": "frac",     "out": "fractions"},
-            "list":          {"transfer": "overlay_collect",  "op": "values",   "out": "list"},
-            "histogram":     {"transfer": "overlay_collect",  "op": "values",   "out": "histogram"},
+            OverlayMode.WEIGHTED: {
+                "transfer": Transfer.OVERLAY_WEIGHTED,
+                "op": Op.MEAN,
+                "out": OutputSchema.VALUE,
+            },
+            OverlayMode.MODE: {
+                "transfer": Transfer.OVERLAY_MODE,
+                "op": Op.MAJORITY,
+                "out": OutputSchema.VALUE,
+            },
+            OverlayMode.MASS_PRESERVE: {
+                "transfer": Transfer.MASS_PRESERVE,
+                "op": Op.SUM,
+                "out": OutputSchema.VALUE,
+            },
+            OverlayMode.DENSITY_PRESERVE: {
+                "transfer": Transfer.OVERLAY_WEIGHTED,
+                "op": Op.WSUM,
+                "out": OutputSchema.VALUE,
+            },
+            OverlayMode.FRACTIONS: {
+                "transfer": Transfer.OVERLAY_WEIGHTED,
+                "op": Op.FRAC,
+                "out": OutputSchema.FRACTIONS,
+            },
+            OverlayMode.LIST: {
+                "transfer": Transfer.OVERLAY_COLLECT,
+                "op": Op.VALUES,
+                "out": OutputSchema.LIST,
+            },
+            OverlayMode.HISTOGRAM: {
+                "transfer": Transfer.OVERLAY_COLLECT,
+                "op": Op.VALUES,
+                "out": OutputSchema.HISTOGRAM,
+            },
         }[overlay]
     if sample is not None:
-        return {"transfer": "sample", "op": None, "out": "value", "interp": sample}
+        return {
+            "transfer": Transfer.SAMPLE,
+            "op": None,
+            "out": OutputSchema.VALUE,
+            "interp": sample,
+        }
     # point (default)
-    out = point if point is not None else "value"
-    return {"transfer": "assign_centers", "op": None, "out": out}
+    out = OutputSchema(point) if point is not None else OutputSchema.VALUE
+    return {"transfer": Transfer.ASSIGN_CENTERS, "op": None, "out": out}
 
 
 def validate_config(
@@ -340,9 +375,13 @@ def _build_output_meta(
     interp: str,
 ) -> tuple[pd.DataFrame, str]:
     if (
-        transfer == "sample"
-        or (transfer in const._OVERLAY_TRANSFER_KEYS and out not in ("fractions", "list", "histogram"))
-        or (out == "value" and len(aggfuncs) == 1)
+        transfer == Transfer.SAMPLE
+        or (
+            transfer in const._OVERLAY_TRANSFER_KEYS
+            and out
+            not in (OutputSchema.FRACTIONS, OutputSchema.LIST, OutputSchema.HISTOGRAM)
+        )
+        or (out == OutputSchema.VALUE and len(aggfuncs) == 1)
     ):
         out_meta = pd.DataFrame(
             {
@@ -364,7 +403,7 @@ def _build_output_meta(
             }
         )
         _compacting = "/compacting" if compact else ""
-        if transfer == "sample":
+        if transfer == Transfer.SAMPLE:
             tqdm_label = f"Sampling ({interp}){_compacting}"
         elif transfer in const._OVERLAY_TRANSFER_KEYS:
             tqdm_label = f"Overlay{_compacting}"
@@ -380,7 +419,7 @@ def _build_output_meta(
         )
         tqdm_label = (
             "Collecting"
-            if out != "value"
+            if out != OutputSchema.VALUE
             else f"Aggregating{'/compacting' if compact else ''}"
         )
     out_meta.index = pd.Index([], name=index_col, dtype="string")
@@ -402,16 +441,15 @@ def _build_write_schema(
         pa.field(index_col, pa.string()),
         pa.field(partition_col, pa.string()),
     ]
-    if out == "fractions":
-        frac_struct = pa.struct([
-            pa.field("classes", pa.list_(pa.int64())),
-            pa.field("fractions", pa.list_(pa.float64())),
-        ])
-        return pa.schema(
-            common_fields
-            + [pa.field(c, frac_struct) for c in band_cols]
+    if out == OutputSchema.FRACTIONS:
+        frac_struct = pa.struct(
+            [
+                pa.field("classes", pa.list_(pa.int64())),
+                pa.field("fractions", pa.list_(pa.float64())),
+            ]
         )
-    if out == "list":
+        return pa.schema(common_fields + [pa.field(c, frac_struct) for c in band_cols])
+    if out == OutputSchema.LIST:
         return pa.schema(
             common_fields
             + [
@@ -419,7 +457,7 @@ def _build_write_schema(
                 for c in band_cols
             ]
         )
-    if out == "histogram":
+    if out == OutputSchema.HISTOGRAM:
         return pa.schema(
             common_fields
             + [
@@ -541,8 +579,8 @@ def address_boundary_issues(
     # Capture source dtypes before map_partitions changes them.
     source_dtypes = {c: ddf[c].dtype for c in band_cols}
 
-    out = kwargs.get("out", "value")
-    transfer = kwargs.get("transfer", "assign_centers")
+    out = kwargs.get("out", OutputSchema.VALUE)
+    transfer = kwargs.get("transfer", Transfer.ASSIGN_CENTERS)
     decimals = kwargs.get("decimals")
     aggfuncs = kwargs.get("aggfuncs", [("mean", "mean")])
 
@@ -560,13 +598,13 @@ def address_boundary_issues(
     )
 
     with TqdmCallback(desc=tqdm_label):
-        if transfer == "sample" or transfer in const._OVERLAY_TRANSFER_KEYS:
+        if transfer == Transfer.SAMPLE or transfer in const._OVERLAY_TRANSFER_KEYS:
             mp_func = indexer.parent_groupby_nn
             mp_args = (resolution, parent_res, decimals)
-        elif out == "list":
+        elif out == OutputSchema.LIST:
             mp_func = indexer.parent_groupby_list
             mp_args = (resolution, parent_res, decimals)
-        elif out == "histogram":
+        elif out == OutputSchema.HISTOGRAM:
             mp_func = indexer.parent_groupby_histogram
             mp_args = (resolution, parent_res, decimals)
         else:
@@ -606,8 +644,6 @@ def address_boundary_issues(
     return output
 
 
-
-
 def initial_index(
     dggs: str,
     raster_input: Union[Path, str],
@@ -643,7 +679,10 @@ def initial_index(
 
     indexer = idxfactory.indexer_instance(dggs)
 
-    if kwargs["transfer"] in {"sample", *const._OVERLAY_TRANSFER_KEYS} and not indexer.SUPPORTS_CELL_ENUMERATION:
+    if (
+        kwargs["transfer"] in {Transfer.SAMPLE, *const._OVERLAY_TRANSFER_KEYS}
+        and not indexer.SUPPORTS_CELL_ENUMERATION
+    ):
         raise click.UsageError(
             f"--transfer {kwargs['transfer']!r} requires spatial cell enumeration, "
             f"which is not supported by the {dggs!r} DGGS."
@@ -702,7 +741,7 @@ def initial_index(
                     src.crs, "EPSG:4326", always_xy=True
                 )
                 LOGGER.debug("Coordinate transformer: %s → EPSG:4326", src.crs)
-                if kwargs["transfer"] == "sample":
+                if kwargs["transfer"] == Transfer.SAMPLE:
                     inverse_transformer = pyproj.Transformer.from_crs(
                         "EPSG:4326", src.crs, always_xy=True
                     )
@@ -755,7 +794,7 @@ def initial_index(
                         compression=compression,
                     )
 
-                if kwargs["transfer"] == "sample":
+                if kwargs["transfer"] == Transfer.SAMPLE:
                     ctx = _SampleIndexer(
                         src=src,
                         da=da,

@@ -124,20 +124,19 @@ Options:
                                   numeric indices (1-based indexing) or string
                                   band labels (if present in the input), e.g.
                                   -b B02 -b B07 -b B12.
-  --nodata_policy [omit|emit]     'omit' excludes nodata cells from output
+  -n, --nodata [omit|emit]        'omit' excludes nodata cells from output
                                   (default). 'emit' includes them, writing the
                                   source raster nodata value (or
-                                  --emit_nodata_value if set). Note: non-NaN
+                                  --nodata-fill if set). Note: non-NaN
                                   emitted values participate in cell
                                   aggregation (see -a/--agg); if this is
                                   undesired, ensure your source nodata is NaN
-                                  or override with --emit_nodata_value.
+                                  or override with --nodata-fill.
                                   [default: omit]
-  --emit_nodata_value NUMBER      Override the value written for nodata cells
-                                  when --nodata_policy=emit. If omitted, the
-                                  source raster nodata value is used (NaN if
-                                  none is defined). Pass 'nan' to explicitly
-                                  emit NaN. Coerced to the output dtype. Note:
+  --nodata-fill NUMBER            Override the value written for nodata cells
+                                  when --nodata=emit. If omitted, the source
+                                  raster nodata value is used (NaN if none is
+                                  defined). Coerced to the output dtype. Note:
                                   non-NaN values participate in cell
                                   aggregation (see -a/--agg).
   -c, --compression TEXT          Compression method to use for the output
@@ -149,6 +148,31 @@ Options:
                                   parallel. The default is determined
                                   dynamically as the total number of available
                                   cores, minus one.
+  --point OUTPUT                  [Mutually exclusive with --overlay and
+                                  --sample] Assign each pixel to the DGGS
+                                  cell containing its centre (default).
+                                  OUTPUT: 'value' (scalar per cell, default),
+                                  'list' (sorted list of all contributing
+                                  pixel values), 'histogram' (value-count
+                                  struct).
+  --overlay METHOD                [Mutually exclusive with --point and
+                                  --sample] Area-based polygon intersection.
+                                  METHOD: 'weighted' (area-weighted mean),
+                                  'mode' (majority class by overlap area),
+                                  'mass-preserve' (area-weighted sum; conserves
+                                  total — use when pixel value is a total
+                                  count/mass), 'density-preserve' (integrates
+                                  density × pixel area; use when pixel value
+                                  is a per-area rate), 'fractions' (per-class
+                                  area fractions → struct), 'list' (all
+                                  overlapping pixel values as a sorted list),
+                                  'histogram' (value-count histogram of
+                                  overlapping pixels).
+  --sample INTERP                 [Mutually exclusive with --point and
+                                  --overlay] Sample the raster at each DGGS
+                                  cell centre. INTERP: 'nn' (nearest-
+                                  neighbour, default), 'bilinear', 'bicubic',
+                                  'lanczos'.
   -a, --agg AGGFUNC[,AGGFUNC...]  Aggregation function(s) applied when
                                   multiple raster pixels map to the same DGGS
                                   cell (only relevant for --point). Options:
@@ -157,23 +181,6 @@ Options:
                                   Comma-separate multiple names (e.g. min,max)
                                   to produce a struct column per band.
                                   [default: mean]
-  --point OUTPUT                  Assign each pixel to the DGGS cell
-                                  containing its centre (default). OUTPUT:
-                                  'value' (scalar per cell, default), 'list'
-                                  (sorted list of all contributing pixel
-                                  values), 'histogram' (value-count struct).
-  --overlay METHOD                Area-based polygon intersection. METHOD:
-                                  'weighted' (area-weighted mean), 'mode'
-                                  (majority class by overlap area), 'mass-
-                                  preserve' (area-weighted sum; conserves
-                                  total), 'fractions' (per-class area
-                                  fractions → struct), 'list' (all overlapping
-                                  pixel values as a sorted list), 'histogram'
-                                  (value-count histogram of overlapping
-                                  pixels).
-  --sample INTERP                 Sample the raster at each DGGS cell centre.
-                                  INTERP: 'nn' (nearest-neighbour, default),
-                                  'bilinear', 'bicubic', 'lanczos'.
   -vct, --valid-coverage-threshold FLOAT RANGE
                                   Minimum fraction of each DGGS cell's
                                   overlapping raster area that must contain
@@ -242,9 +249,10 @@ Uses [exactextract](https://github.com/isciences/exactextract) to compute exact 
 
 | `--overlay METHOD` | Output schema | Use for |
 |---|---|---|
-| `weighted` | Scalar `T` per band | Intensive quantities: temperature, elevation, concentration, density, continuous fields |
+| `weighted` | Scalar `T` per band | Intensive quantities: temperature, elevation, concentration, fraction cover — value per unit area, averaged across the cell |
 | `mode` | Scalar `T` per band | Categorical rasters: land cover, soil type, zone IDs, masks |
-| `mass-preserve` | Scalar `T` per band | Extensive quantities: population count, emissions, totals that must be conserved |
+| `mass-preserve` | Scalar `T` per band | Extensive totals: population count, emissions — pixel value is already a total; sum is conserved |
+| `density-preserve` | Scalar `T` per band | Density rasters (W/m², kg/km²) — integrates density × pixel area to give the cell total; geographic CRS uses geodesic pixel areas |
 | `fractions` | `struct<classes: list<int64>, fractions: list<float64>>` per band | Class area fractions within each DGGS cell |
 | `list` | `list<T>` per band | All overlapping pixel values as a sorted list (collect mode) |
 | `histogram` | `struct<values: list<T>, counts: list<int64>>` per band | Histogram of overlapping pixel values |
@@ -258,6 +266,9 @@ raster2dggs h3 landcover.tif output/ -r 8 --overlay mode
 
 # Mass-conserving sum (population counts)
 raster2dggs h3 popcount.tif output/ -r 8 --overlay mass-preserve
+
+# Density integration (W/m² → total W per DGGS cell)
+raster2dggs h3 power_density.tif output/ -r 8 --overlay density-preserve
 
 # Per-class area fractions
 raster2dggs h3 landcover.tif output/ -r 8 --overlay fractions
@@ -288,9 +299,9 @@ By default (`-vct 0.0`) any cell with at least one valid pixel in its overlap ar
 raster2dggs h3 input.tif output/ -r 8 --overlay mode -vct 0.5
 ```
 
-The threshold is applied **per band**: a cell may receive a valid value for one band and be nulled for another if that band has sparser nodata. Nulled values are then handled by `--nodata_policy` — the default `omit` drops rows where any band is null; `emit` keeps them as NaN (or `--emit_nodata_value` if set).
+The threshold is applied **per band**: a cell may receive a valid value for one band and be nulled for another if that band has sparser nodata. Nulled values are then handled by `--nodata` — the default `omit` drops rows where any band is null; `emit` keeps them as NaN (or `--nodata-fill` if set).
 
-This option has no effect for `--overlay mass-preserve`. Partial sums produced by `mass-preserve` are correct values representing the fraction of mass within the cell–raster intersection; filtering them out would break the mass-conservation guarantee.
+This option has no effect for `--overlay mass-preserve`. Partial sums produced by `mass-preserve` are correct values representing the fraction of mass within the cell–raster intersection; filtering them out would break the mass-conservation guarantee. `--overlay density-preserve` respects the threshold normally — a cell with insufficient valid coverage will be nulled.
 
 ### Windowed resampling — `--sample`
 
@@ -665,7 +676,7 @@ raster2dggs h3 --resolution 8 --overlay mass-preserve popcount.tif ./output
 
 Emit nodata cells rather than omitting them, replacing the nodata value with −1:
 ```bash
-raster2dggs h3 --resolution 9 --nodata_policy emit --emit_nodata_value -1 input.tif ./output
+raster2dggs h3 --resolution 9 --nodata emit --nodata-fill -1 input.tif ./output
 ```
 
 ## Citation

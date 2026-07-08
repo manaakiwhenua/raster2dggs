@@ -242,26 +242,28 @@ def make_command(spec: DGGS_Spec):
         help="Band(s) to include in the output. Can specify multiple, e.g. `-b 1 -b 2 -b 4` for bands 1, 2, and 4 (all unspecified bands are ignored). If unused, all bands are included in the output (this is the default behaviour). Bands can be specified as numeric indices (1-based indexing) or string band labels (if present in the input), e.g. -b B02 -b B07 -b B12.",
     )
     @click.option(
-        "--nodata_policy",
+        "-n",
+        "--nodata",
+        "nodata_policy",
         type=click.Choice(const.NODATA_POLICY_OPTIONS, case_sensitive=False),
         default=const.DEFAULTS["nodata_policy"],
         show_default=True,
         help=(
             "'omit' excludes nodata cells from output (default). "
-            "'emit' includes them, writing the source raster nodata value (or --emit_nodata_value if set). "
+            "'emit' includes them, writing the source raster nodata value (or --nodata-fill if set). "
             "Note: non-NaN emitted values participate in cell aggregation (see -a/--agg); "
-            "if this is undesired, ensure your source nodata is NaN or override with --emit_nodata_value."
+            "if this is undesired, ensure your source nodata is NaN or override with --nodata-fill."
         ),
     )
     @click.option(
-        "--emit_nodata_value",
+        "--nodata-fill",
+        "emit_nodata_value",
         default=None,
         type=float,
         metavar="NUMBER",
         help=(
-            "Override the value written for nodata cells when --nodata_policy=emit. "
+            "Override the value written for nodata cells when --nodata=emit. "
             "If omitted, the source raster nodata value is used (NaN if none is defined). "
-            "Pass 'nan' to explicitly emit NaN. "
             "Coerced to the output dtype. "
             "Note: non-NaN values participate in cell aggregation (see -a/--agg)."
         ),
@@ -280,6 +282,57 @@ def make_command(spec: DGGS_Spec):
         help="Number of threads to use when running in parallel. The default is determined dynamically as the total number of available cores, minus one.",
     )
     @click.option(
+        "--point",
+        is_flag=False,
+        flag_value="value",
+        default=None,
+        type=click.Choice(
+            [
+                const.OutputSchema.VALUE.value,
+                const.OutputSchema.LIST.value,
+                const.OutputSchema.HISTOGRAM.value,
+            ]
+        ),
+        metavar="OUTPUT",
+        help=(
+            "[Mutually exclusive with --overlay and --sample] "
+            "Assign each pixel to the DGGS cell containing its centre (default). "
+            "OUTPUT: 'value' (scalar per cell, default), "
+            "'list' (sorted list of all contributing pixel values), "
+            "'histogram' (value-count struct)."
+        ),
+    )
+    @click.option(
+        "--overlay",
+        type=click.Choice([m.value for m in const.OverlayMode]),
+        default=None,
+        metavar="METHOD",
+        help=(
+            "[Mutually exclusive with --point and --sample] "
+            "Area-based polygon intersection. METHOD: "
+            "'weighted' (area-weighted mean), "
+            "'mode' (majority class by overlap area), "
+            "'mass-preserve' (area-weighted sum; conserves total — use when pixel value is a total count/mass), "
+            "'density-preserve' (integrates density × pixel area; use when pixel value is a per-area rate), "
+            "'fractions' (per-class area fractions → struct), "
+            "'list' (all overlapping pixel values as a sorted list), "
+            "'histogram' (value-count histogram of overlapping pixels)."
+        ),
+    )
+    @click.option(
+        "--sample",
+        is_flag=False,
+        flag_value="nn",
+        default=None,
+        type=click.Choice([i.value for i in const.Interp]),
+        metavar="INTERP",
+        help=(
+            "[Mutually exclusive with --point and --overlay] "
+            "Sample the raster at each DGGS cell centre. "
+            "INTERP: 'nn' (nearest-neighbour, default), 'bilinear', 'bicubic', 'lanczos'."
+        ),
+    )
+    @click.option(
         "-a",
         "--agg",
         default=const.DEFAULTS["aggfunc"],
@@ -293,43 +346,6 @@ def make_command(spec: DGGS_Spec):
         ),
     )
     @click.option(
-        "--point",
-        is_flag=False, flag_value="value", default=None,
-        type=click.Choice(["value", "list", "histogram"]),
-        metavar="OUTPUT",
-        help=(
-            "Assign each pixel to the DGGS cell containing its centre (default). "
-            "OUTPUT: 'value' (scalar per cell, default), "
-            "'list' (sorted list of all contributing pixel values), "
-            "'histogram' (value-count struct)."
-        ),
-    )
-    @click.option(
-        "--overlay",
-        type=click.Choice(["weighted", "mode", "mass-preserve", "fractions", "list", "histogram"]),
-        default=None,
-        metavar="METHOD",
-        help=(
-            "Area-based polygon intersection. METHOD: "
-            "'weighted' (area-weighted mean), "
-            "'mode' (majority class by overlap area), "
-            "'mass-preserve' (area-weighted sum; conserves total), "
-            "'fractions' (per-class area fractions → struct), "
-            "'list' (all overlapping pixel values as a sorted list), "
-            "'histogram' (value-count histogram of overlapping pixels)."
-        ),
-    )
-    @click.option(
-        "--sample",
-        is_flag=False, flag_value="nn", default=None,
-        type=click.Choice([i.value for i in const.Interp]),
-        metavar="INTERP",
-        help=(
-            "Sample the raster at each DGGS cell centre. "
-            "INTERP: 'nn' (nearest-neighbour, default), 'bilinear', 'bicubic', 'lanczos'."
-        ),
-    )
-    @click.option(
         "-vct",
         "--valid-coverage-threshold",
         "valid_coverage_threshold",
@@ -340,7 +356,7 @@ def make_command(spec: DGGS_Spec):
             "Minimum fraction of each DGGS cell's overlapping raster area that must contain "
             "valid (non-nodata) pixels for the cell to receive a value. Applied per band. "
             "0.0 (default) keeps all cells with any valid data. "
-            "Only meaningful for --overlay; ignored for --overlay --mass-preserve "
+            "Only meaningful for --overlay; ignored for --overlay mass-preserve "
             "(partial sums are correct values — filtering them would break mass conservation)."
         ),
     )
@@ -411,7 +427,9 @@ def make_command(spec: DGGS_Spec):
         agg_from_cli = (
             ctx.get_parameter_source("agg") == click.core.ParameterSource.COMMANDLINE
         )
-        if (point in ("list", "histogram") or overlay in ("list", "histogram")) and agg_from_cli:
+        if (
+            point in ("list", "histogram") or overlay in ("list", "histogram")
+        ) and agg_from_cli:
             effective = point or overlay
             common.LOGGER.warning(
                 f"--point {effective}: --agg has no effect (all contributing values are collected)"
@@ -422,8 +440,8 @@ def make_command(spec: DGGS_Spec):
             )
         if emit_nodata_value is not None and nodata_policy == "omit":
             common.LOGGER.warning(
-                "--emit_nodata_value has no effect when --nodata_policy=omit (the default). "
-                "Add --nodata_policy emit to write the specified value for nodata cells."
+                "--nodata-fill has no effect when --nodata=omit (the default). "
+                "Add --nodata emit to write the specified value for nodata cells."
             )
         return run_index(
             spec.name,

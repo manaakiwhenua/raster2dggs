@@ -26,19 +26,23 @@ import geopandas as gpd
 import numpy as np
 import pandas as pd
 import pyarrow as pa
+import pyproj
 import rasterio as rio
 from rasterio.warp import transform_bounds, transform as warp_transform
 from shapely.geometry import Polygon, shape
 
 import raster2dggs.constants as const
+from raster2dggs.constants import Op, OutputSchema
 from raster2dggs.interfaces import IRasterIndexer
 
 LOGGER = logging.getLogger(__name__)
 
-_FRAC_STRUCT_TYPE = pa.struct([
-    pa.field("classes", pa.list_(pa.int64())),
-    pa.field("fractions", pa.list_(pa.float64())),
-])
+_FRAC_STRUCT_TYPE = pa.struct(
+    [
+        pa.field("classes", pa.list_(pa.int64())),
+        pa.field("fractions", pa.list_(pa.float64())),
+    ]
+)
 
 
 def _frac_pairs(frac_arr, unique_arr, scale=1.0, decimals=None):
@@ -77,8 +81,12 @@ def _pa_elem_type(numpy_dtype_str: str, decimals) -> pa.DataType:
 
 
 def _build_collect_table(
-    result_df: pd.DataFrame, band_cols: list, src_dtypes: tuple,
-    selected_indices: tuple, out: str, decimals,
+    result_df: pd.DataFrame,
+    band_cols: list,
+    src_dtypes: tuple,
+    selected_indices: tuple,
+    out: str,
+    decimals,
 ) -> pa.Table:
     """Build a PyArrow Table for --overlay --list or --overlay --histogram output."""
     arrays = {}
@@ -87,13 +95,15 @@ def _build_collect_table(
             arrays[col] = pa.array(result_df[col].tolist())
     for idx, col in zip(selected_indices, band_cols):
         elem_type = _pa_elem_type(src_dtypes[idx - 1], decimals)
-        if out == "list":
+        if out == OutputSchema.LIST:
             arrays[col] = pa.array(result_df[col].tolist(), type=pa.list_(elem_type))
         else:
-            hist_type = pa.struct([
-                pa.field("values", pa.list_(elem_type)),
-                pa.field("counts", pa.list_(pa.int64())),
-            ])
+            hist_type = pa.struct(
+                [
+                    pa.field("values", pa.list_(elem_type)),
+                    pa.field("counts", pa.list_(pa.int64())),
+                ]
+            )
             arrays[col] = pa.array(result_df[col].tolist(), type=hist_type)
     return pa.table(arrays)
 
@@ -140,8 +150,8 @@ class _OverlayIndexer:
     nodata_policy: str
     emit_nodata_value: Optional[Any]
     write_result: Callable
-    op: str  # 'mean', 'majority', 'sum', 'frac', or 'values'
-    out: str = "value"  # 'value', 'fractions', 'list', or 'histogram'
+    op: Op
+    out: OutputSchema = OutputSchema.VALUE
     min_valid_coverage: float = 0.0
     decimals: Optional[int] = None
 
@@ -149,20 +159,67 @@ class _OverlayIndexer:
         # mass_preserve (sum) must not filter by coverage — partial sums are correct
         # values representing partial mass, not missing data. Filtering would break
         # the conservation property the transfer is designed to enforce.
-        self._apply_coverage_threshold = self.min_valid_coverage > 0.0 and self.op != "sum"
-        if self.min_valid_coverage > 0.0 and self.op == "sum":
+        self._apply_coverage_threshold = (
+            self.min_valid_coverage > 0.0 and self.op != Op.SUM
+        )
+        if self.min_valid_coverage > 0.0 and self.op == Op.SUM:
             LOGGER.warning(
                 "--valid-coverage-threshold has no effect with --transfer mass_preserve "
                 "(partial sums are correct values; filtering them would break mass conservation)"
             )
 
+        self._geodesic_weights_path = None
         with rio.open(self.raster_input, sharing=False) as src:
             self._src_crs = src.crs
             self._src_transform = src.transform
             self._src_band_count = src.count
             self._src_dtypes = src.dtypes
 
-            if self._apply_coverage_threshold or self.op == "frac":
+            if (self.op == Op.MEAN and src.crs.is_geographic) or self.op == Op.WSUM:
+                # Pixel-area weights raster for exactextract weighted_mean / weighted_sum.
+                # For geographic CRS: geodesic area varies by row (latitude); use pyproj.
+                # For projected CRS (wsum only): pixel area is constant from the transform.
+                T = src.transform
+                if src.crs.is_geographic:
+                    geod = pyproj.CRS(src.crs.to_wkt()).get_geod()
+                    areas = np.empty((src.height, src.width), dtype=np.float64)
+                    lon_left, lon_right = T.c, T.c + T.a
+                    for r in range(src.height):
+                        lat_top = T.f + r * T.e
+                        lat_bot = T.f + (r + 1) * T.e
+                        area, _ = geod.polygon_area_perimeter(
+                            [lon_left, lon_right, lon_right, lon_left],
+                            [lat_top, lat_top, lat_bot, lat_bot],
+                        )
+                        areas[r, :] = abs(area)
+                else:
+                    areas = np.full(
+                        (src.height, src.width),
+                        abs(T.a * T.e),
+                        dtype=np.float64,
+                    )
+                wgt_profile = {
+                    "driver": "GTiff",
+                    "height": src.height,
+                    "width": src.width,
+                    "count": 1,
+                    "dtype": "float64",
+                    "crs": src.crs,
+                    "transform": src.transform,
+                    "nodata": None,
+                }
+                with tempfile.NamedTemporaryFile(suffix=".tif", delete=False) as tmp:
+                    self._geodesic_weights_path = tmp.name
+                with rio.open(self._geodesic_weights_path, "w", **wgt_profile) as dst:
+                    dst.write(areas[np.newaxis])
+                LOGGER.debug(
+                    "Pixel area weights computed for %s (%.0f–%.0f units²/pixel)",
+                    src.crs.to_string(),
+                    areas.min(),
+                    areas.max(),
+                )
+
+            if self._apply_coverage_threshold or self.op == Op.FRAC:
                 # Densified boundary polygon of the raster footprint in WGS84.
                 # Sampling n_edge points per edge (in pixel space) and reprojecting
                 # them all correctly captures curved boundaries for projected CRS
@@ -174,19 +231,25 @@ class _OverlayIndexer:
                 # they overlap almost no actual raster pixels.
                 n_edge = 100
                 h, w = src.height, src.width
-                perim_row = np.concatenate([
-                    np.full(n_edge, h),           # bottom: left → right
-                    np.linspace(h, 0, n_edge),    # right:  bottom → top
-                    np.zeros(n_edge),             # top:    right → left
-                    np.linspace(0, h, n_edge),    # left:   top → bottom
-                ])
-                perim_col = np.concatenate([
-                    np.linspace(0, w, n_edge),    # bottom
-                    np.full(n_edge, w),           # right
-                    np.linspace(w, 0, n_edge),    # top
-                    np.zeros(n_edge),             # left
-                ])
-                xs, ys = rio.transform.xy(src.transform, perim_row, perim_col, offset="ul")
+                perim_row = np.concatenate(
+                    [
+                        np.full(n_edge, h),  # bottom: left → right
+                        np.linspace(h, 0, n_edge),  # right:  bottom → top
+                        np.zeros(n_edge),  # top:    right → left
+                        np.linspace(0, h, n_edge),  # left:   top → bottom
+                    ]
+                )
+                perim_col = np.concatenate(
+                    [
+                        np.linspace(0, w, n_edge),  # bottom
+                        np.full(n_edge, w),  # right
+                        np.linspace(w, 0, n_edge),  # top
+                        np.zeros(n_edge),  # left
+                    ]
+                )
+                xs, ys = rio.transform.xy(
+                    src.transform, perim_row, perim_col, offset="ul"
+                )
                 lons, lats = warp_transform(src.crs, "EPSG:4326", list(xs), list(ys))
                 self._raster_footprint_wgs84 = Polygon(zip(lons, lats))
 
@@ -212,9 +275,19 @@ class _OverlayIndexer:
                 self._raster_footprint_wgs84 = None
                 self._coverage_mask_path = None
 
-        # exactextract names columns "{op}" for single-band rasters and
-        # "band_{i}_{op}" for multi-band rasters (1-based original band index).
-        if self._src_band_count == 1:
+        # exactextract column naming:
+        #   unweighted: "{op}" (single-band) or "band_{i}_{op}" (multi-band)
+        #   weighted:   "weighted_{op}" (single-band) or "band_{i}_weight_weighted_{op}" (multi-band)
+        if self._geodesic_weights_path is not None:
+            weighted_agg = "weighted_sum" if self.op == Op.WSUM else "weighted_mean"
+            if self._src_band_count == 1:
+                self._col_rename = {weighted_agg: self.selected_labels[0]}
+            else:
+                self._col_rename = {
+                    f"band_{idx}_weight_{weighted_agg}": label
+                    for idx, label in zip(self.selected_indices, self.selected_labels)
+                }
+        elif self._src_band_count == 1:
             self._col_rename = {self.op: self.selected_labels[0]}
         else:
             self._col_rename = {
@@ -223,11 +296,13 @@ class _OverlayIndexer:
             }
 
     def __del__(self):
-        if self._coverage_mask_path is not None:
-            try:
-                os.unlink(self._coverage_mask_path)
-            except OSError:
-                pass
+        for path_attr in ("_coverage_mask_path", "_geodesic_weights_path"):
+            path = getattr(self, path_attr, None)
+            if path is not None:
+                try:
+                    os.unlink(path)
+                except OSError:
+                    pass
 
     def process_window(self, window):
         """Compute overlay stats for all DGGS cells overlapping this raster window."""
@@ -258,24 +333,49 @@ class _OverlayIndexer:
         max_lat = min(90.0, max_lat + lat_pad)
 
         cells = list(
-            self.indexer.cells_in_bbox(min_lon, min_lat, max_lon, max_lat, self.resolution)
+            self.indexer.cells_in_bbox(
+                min_lon, min_lat, max_lon, max_lat, self.resolution
+            )
         )
         if not cells:
             return None
 
         polygons = [_fix_antimeridian(self.indexer.cell_to_polygon(c)) for c in cells]
         # WGS84 GDF for VCT shapely area computation (raster_fracs).
-        gdf_wgs84 = gpd.GeoDataFrame({"_cell_id": cells}, geometry=polygons, crs="EPSG:4326")
+        gdf_wgs84 = gpd.GeoDataFrame(
+            {"_cell_id": cells}, geometry=polygons, crs="EPSG:4326"
+        )
         # exactextract does not reliably reproject features to the raster CRS itself;
         # reproject explicitly so intersections are computed in the correct coordinate space.
         gdf = gdf_wgs84.to_crs(self._src_crs)
 
-        is_frac = (self.op == "frac")
-        is_collect = (self.op == "values")
-        main_ops = ["frac", "unique"] if is_frac else [self.op]
-        result_df = exact_extract(
-            self.raster_input, gdf, main_ops, include_cols="_cell_id", output="pandas"
-        )
+        is_frac = self.op == Op.FRAC
+        is_collect = self.op == Op.VALUES
+        is_geodesic = self._geodesic_weights_path is not None
+        weighted_agg = "weighted_sum" if self.op == Op.WSUM else "weighted_mean"
+        if is_frac:
+            main_ops = ["frac", "unique"]
+        elif is_geodesic:
+            main_ops = [weighted_agg]
+        else:
+            main_ops = [str(self.op)]
+        if is_geodesic:
+            result_df = exact_extract(
+                self.raster_input,
+                gdf,
+                main_ops,
+                weights=self._geodesic_weights_path,
+                include_cols="_cell_id",
+                output="pandas",
+            )
+        else:
+            result_df = exact_extract(
+                self.raster_input,
+                gdf,
+                main_ops,
+                include_cols="_cell_id",
+                output="pandas",
+            )
 
         valid_frac_by_band = {}
         if is_frac or self._apply_coverage_threshold:
@@ -286,14 +386,24 @@ class _OverlayIndexer:
             # sum to 1.0 regardless of how much of the cell is nodata or outside raster).
             # For threshold: used to null cells below min_valid_coverage.
             cov_df = exact_extract(
-                self._coverage_mask_path, gdf, ["mean"],
-                include_cols="_cell_id", output="pandas",
+                self._coverage_mask_path,
+                gdf,
+                ["mean"],
+                include_cols="_cell_id",
+                output="pandas",
             ).set_index("_cell_id")
 
             raster_fracs = pd.Series(
                 [
-                    min(1.0, poly.intersection(self._raster_footprint_wgs84).area / poly.area)
-                    if poly.area > 0 else 0.0
+                    (
+                        min(
+                            1.0,
+                            poly.intersection(self._raster_footprint_wgs84).area
+                            / poly.area,
+                        )
+                        if poly.area > 0
+                        else 0.0
+                    )
                     for poly in gdf_wgs84.geometry
                 ],
                 index=pd.Index(cells, name="_cell_id"),
@@ -303,11 +413,15 @@ class _OverlayIndexer:
             for idx in self.selected_indices:
                 if self._src_band_count == 1:
                     vf = cov_df["mean"] * raster_fracs
-                    main_col = self.op
+                    main_col = weighted_agg if is_geodesic else self.op
                     unique_col = "unique"
                 else:
                     vf = cov_df[f"band_{idx}_mean"] * raster_fracs
-                    main_col = f"band_{idx}_{self.op}"
+                    main_col = (
+                        f"band_{idx}_weight_{weighted_agg}"
+                        if is_geodesic
+                        else f"band_{idx}_{self.op}"
+                    )
                     unique_col = f"band_{idx}_unique"
                 valid_frac_by_band[idx] = vf
                 if self._apply_coverage_threshold:
@@ -329,27 +443,37 @@ class _OverlayIndexer:
             for idx, label in zip(self.selected_indices, self.selected_labels):
                 fc = "frac" if self._src_band_count == 1 else f"band_{idx}_frac"
                 uc = "unique" if self._src_band_count == 1 else f"band_{idx}_unique"
-                vf_values = valid_frac_by_band[idx].reindex(result_df["_cell_id"]).values
+                vf_values = (
+                    valid_frac_by_band[idx].reindex(result_df["_cell_id"]).values
+                )
                 result_df[label] = [
                     _frac_pairs(f, u, scale=s, decimals=self.decimals)
                     for f, u, s in zip(result_df[fc], result_df[uc], vf_values)
                 ]
             result_df = result_df[["_cell_id"] + band_cols]
 
-            nd_mask = result_df[band_cols].apply(
-                lambda col: col.map(lambda x: x is None or len(x["classes"]) == 0)
-            ).any(axis=1)
+            nd_mask = (
+                result_df[band_cols]
+                .apply(
+                    lambda col: col.map(lambda x: x is None or len(x["classes"]) == 0)
+                )
+                .any(axis=1)
+            )
         elif is_collect:
             for idx, label in zip(self.selected_indices, self.selected_labels):
                 vc = "values" if self._src_band_count == 1 else f"band_{idx}_values"
                 raw = result_df[vc]
-                if self.out == "list":
+                if self.out == OutputSchema.LIST:
                     result_df[label] = [
                         (
-                            sorted(round(v, self.decimals) for v in arr.tolist())
-                            if self.decimals is not None
-                            else sorted(arr.tolist())
-                        ) if arr is not None and len(arr) > 0 else None
+                            (
+                                sorted(round(v, self.decimals) for v in arr.tolist())
+                                if self.decimals is not None
+                                else sorted(arr.tolist())
+                            )
+                            if arr is not None and len(arr) > 0
+                            else None
+                        )
                         for arr in raw
                     ]
                 else:
@@ -358,11 +482,15 @@ class _OverlayIndexer:
                     ]
             result_df = result_df[["_cell_id"] + band_cols]
 
-            nd_mask = result_df[band_cols].apply(
-                lambda col: col.map(lambda x: x is None or len(x) == 0)
-            ).any(axis=1)
+            nd_mask = (
+                result_df[band_cols]
+                .apply(lambda col: col.map(lambda x: x is None or len(x) == 0))
+                .any(axis=1)
+            )
         else:
-            keep = ["_cell_id"] + [c for c in self._col_rename if c in result_df.columns]
+            keep = ["_cell_id"] + [
+                c for c in self._col_rename if c in result_df.columns
+            ]
             result_df = result_df[keep].rename(columns=self._col_rename)
 
             nd_mask = result_df[band_cols].isna().any(axis=1)
@@ -376,7 +504,9 @@ class _OverlayIndexer:
                     result_df.loc[nd_mask, col] = None
             else:
                 fill = (
-                    self.emit_nodata_value if self.emit_nodata_value is not None else np.nan
+                    self.emit_nodata_value
+                    if self.emit_nodata_value is not None
+                    else np.nan
                 )
                 for col in band_cols:
                     result_df.loc[nd_mask, col] = np.nan if pd.isna(fill) else fill
@@ -397,8 +527,12 @@ class _OverlayIndexer:
             table = _build_frac_table(result_df, band_cols)
         elif is_collect:
             table = _build_collect_table(
-                result_df, band_cols, self._src_dtypes,
-                self.selected_indices, self.out, self.decimals,
+                result_df,
+                band_cols,
+                self._src_dtypes,
+                self.selected_indices,
+                self.out,
+                self.decimals,
             )
         else:
             table = pa.Table.from_pandas(result_df, preserve_index=False)

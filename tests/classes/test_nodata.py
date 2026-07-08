@@ -57,7 +57,7 @@ class TestNodataPolicy(TestRunthrough):
         return read_output(TEST_OUTPUT_PATH).to_pandas()
 
     def test_omit_excludes_nodata_cells(self):
-        df = self._run("--nodata_policy", "omit")
+        df = self._run("--nodata", "omit")
         self.assertFalse(
             (df["band_1"] == NODATA_SENTINEL).any(),
             "omit policy should produce no nodata-sentinel values",
@@ -69,9 +69,9 @@ class TestNodataPolicy(TestRunthrough):
     def test_emit_with_explicit_value_lowers_cell_value(self):
         # All valid pixels have value 42. The nodata pixel is replaced with 0,
         # so any H3 cell containing it will have a mean < 42 (or exactly 0 if isolated).
-        df_omit = self._run("--nodata_policy", "omit")
+        df_omit = self._run("--nodata", "omit")
         omit_min = df_omit["band_1"].min()
-        df_emit = self._run("--nodata_policy", "emit", "--emit_nodata_value", "0")
+        df_emit = self._run("--nodata", "emit", "--nodata-fill", "0")
         self.assertLess(
             df_emit["band_1"].min(),
             omit_min,
@@ -79,8 +79,8 @@ class TestNodataPolicy(TestRunthrough):
         )
 
     def test_emit_without_explicit_value_includes_nodata_cells(self):
-        df_omit = self._run("--nodata_policy", "omit")
-        df_emit = self._run("--nodata_policy", "emit")
+        df_omit = self._run("--nodata", "omit")
+        df_emit = self._run("--nodata", "emit")
         self.assertGreaterEqual(
             len(df_emit),
             len(df_omit),
