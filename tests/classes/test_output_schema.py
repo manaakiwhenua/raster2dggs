@@ -449,7 +449,7 @@ def _set_band_name(path: str, band_name: str, band_index: int = 1) -> None:
     ds = gdal.Open(path, gdal.GA_Update)
     ds.GetRasterBand(band_index).SetDescription(band_name)
     ds.FlushCache()
-    ds = None
+    ds.Close()
 
 
 def _make_named_raster(path: str, band_name: str) -> None:
