@@ -190,6 +190,41 @@ def create_aggfuncs(
     return result
 
 
+def resolve_to_internal(
+    point: Optional[str],
+    overlay: Optional[str],
+    sample: Optional[str],
+) -> dict:
+    """Map CLI flags to the internal (transfer_key, op, out_key) triple."""
+    if overlay is not None:
+        return {
+            "weighted":      {"transfer": "overlay_weighted", "op": "mean",     "out": "value"},
+            "mode":          {"transfer": "overlay_mode",     "op": "majority", "out": "value"},
+            "mass-preserve": {"transfer": "mass_preserve",    "op": "sum",      "out": "value"},
+            "fractions":     {"transfer": "overlay_weighted", "op": "frac",     "out": "fractions"},
+            "list":          {"transfer": "overlay_collect",  "op": "values",   "out": "list"},
+            "histogram":     {"transfer": "overlay_collect",  "op": "values",   "out": "histogram"},
+        }[overlay]
+    if sample is not None:
+        return {"transfer": "sample", "op": None, "out": "value", "interp": sample}
+    # point (default)
+    out = point if point is not None else "value"
+    return {"transfer": "assign_centers", "op": None, "out": out}
+
+
+def validate_config(
+    point: Optional[str],
+    overlay: Optional[str],
+    sample: Optional[str],
+) -> None:
+    if overlay is not None and sample is not None:
+        raise click.UsageError("--overlay and --sample are mutually exclusive")
+    if point is not None and overlay is not None:
+        raise click.UsageError("--point and --overlay are mutually exclusive")
+    if point is not None and sample is not None:
+        raise click.UsageError("--point and --sample are mutually exclusive")
+
+
 def assemble_kwargs(
     compression: str,
     threads: int,
@@ -198,10 +233,9 @@ def assemble_kwargs(
     overwrite: bool,
     compact: bool,
     geo: str,
-    semantics: str = const.Semantics.POINT_CENTER_STRICT,
-    transfer: str = const.Transfer.ASSIGN_CENTERS,
-    interp: str = const.Interp.NN,
-    out: str = const.OutputSchema.VALUE,
+    point: Optional[str] = None,
+    overlay: Optional[str] = None,
+    sample: Optional[str] = None,
     valid_coverage_threshold: float = 0.0,
 ) -> dict:
     return {
@@ -212,10 +246,9 @@ def assemble_kwargs(
         "overwrite": overwrite,
         "compact": compact,
         "geo": geo if geo != "none" else None,
-        "semantics": semantics,
-        "transfer": transfer,
-        "interp": interp,
-        "out": out,
+        "point": point,
+        "overlay": overlay,
+        "sample": sample,
         "valid_coverage_threshold": valid_coverage_threshold,
     }
 
@@ -307,8 +340,8 @@ def _build_output_meta(
     interp: str,
 ) -> tuple[pd.DataFrame, str]:
     if (
-        transfer == const.Transfer.SAMPLE
-        or (transfer in const.OVERLAY_TRANSFERS and out != const.OutputSchema.FRACTIONS)
+        transfer == "sample"
+        or (transfer in const._OVERLAY_TRANSFER_KEYS and out not in ("fractions", "list", "histogram"))
         or (out == "value" and len(aggfuncs) == 1)
     ):
         out_meta = pd.DataFrame(
@@ -331,10 +364,10 @@ def _build_output_meta(
             }
         )
         _compacting = "/compacting" if compact else ""
-        if transfer == const.Transfer.SAMPLE:
+        if transfer == "sample":
             tqdm_label = f"Sampling ({interp}){_compacting}"
-        elif transfer in const.OVERLAY_TRANSFERS:
-            tqdm_label = f"Overlay ({transfer}){_compacting}"
+        elif transfer in const._OVERLAY_TRANSFER_KEYS:
+            tqdm_label = f"Overlay{_compacting}"
         else:
             tqdm_label = f"Aggregating{_compacting}"
     else:
@@ -369,7 +402,7 @@ def _build_write_schema(
         pa.field(index_col, pa.string()),
         pa.field(partition_col, pa.string()),
     ]
-    if out == const.OutputSchema.FRACTIONS:
+    if out == "fractions":
         frac_struct = pa.struct([
             pa.field("classes", pa.list_(pa.int64())),
             pa.field("fractions", pa.list_(pa.float64())),
@@ -509,7 +542,7 @@ def address_boundary_issues(
     source_dtypes = {c: ddf[c].dtype for c in band_cols}
 
     out = kwargs.get("out", "value")
-    transfer = kwargs.get("transfer", const.Transfer.ASSIGN_CENTERS)
+    transfer = kwargs.get("transfer", "assign_centers")
     decimals = kwargs.get("decimals")
     aggfuncs = kwargs.get("aggfuncs", [("mean", "mean")])
 
@@ -527,7 +560,7 @@ def address_boundary_issues(
     )
 
     with TqdmCallback(desc=tqdm_label):
-        if transfer == const.Transfer.SAMPLE or transfer in const.OVERLAY_TRANSFERS:
+        if transfer == "sample" or transfer in const._OVERLAY_TRANSFER_KEYS:
             mp_func = indexer.parent_groupby_nn
             mp_args = (resolution, parent_res, decimals)
         elif out == "list":
@@ -573,31 +606,6 @@ def address_boundary_issues(
     return output
 
 
-def validate_transfer_config(
-    semantics: str, transfer: str, interp: str, out: str
-) -> None:
-    if (semantics, transfer) in const.INAPPROPRIATE:
-        raise click.UsageError(
-            f"--transfer {transfer!r} is inappropriate for --semantics {semantics!r}. "
-            f"See the semantics × transfer matrix in the documentation."
-        )
-    if (semantics, transfer, interp) in const.INAPPROPRIATE_INTERP:
-        raise click.UsageError(
-            f"--transfer {transfer!r} --interp {interp!r} is inappropriate for "
-            f"--semantics {semantics!r}. "
-            f"See the semantics × transfer matrix in the documentation."
-        )
-    lookup = (
-        (semantics, transfer, interp, out)
-        if transfer == const.Transfer.SAMPLE
-        else (semantics, transfer, out)
-    )
-    if lookup not in const.IMPLEMENTED:
-        raise NotImplementedError(
-            f"--semantics {semantics!r} / --transfer {transfer!r}"
-            + (f" / --interp {interp!r}" if transfer == const.Transfer.SAMPLE else "")
-            + f" / --out {out!r} is a valid combination but is not yet implemented."
-        )
 
 
 def initial_index(
@@ -621,16 +629,21 @@ def initial_index(
     the output of this "stage 1" processing) to a secondary function
     that addresses issues at the boundaries of raster windows.
     """
-    validate_transfer_config(
-        kwargs["semantics"],
-        kwargs["transfer"],
-        kwargs.get("interp", const.Interp.NN),
-        kwargs["out"],
+    validate_config(
+        kwargs.get("point"),
+        kwargs.get("overlay"),
+        kwargs.get("sample"),
     )
+    internal = resolve_to_internal(
+        kwargs.get("point"),
+        kwargs.get("overlay"),
+        kwargs.get("sample"),
+    )
+    kwargs = {**kwargs, **internal}
 
     indexer = idxfactory.indexer_instance(dggs)
 
-    if kwargs["transfer"] in {const.Transfer.SAMPLE, *const.OVERLAY_TRANSFERS} and not indexer.SUPPORTS_CELL_ENUMERATION:
+    if kwargs["transfer"] in {"sample", *const._OVERLAY_TRANSFER_KEYS} and not indexer.SUPPORTS_CELL_ENUMERATION:
         raise click.UsageError(
             f"--transfer {kwargs['transfer']!r} requires spatial cell enumeration, "
             f"which is not supported by the {dggs!r} DGGS."
@@ -689,7 +702,7 @@ def initial_index(
                     src.crs, "EPSG:4326", always_xy=True
                 )
                 LOGGER.debug("Coordinate transformer: %s → EPSG:4326", src.crs)
-                if kwargs["transfer"] == const.Transfer.SAMPLE:
+                if kwargs["transfer"] == "sample":
                     inverse_transformer = pyproj.Transformer.from_crs(
                         "EPSG:4326", src.crs, always_xy=True
                     )
@@ -742,7 +755,7 @@ def initial_index(
                         compression=compression,
                     )
 
-                if kwargs["transfer"] == const.Transfer.SAMPLE:
+                if kwargs["transfer"] == "sample":
                     ctx = _SampleIndexer(
                         src=src,
                         da=da,
@@ -765,7 +778,7 @@ def initial_index(
                         stage1_func = ctx.process_lanczos
                     else:
                         stage1_func = ctx.process_nn
-                elif kwargs["transfer"] in const.OVERLAY_TRANSFERS:
+                elif kwargs["transfer"] in const._OVERLAY_TRANSFER_KEYS:
                     ctx = _OverlayIndexer(
                         raster_input=str(raster_input),
                         indexer=indexer,
@@ -776,7 +789,8 @@ def initial_index(
                         nodata_policy=nodata_policy,
                         emit_nodata_value=emit_nodata_value,
                         write_result=_write_result,
-                        op=const.OVERLAY_OP[kwargs["semantics"]],
+                        op=kwargs["op"],
+                        out=kwargs["out"],
                         min_valid_coverage=kwargs.get("valid_coverage_threshold", 0.0),
                         decimals=kwargs.get("decimals"),
                     )

@@ -27,12 +27,10 @@ Contributions (particularly for additional DGGSs), suggestions, bug reports and 
 
 - [Installation](#installation)
 - [Usage](#usage)
-- [Raster semantics and transfer operators](#raster-semantics-and-transfer-operators)
-  - [Semantics](#semantics---semantics)
-  - [Transfer operators](#transfer-operators---transfer)
-  - [Semantics × transfer compatibility](#semantics--transfer-compatibility)
-  - [Output schemas](#output-schemas---out)
-  - [Currently implemented combinations](#currently-implemented-combinations)
+- [Sampling strategies](#sampling-strategies)
+  - [Point sampling (default)](#point-sampling-default---point)
+  - [Overlay (area-based)](#overlay-area-based---overlay)
+  - [Windowed resampling](#windowed-resampling---sample)
 - [Visualising output](#visualising-output)
   - [DuckDB](#duckdb)
   - [GDAL](#gdal)
@@ -153,41 +151,40 @@ Options:
                                   cores, minus one.
   -a, --agg AGGFUNC[,AGGFUNC...]  Aggregation function(s) applied when
                                   multiple raster pixels map to the same DGGS
-                                  cell (only relevant for --transfer
-                                  assign_centers). Options: count, mean, sum,
-                                  prod, std, var, min, max, median, mode,
-                                  majority, nunique, range. Comma-separate
-                                  multiple names (e.g. min,max) to produce a
-                                  struct column per band.  [default: mean]
-  --semantics [point_center_strict|point_sample_field|cell_average|piecewise_constant|fraction_cover|count_total|density|event_indicator]
-                                  What a raster cell value means (determines
-                                  valid transfer operators).  [default:
-                                  point_center_strict]
-  --transfer [assign_centers|sample|overlay_weighted|overlay_mode|mass_preserve]
-                                  How values are mapped from raster pixels to
-                                  DGGS cells.  [default: assign_centers]
-  --interp [nn|bilinear|bicubic|lanczos]
-                                  Interpolation method used with --transfer
-                                  sample. Ignored for other transfer
-                                  operators.  [default: nn]
+                                  cell (only relevant for --point). Options:
+                                  count, mean, sum, prod, std, var, min, max,
+                                  median, mode, majority, nunique, range.
+                                  Comma-separate multiple names (e.g. min,max)
+                                  to produce a struct column per band.
+                                  [default: mean]
+  --point OUTPUT                  Assign each pixel to the DGGS cell
+                                  containing its centre (default). OUTPUT:
+                                  'value' (scalar per cell, default), 'list'
+                                  (sorted list of all contributing pixel
+                                  values), 'histogram' (value-count struct).
+  --overlay METHOD                Area-based polygon intersection. METHOD:
+                                  'weighted' (area-weighted mean), 'mode'
+                                  (majority class by overlap area), 'mass-
+                                  preserve' (area-weighted sum; conserves
+                                  total), 'fractions' (per-class area
+                                  fractions → struct), 'list' (all overlapping
+                                  pixel values as a sorted list), 'histogram'
+                                  (value-count histogram of overlapping
+                                  pixels).
+  --sample INTERP                 Sample the raster at each DGGS cell centre.
+                                  INTERP: 'nn' (nearest-neighbour, default),
+                                  'bilinear', 'bicubic', 'lanczos'.
   -vct, --valid-coverage-threshold FLOAT RANGE
                                   Minimum fraction of each DGGS cell's
                                   overlapping raster area that must contain
                                   valid (non-nodata) pixels for the cell to
                                   receive a value. Applied per band. 0.0
                                   (default) keeps all cells with any valid
-                                  data. Only meaningful for --transfer
-                                  overlay_weighted and overlay_mode; ignored
-                                  for mass_preserve (partial sums are correct
-                                  values — filtering them would break mass
-                                  conservation).  [default: 0.0]
-  --out [value|fractions|histogram|list]
-                                  Output schema: scalar value, class
-                                  fractions, histogram, or sorted sample list.
-                                  'list' collects all contributing pixel
-                                  values per cell in ascending order
-                                  (deterministic); use -d/--decimals to
-                                  control precision.  [default: value]
+                                  data. Only meaningful for --overlay; ignored
+                                  for --overlay mass-preserve (partial sums
+                                  are correct values — filtering them would
+                                  break mass conservation).  [default: 0.0;
+                                  0.0<=x<=1.0]
   -d, --decimals INTEGER|none     Decimal places to round output values. 0 =
                                   integer; negative values round to tens (-1),
                                   hundreds (-2), etc. Use 'none' to disable
@@ -208,94 +205,76 @@ Options:
   --help                          Show this message and exit.
 ```
 
-## Raster semantics and transfer operators
+## Sampling strategies
 
-The conversion from raster to DGGS is not a single operation — it depends on what a raster cell value *means* and how you want values *mapped* to DGGS cells. Three flags control this:
+Three mutually exclusive modes control how pixel values are mapped to DGGS cells:
 
-- `--semantics` — what a raster cell value represents
-- `--transfer` — the method used to map values from pixels to DGGS cells
-- `--out` — the output schema (scalar value, class fractions, histogram, or sorted list)
-- `-a`/`--agg` — aggregation function(s) applied when multiple pixels map to the same DGGS cell; comma-separate multiple names (e.g. `--agg min,max`) to produce a struct column per band (`band_1: struct<min: T, max: T>`) instead of a scalar
+- `--point` (default) — index each pixel centre to a DGGS cell
+- `--overlay METHOD` — compute area-weighted intersections between pixels and DGGS cells
+- `--sample` — sample the raster at each DGGS cell centre
 
-The defaults (`--semantics point_center_strict --transfer assign_centers --out value`) reflect the historical behaviour of the tool: each pixel centre is indexed to a DGGS cell, and multiple pixels mapping to the same cell are aggregated with the function specified by `--agg`. This produces sparse output (gaps) when the DGGS resolution is finer than the raster.
+### Point sampling (default) — `--point`
 
-Support for additional semantics × transfer combinations is being added incrementally. Combinations that are not yet implemented will raise a clear error rather than silently producing incorrect output.
+Each raster pixel centre is indexed to its containing DGGS cell. When multiple pixels fall in the same cell, `-a`/`--agg` determines how they are combined (default: `mean`). Produces sparse output (gaps) when the DGGS resolution is finer than the raster.
 
-### Semantics (`--semantics`)
-
-| Value | Meaning | Examples |
-|---|---|---|
-| `point_center_strict` | Value applies **only** at the pixel centre; no implied value elsewhere | Observation grids, sensor samples on a lattice |
-| `point_sample_field` | Sample of a continuous field (reconstructable by interpolation) | DEMs (often), modelled temperature/pressure surfaces |
-| `cell_average` | Value is the **average over the pixel area** (block support) | Climate "mean over grid cell", averaged concentration grids |
-| `piecewise_constant` | Uniform value across the pixel area ("pixel-as-polygon") | Land cover class, soil class, zone IDs, masks |
-| `fraction_cover` | Value is a proportion of a class or material within the pixel | % tree cover, % impervious surface, fractional water/snow |
-| `count_total` | Value is a total within the pixel (extensive; must conserve sums) | Population count per cell, emissions totals, incident counts |
-| `density` | Per-area intensity (intensive quantity) | People/km², biomass density, W/m², rainfall rate |
-| `event_indicator` | Presence/absence or event count binned to cells | Fire detected (0/1), lightning presence, event counts |
-
-### Transfer operators (`--transfer`)
-
-| Value | Description |
-|---|---|
-| `assign_centers` | For each raster pixel, index its **centre coordinate** to a DGGS cell. Produces sparse output (gaps) when the DGGS resolution is finer than the raster. |
-| `sample` | For each DGGS cell, sample the raster at the **DGGS cell centre**. Use `--interp` to choose the method (default: `nn`). |
-| `overlay_weighted` | For each DGGS cell, compute overlap-weighted outputs (means, fractions, histograms). Requires an area model. |
-| `overlay_mode` | For each DGGS cell, assign the class with the greatest overlap area. Use `--valid-coverage-threshold` (`-vct`) to discard cells with insufficient valid-data coverage. |
-| `mass_preserve` | Redistribute each raster cell total into DGGS cells proportional to overlap area. Conserves sums. |
-
-### Semantics × transfer compatibility
-
-Legend: **✓** appropriate/common · **△** possible (with caveats) · **✗** inappropriate (breaks semantics)
-
-| `--semantics` | `assign_centers` | `sample` (nn) | `sample` (bilinear+) | `overlay_weighted` | `overlay_mode` | `mass_preserve` | Typical `--out` / `--agg` |
-|---|:---:|:---:|:---:|:---:|:---:|:---:|---|
-| `point_center_strict` | **✓** | ✗ | ✗ | ✗ | ✗ | ✗ | `value` with `--agg mean\|min\|max\|…`; `--agg min,max` for struct; `--out list\|histogram` |
-| `point_sample_field` | △ | **✓** | **✓** | △ | ✗ | ✗ | `value` |
-| `cell_average` | ✗ | △ | ✗ | **✓** | ✗ | ✗ | `value --agg mean` |
-| `piecewise_constant` | ✗ | **✓** | ✗ | **✓** | **✓** | ✗ | `value --agg mode` or `fractions` |
-| `fraction_cover` | ✗ | ✗ | ✗ | **✓** | ✗ | ✗ | `value --agg mean` |
-| `count_total` | ✗ | ✗ | ✗ | △ | ✗ | **✓** | `value --agg sum` |
-| `density` | ✗ | △ | △ | **✓** | ✗ | △ | `value --agg mean` |
-| `event_indicator` | △ | △ | ✗ | △ | △ | **✓** | Presence: `fractions`; Counts: `value --agg sum` |
-
-### Output schemas (`--out`)
-
-| Value | Schema | Description |
-|---|---|---|
-| `value` | Scalar `T`, or `struct<name: T, …>` with multi-`--agg` | One value per DGGS cell per band (default). Pass a single `--agg` for a scalar; pass comma-separated names (e.g. `--agg min,max`) for a struct. |
-| `fractions` | *(not yet implemented)* | Area fractions per class per DGGS cell, for categorical rasters. piecewise_constant|
-| `histogram` | `struct<values: list<T>, counts: list<int64>>` | Value-count pairs for all contributing pixels, in ascending value order. |
-| `list` | `list<T>` | All contributing pixel values in ascending order (deterministic). Useful for `point_center_strict` coarsening workflows. `--agg` has no effect. |
-
-### Currently implemented combinations
-
-| `--semantics` | `--transfer` | `--out` | Notes |
-|---|---|---|---|
-| `point_center_strict` | `assign_centers` | `value` | Single `--agg` → scalar; multiple `--agg` (e.g. `min,max`) → struct per band. |
-| `point_center_strict` | `assign_centers` | `list` | Sorted list of all contributing pixel values per cell. `--agg` is ignored. |
-| `point_center_strict` | `assign_centers` | `histogram` | Value-count struct per cell. `--agg` is ignored. |
-| `event_indicator` | `assign_centers` | `value` | Index each event pixel to its DGGS cell. Use `--agg sum` for total event count per cell, `--agg mean` for event rate, or `--agg mode` for majority presence/absence. |
-| `event_indicator` | `assign_centers` | `list` | Sorted list of all event values (0/1 or counts) contributing to each cell. `--agg` is ignored. |
-| `event_indicator` | `assign_centers` | `histogram` | Value-count struct per cell — useful for summarising the distribution of event counts. `--agg` is ignored. |
-| `point_sample_field` | `sample` (`--interp nn\|bilinear\|bicubic\|lanczos`) | `value` | Point sample at each DGGS cell centre. `--interp` selects the method: `nn` (nearest-neighbour), `bilinear` (2×2 stencil), `bicubic` (Keys, 4×4), `lanczos` (Lanczos-3, 6×6). `--agg` is ignored. Supports `--compact`. |
-| `density` | `sample` (`--interp nn\|bilinear\|bicubic\|lanczos`) | `value` | Point sample of a per-area intensity raster (e.g. population density, rainfall rate) at each DGGS cell centre. Same interp options as `point_sample_field`. `--agg` is ignored. Supports `--compact`. |
-| `piecewise_constant` | `sample` (`--interp nn` only) | `value` | Nearest-neighbour sample at each DGGS cell centre. Suitable for categorical rasters (landcover, zone IDs, soil class). Smooth interpolation options are rejected as meaningless for categorical data. `--agg` is ignored. Supports `--compact`. |
-| `event_indicator` | `sample` (`--interp nn` only) | `value` | Nearest-neighbour sample at each DGGS cell centre. Answers "did the event occur at this cell centre?" for presence/absence or occurrence-count rasters (fire scars, flood inundation, species detections). Smooth interpolation is rejected (fractional values are not event indicators). `--agg` is ignored. Supports `--compact`. |
-| `cell_average` | `overlay_weighted` | `value` | Area-weighted mean of all raster pixels overlapping each DGGS cell (coverage-weighted by pixel–cell intersection area). Correct for intensive quantities (temperature, concentration, elevation). `--agg` is ignored. |
-| `density` | `overlay_weighted` | `value` | Area-weighted mean of a per-area intensity raster (population density, rainfall rate, etc.) across each DGGS cell. Appropriate when the raster already encodes a density. `--agg` is ignored. |
-| `piecewise_constant` | `overlay_mode` | `value` | Assigns each DGGS cell the raster class with the greatest total overlap area (coverage-weighted majority). Correct for categorical rasters (land cover, soil type, zone IDs). `--agg` is ignored. |
-| `event_indicator` | `overlay_mode` | `value` | Assigns each DGGS cell the event value with the greatest overlap area. Useful when event presence/absence is recorded as a raster and area dominance is the desired summary. `--agg` is ignored. |
-| `count_total` | `mass_preserve` | `value` | Redistributes each raster pixel's total count into overlapping DGGS cells proportional to intersection area (coverage-weighted sum). Conserves the raster's total count. `--agg` is ignored. |
-
-All other valid combinations will raise a `NotImplementedError` with a descriptive message until they are added.
-
-#### Performance note for overlay transfers
-
-Overlay transfers (`overlay_weighted`, `overlay_mode`, `mass_preserve`) use [exactextract](https://github.com/isciences/exactextract) to compute pixel–cell area intersections. For each raster window, exactextract reads only the raster blocks needed to cover that window's DGGS cells. If the raster fits in memory, increasing GDAL's block cache allows blocks read for early windows to remain cached for later ones, reducing redundant I/O:
+**Output modes** (pass as `--point OUTPUT`):
+- *(no arg / `--point value`)* — scalar per cell per band; use `--agg min,max` etc. for multi-agg struct output
+- `--point list` — sorted list of all contributing pixel values: `list<T>` per band. `--agg` is ignored.
+- `--point histogram` — value-count histogram: `struct<values: list<T>, counts: list<int64>>` per band. `--agg` is ignored.
 
 ```bash
-GDAL_CACHEMAX=512 raster2dggs h3 input.tif output/ -r 8 --semantics cell_average --transfer overlay_weighted
+# Default: mean of all contributing pixels
+raster2dggs h3 input.tif output/ -r 9
+
+# Min and max in a single pass
+raster2dggs h3 input.tif output/ -r 9 --agg min,max
+
+# Sorted list of all pixel values per cell
+raster2dggs h3 input.tif output/ -r 7 --point list -d 2
+
+# Histogram of pixel values per cell
+raster2dggs h3 input.tif output/ -r 7 --point histogram -d 0
+```
+
+### Overlay (area-based) — `--overlay METHOD`
+
+Uses [exactextract](https://github.com/isciences/exactextract) to compute exact pixel–cell intersection areas. `METHOD` is required:
+
+| `--overlay METHOD` | Output schema | Use for |
+|---|---|---|
+| `weighted` | Scalar `T` per band | Intensive quantities: temperature, elevation, concentration, density, continuous fields |
+| `mode` | Scalar `T` per band | Categorical rasters: land cover, soil type, zone IDs, masks |
+| `mass-preserve` | Scalar `T` per band | Extensive quantities: population count, emissions, totals that must be conserved |
+| `fractions` | `struct<classes: list<int64>, fractions: list<float64>>` per band | Class area fractions within each DGGS cell |
+| `list` | `list<T>` per band | All overlapping pixel values as a sorted list (collect mode) |
+| `histogram` | `struct<values: list<T>, counts: list<int64>>` per band | Histogram of overlapping pixel values |
+
+```bash
+# Area-weighted mean (intensive quantities)
+raster2dggs h3 input.tif output/ -r 8 --overlay weighted
+
+# Majority-class (categorical rasters)
+raster2dggs h3 landcover.tif output/ -r 8 --overlay mode
+
+# Mass-conserving sum (population counts)
+raster2dggs h3 popcount.tif output/ -r 8 --overlay mass-preserve
+
+# Per-class area fractions
+raster2dggs h3 landcover.tif output/ -r 8 --overlay fractions
+
+# Collect all overlapping pixel values as a list
+raster2dggs h3 input.tif output/ -r 8 --overlay list
+
+# Histogram of all overlapping pixel values
+raster2dggs h3 input.tif output/ -r 8 --overlay histogram
+```
+
+#### Performance note
+
+`--overlay` uses exactextract to compute pixel–cell area intersections. For each raster window, exactextract reads only the raster blocks needed to cover that window's DGGS cells. If the raster fits in memory, increasing GDAL's block cache allows blocks read for early windows to remain cached for later ones, reducing redundant I/O:
+
+```bash
+GDAL_CACHEMAX=512 raster2dggs h3 input.tif output/ -r 8 --overlay weighted
 ```
 
 The value is in megabytes. The default is 64 MB. For large rasters or high DGGS resolutions where each window covers many cells, a larger cache can significantly reduce processing time.
@@ -306,14 +285,36 @@ By default (`-vct 0.0`) any cell with at least one valid pixel in its overlap ar
 
 ```bash
 # Discard cells where fewer than 50% of overlapping pixels are valid
-raster2dggs h3 input.tif output/ -r 8 \
-    --semantics piecewise_constant --transfer overlay_mode \
-    -vct 0.5
+raster2dggs h3 input.tif output/ -r 8 --overlay mode -vct 0.5
 ```
 
 The threshold is applied **per band**: a cell may receive a valid value for one band and be nulled for another if that band has sparser nodata. Nulled values are then handled by `--nodata_policy` — the default `omit` drops rows where any band is null; `emit` keeps them as NaN (or `--emit_nodata_value` if set).
 
-This option has no effect for `--transfer mass_preserve`. Partial sums produced by `mass_preserve` are correct values representing the fraction of mass within the cell–raster intersection; filtering them out would break the mass-conservation guarantee.
+This option has no effect for `--overlay mass-preserve`. Partial sums produced by `mass-preserve` are correct values representing the fraction of mass within the cell–raster intersection; filtering them out would break the mass-conservation guarantee.
+
+### Windowed resampling — `--sample`
+
+For each DGGS cell, samples the raster at the cell centre using windowed I/O. Pass the resampling kernel as `--sample INTERP` (default: `nn`):
+
+| `INTERP` | Description |
+|---|---|
+| `nn` (default) | Nearest-neighbour — suitable for categorical rasters |
+| `bilinear` | Bilinear (2×2 stencil) — smooth continuous fields |
+| `bicubic` | Bicubic/Keys (4×4 stencil) — higher-quality smooth fields |
+| `lanczos` | Lanczos-3 (6×6 stencil) — highest quality, slowest |
+
+```bash
+# NN sample (default — works for both continuous and categorical)
+raster2dggs h3 input.tif output/ -r 9 --sample
+
+# Bilinear sample for a smooth continuous field (DEM, temperature)
+raster2dggs h3 dem.tif output/ -r 9 --sample bilinear
+
+# NN sample for a categorical raster (landcover)
+raster2dggs h3 landcover.tif output/ -r 9 --sample -d 0
+```
+
+`--agg` is ignored for `--sample`. Supports `--compact`.
 
 ## Visualising output
 
@@ -363,7 +364,7 @@ D SELECT * FROM read_parquet('se_island.pq') LIMIT 7;
 └────────┴────────┴────────┴────────────────────────────────────────────────────────────────────────────────┴─────────────┴─────────┘
 ```
 
-Output value columns may also be arrays (`double[]` or `int64[]`) or structs, not just scalar values, depending on the options you pass to the tool (e.g. `--agg min,max` (multiple aggregations) or `--out list|histogram`) and the relative size of the DGGS cells and raster cells.
+Output value columns may also be arrays (`double[]` or `int64[]`) or structs, not just scalar values, depending on the options you pass to the tool (e.g. `--agg min,max` (multiple aggregations) or `--point list`/`--point histogram`) and the relative size of the DGGS cells and raster cells.
 
 In the case of struct outputs, it should be noted that there's no real consequence of using a struct (i.e. `band_1.min`, `band_1.max`) over a series of flat columns (i.e. `band_1_min`, `band_1_max`), since Parquet uses Dremel shredding for nested types: a `struct(min double, max double)` column is physically stored as two separate column chunks (`band_1.min`, `band_1.max`) with definition/repetition level metadata. So the on-disk layout is identical to flat columns. Consequences:
 
@@ -373,7 +374,7 @@ In the case of struct outputs, it should be noted that there's no real consequen
 
 Examples:
 
-`--out list -d 1`:
+`--point list -d 1`:
 
 ```bash
 D SELECT band_1 FROM read_parquet('./tests/data/output/larger-than-pixel/temp_mean_wgs84-poly.geoparquet') LIMIT 7;
@@ -391,7 +392,7 @@ D SELECT band_1 FROM read_parquet('./tests/data/output/larger-than-pixel/temp_me
 └────────────────────────────────────────────┘
 ```
 
-`--out histogram -d 0`:
+`--point histogram -d 0`:
 
 ```bash
 D SELECT band_1 FROM read_parquet('./tests/data/output/larger-than-pixel/temp_mean_wgs84-poly.geoparquet') LIMIT 7;
@@ -409,7 +410,7 @@ D SELECT band_1 FROM read_parquet('./tests/data/output/larger-than-pixel/temp_me
 └────────────────────────────────────────────┘
 ```
 
-`--out value --agg min,max,majority,mode -d 0`:
+`--agg min,max,majority,mode -d 0`:
 
 ```bash
 D SELECT band_1 FROM read_parquet('./tests/data/output/larger-than-pixel/temp_mean_wgs84-poly.geoparquet') LIMIT 7;
@@ -624,27 +625,42 @@ raster2dggs h3 --resolution 9 --agg min,max,mean -d 1 input.tif ./output
 
 Collect all contributing pixel values per cell as a sorted list:
 ```bash
-raster2dggs h3 --resolution 7 --out list -d 2 input.tif ./output
+raster2dggs h3 --resolution 7 --point list -d 2 input.tif ./output
 ```
 
 Histogram of contributing pixel values per cell:
 ```bash
-raster2dggs h3 --resolution 7 --out histogram -d 0 input.tif ./output
+raster2dggs h3 --resolution 7 --point histogram -d 0 input.tif ./output
 ```
 
 Nearest-neighbour sampling for a continuous field (e.g. DEM, temperature grid):
 ```bash
-raster2dggs h3 --resolution 9 --semantics point_sample_field --transfer sample input.tif ./output
+raster2dggs h3 --resolution 9 --sample input.tif ./output
 ```
 
 Bilinear sampling for a continuous field:
 ```bash
-raster2dggs h3 --resolution 9 --semantics point_sample_field --transfer sample --interp bilinear input.tif ./output
+raster2dggs h3 --resolution 9 --sample bilinear input.tif ./output
 ```
 
 Nearest-neighbour sampling for a categorical raster (e.g. landcover):
 ```bash
-raster2dggs h3 --resolution 9 --semantics piecewise_constant --transfer sample -d 0 landcover.tif ./output
+raster2dggs h3 --resolution 9 --sample -d 0 landcover.tif ./output
+```
+
+Area-weighted mean for a continuous raster:
+```bash
+raster2dggs h3 --resolution 8 --overlay weighted input.tif ./output
+```
+
+Majority-class for a categorical raster:
+```bash
+raster2dggs h3 --resolution 8 --overlay mode landcover.tif ./output
+```
+
+Mass-conserving sum for population counts:
+```bash
+raster2dggs h3 --resolution 8 --overlay mass-preserve popcount.tif ./output
 ```
 
 Emit nodata cells rather than omitting them, replacing the nodata value with −1:

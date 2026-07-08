@@ -58,6 +58,46 @@ def _frac_pairs(frac_arr, unique_arr, scale=1.0, decimals=None):
     return {"classes": [k for k, _ in pairs], "fractions": fracs}
 
 
+def _build_histogram(arr, decimals=None) -> Optional[dict]:
+    """Return {"values": [...], "counts": [...]} from a pixel-value array, or None if empty."""
+    if arr is None or len(arr) == 0:
+        return None
+    if decimals is not None:
+        arr = np.round(arr, decimals)
+    unique, counts = np.unique(arr, return_counts=True)
+    return {"values": unique.tolist(), "counts": counts.astype(np.int64).tolist()}
+
+
+def _pa_elem_type(numpy_dtype_str: str, decimals) -> pa.DataType:
+    if decimals is not None and decimals <= 0:
+        return pa.int64()
+    if decimals is not None:
+        return pa.float64()
+    return pa.from_numpy_dtype(numpy_dtype_str)
+
+
+def _build_collect_table(
+    result_df: pd.DataFrame, band_cols: list, src_dtypes: tuple,
+    selected_indices: tuple, out: str, decimals,
+) -> pa.Table:
+    """Build a PyArrow Table for --overlay --list or --overlay --histogram output."""
+    arrays = {}
+    for col in result_df.columns:
+        if col not in band_cols:
+            arrays[col] = pa.array(result_df[col].tolist())
+    for idx, col in zip(selected_indices, band_cols):
+        elem_type = _pa_elem_type(src_dtypes[idx - 1], decimals)
+        if out == "list":
+            arrays[col] = pa.array(result_df[col].tolist(), type=pa.list_(elem_type))
+        else:
+            hist_type = pa.struct([
+                pa.field("values", pa.list_(elem_type)),
+                pa.field("counts", pa.list_(pa.int64())),
+            ])
+            arrays[col] = pa.array(result_df[col].tolist(), type=hist_type)
+    return pa.table(arrays)
+
+
 def _build_frac_table(result_df: pd.DataFrame, band_cols: list) -> pa.Table:
     """Build a PyArrow Table with struct<classes, fractions> columns for fraction_cover output."""
     arrays = {}
@@ -100,7 +140,8 @@ class _OverlayIndexer:
     nodata_policy: str
     emit_nodata_value: Optional[Any]
     write_result: Callable
-    op: str  # 'mean', 'majority', or 'sum'
+    op: str  # 'mean', 'majority', 'sum', 'frac', or 'values'
+    out: str = "value"  # 'value', 'fractions', 'list', or 'histogram'
     min_valid_coverage: float = 0.0
     decimals: Optional[int] = None
 
@@ -119,6 +160,7 @@ class _OverlayIndexer:
             self._src_crs = src.crs
             self._src_transform = src.transform
             self._src_band_count = src.count
+            self._src_dtypes = src.dtypes
 
             if self._apply_coverage_threshold or self.op == "frac":
                 # Densified boundary polygon of the raster footprint in WGS84.
@@ -229,6 +271,7 @@ class _OverlayIndexer:
         gdf = gdf_wgs84.to_crs(self._src_crs)
 
         is_frac = (self.op == "frac")
+        is_collect = (self.op == "values")
         main_ops = ["frac", "unique"] if is_frac else [self.op]
         result_df = exact_extract(
             self.raster_input, gdf, main_ops, include_cols="_cell_id", output="pandas"
@@ -296,6 +339,28 @@ class _OverlayIndexer:
             nd_mask = result_df[band_cols].apply(
                 lambda col: col.map(lambda x: x is None or len(x["classes"]) == 0)
             ).any(axis=1)
+        elif is_collect:
+            for idx, label in zip(self.selected_indices, self.selected_labels):
+                vc = "values" if self._src_band_count == 1 else f"band_{idx}_values"
+                raw = result_df[vc]
+                if self.out == "list":
+                    result_df[label] = [
+                        (
+                            sorted(round(v, self.decimals) for v in arr.tolist())
+                            if self.decimals is not None
+                            else sorted(arr.tolist())
+                        ) if arr is not None and len(arr) > 0 else None
+                        for arr in raw
+                    ]
+                else:
+                    result_df[label] = [
+                        _build_histogram(arr, self.decimals) for arr in raw
+                    ]
+            result_df = result_df[["_cell_id"] + band_cols]
+
+            nd_mask = result_df[band_cols].apply(
+                lambda col: col.map(lambda x: x is None or len(x) == 0)
+            ).any(axis=1)
         else:
             keep = ["_cell_id"] + [c for c in self._col_rename if c in result_df.columns]
             result_df = result_df[keep].rename(columns=self._col_rename)
@@ -305,8 +370,8 @@ class _OverlayIndexer:
         if self.nodata_policy.lower() == "omit":
             result_df = result_df[~nd_mask].reset_index(drop=True)
         else:
-            if is_frac:
-                # No scalar fill value makes sense for map columns; emit None (Parquet null).
+            if is_frac or is_collect:
+                # No scalar fill value makes sense for struct/list columns; emit None.
                 for col in band_cols:
                     result_df.loc[nd_mask, col] = None
             else:
@@ -328,10 +393,14 @@ class _OverlayIndexer:
         )
         result_df = result_df.drop(columns=["_cell_id"])
 
-        table = (
-            _build_frac_table(result_df, band_cols)
-            if is_frac
-            else pa.Table.from_pandas(result_df, preserve_index=False)
-        )
+        if is_frac:
+            table = _build_frac_table(result_df, band_cols)
+        elif is_collect:
+            table = _build_collect_table(
+                result_df, band_cols, self._src_dtypes,
+                self.selected_indices, self.out, self.decimals,
+            )
+        else:
+            table = pa.Table.from_pandas(result_df, preserve_index=False)
         self.write_result(table, window)
         return None

@@ -162,10 +162,9 @@ def run_index(
     compact: bool,
     geo: str,
     tempdir,
-    semantics: str,
-    transfer: str,
-    interp: str,
-    out: str,
+    point: Optional[str],
+    overlay: Optional[str],
+    sample: Optional[str],
     valid_coverage_threshold: float = 0.0,
 ):
     tempfile.tempdir = tempdir if tempdir is not None else tempfile.tempdir
@@ -182,10 +181,9 @@ def run_index(
         overwrite,
         compact,
         geo,
-        semantics,
-        transfer,
-        interp,
-        out,
+        point,
+        overlay,
+        sample,
         valid_coverage_threshold,
     )
 
@@ -289,31 +287,47 @@ def make_command(spec: DGGS_Spec):
         show_default=True,
         help=(
             "Aggregation function(s) applied when multiple raster pixels map to the same DGGS cell "
-            "(only relevant for --transfer assign_centers). "
+            "(only relevant for --point). "
             f"Options: {', '.join(const.AGGFUNC_OPTIONS)}. "
             "Comma-separate multiple names (e.g. min,max) to produce a struct column per band."
         ),
     )
     @click.option(
-        "--semantics",
-        default=const.Semantics.POINT_CENTER_STRICT.value,
-        type=click.Choice([s.value for s in const.Semantics]),
-        show_default=True,
-        help="What a raster cell value means (determines valid transfer operators).",
+        "--point",
+        is_flag=False, flag_value="value", default=None,
+        type=click.Choice(["value", "list", "histogram"]),
+        metavar="OUTPUT",
+        help=(
+            "Assign each pixel to the DGGS cell containing its centre (default). "
+            "OUTPUT: 'value' (scalar per cell, default), "
+            "'list' (sorted list of all contributing pixel values), "
+            "'histogram' (value-count struct)."
+        ),
     )
     @click.option(
-        "--transfer",
-        default=const.Transfer.ASSIGN_CENTERS.value,
-        type=click.Choice([t.value for t in const.Transfer]),
-        show_default=True,
-        help="How values are mapped from raster pixels to DGGS cells.",
+        "--overlay",
+        type=click.Choice(["weighted", "mode", "mass-preserve", "fractions", "list", "histogram"]),
+        default=None,
+        metavar="METHOD",
+        help=(
+            "Area-based polygon intersection. METHOD: "
+            "'weighted' (area-weighted mean), "
+            "'mode' (majority class by overlap area), "
+            "'mass-preserve' (area-weighted sum; conserves total), "
+            "'fractions' (per-class area fractions → struct), "
+            "'list' (all overlapping pixel values as a sorted list), "
+            "'histogram' (value-count histogram of overlapping pixels)."
+        ),
     )
     @click.option(
-        "--interp",
-        default=const.Interp.NN.value,
+        "--sample",
+        is_flag=False, flag_value="nn", default=None,
         type=click.Choice([i.value for i in const.Interp]),
-        show_default=True,
-        help="Interpolation method used with --transfer sample. Ignored for other transfer operators.",
+        metavar="INTERP",
+        help=(
+            "Sample the raster at each DGGS cell centre. "
+            "INTERP: 'nn' (nearest-neighbour, default), 'bilinear', 'bicubic', 'lanczos'."
+        ),
     )
     @click.option(
         "-vct",
@@ -326,17 +340,9 @@ def make_command(spec: DGGS_Spec):
             "Minimum fraction of each DGGS cell's overlapping raster area that must contain "
             "valid (non-nodata) pixels for the cell to receive a value. Applied per band. "
             "0.0 (default) keeps all cells with any valid data. "
-            "Only meaningful for --transfer overlay_weighted and overlay_mode; "
-            "ignored for mass_preserve (partial sums are correct values — "
-            "filtering them would break mass conservation)."
+            "Only meaningful for --overlay; ignored for --overlay --mass-preserve "
+            "(partial sums are correct values — filtering them would break mass conservation)."
         ),
-    )
-    @click.option(
-        "--out",
-        default=const.OutputSchema.VALUE.value,
-        type=click.Choice([o.value for o in const.OutputSchema]),
-        show_default=True,
-        help="Output schema: scalar value, class fractions, histogram, or sorted sample list. 'list' collects all contributing pixel values per cell in ascending order (deterministic); use -d/--decimals to control precision.",
     )
     @click.option(
         "-d",
@@ -382,11 +388,10 @@ def make_command(spec: DGGS_Spec):
         compact,
         geo,
         tempdir,
-        semantics,
-        transfer,
-        interp,
+        point,
+        overlay,
+        sample,
         valid_coverage_threshold,
-        out,
     ):
         if isinstance(resolution, str):
             raster_path = common.resolve_input_path(raster_input)
@@ -406,13 +411,14 @@ def make_command(spec: DGGS_Spec):
         agg_from_cli = (
             ctx.get_parameter_source("agg") == click.core.ParameterSource.COMMANDLINE
         )
-        if out in ("list", "histogram", "interval") and agg_from_cli:
+        if (point in ("list", "histogram") or overlay in ("list", "histogram")) and agg_from_cli:
+            effective = point or overlay
             common.LOGGER.warning(
-                f"--out {out!r}: --agg has no effect (all contributing values are collected)"
+                f"--point {effective}: --agg has no effect (all contributing values are collected)"
             )
-        if transfer == const.Transfer.SAMPLE.value and agg_from_cli:
+        if sample is not None and agg_from_cli:
             common.LOGGER.warning(
-                "--transfer sample: --agg has no effect (one sample per DGGS cell)"
+                "--sample: --agg has no effect (one sample per DGGS cell)"
             )
         if emit_nodata_value is not None and nodata_policy == "omit":
             common.LOGGER.warning(
@@ -436,10 +442,9 @@ def make_command(spec: DGGS_Spec):
             compact,
             geo,
             tempdir,
-            semantics,
-            transfer,
-            interp,
-            out,
+            point,
+            overlay,
+            sample,
             valid_coverage_threshold,
         )
 

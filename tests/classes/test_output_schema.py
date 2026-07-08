@@ -1,6 +1,10 @@
 import numpy as np
 import pyarrow as pa
+import rasterio
 from click.testing import CliRunner
+from osgeo import gdal
+from rasterio.crs import CRS
+from rasterio.transform import from_bounds
 
 from classes.base import TestRunthrough, read_output
 from classes.helpers import make_raster
@@ -25,6 +29,28 @@ def _make_raster(path: str, nodata: float = None) -> None:
     make_raster(path, _BOUNDS, _SIZE, pixel_value=_PIXEL_VALUE, nodata=nodata)
 
 
+def _make_mostly_nodata_raster(path: str) -> None:
+    # All pixels are nodata except the single centre pixel.
+    # At res 5 an H3 cell covers the entire raster extent, so
+    # valid_frac ≈ 1/100 = 0.01 — below any threshold > 0.01.
+    data = np.full((1, _SIZE, _SIZE), _NODATA, dtype=np.float32)
+    data[0, _SIZE // 2, _SIZE // 2] = _PIXEL_VALUE
+    transform = from_bounds(*_BOUNDS, _SIZE, _SIZE)
+    with rasterio.open(
+        path,
+        "w",
+        driver="GTiff",
+        height=_SIZE,
+        width=_SIZE,
+        count=1,
+        dtype="float32",
+        crs=CRS.from_epsg(4326),
+        transform=transform,
+        nodata=_NODATA,
+    ) as dst:
+        dst.write(data)
+
+
 class TestOutList(TestRunthrough):
     def setUp(self):
         super().setUp()
@@ -35,7 +61,7 @@ class TestOutList(TestRunthrough):
         return read_output(TEST_OUTPUT_PATH)
 
     def test_band_columns_are_list_typed(self):
-        table = self._run(_COARSE_RES, "--out", "list")
+        table = self._run(_COARSE_RES, "--point", "list")
         band_field = table.schema.field("band_1")
         self.assertIsInstance(
             band_field.type,
@@ -45,17 +71,17 @@ class TestOutList(TestRunthrough):
 
     def test_list_element_type_is_float64_when_rounded(self):
         # float32 is promoted to float64 before rounding to avoid precision artefacts
-        table = self._run(_COARSE_RES, "--out", "list", "-d", "1")
+        table = self._run(_COARSE_RES, "--point", "list", "-d", "1")
         element_type = table.schema.field("band_1").type.value_type
         self.assertEqual(element_type, pa.float64())
 
     def test_list_element_type_preserves_source_dtype_when_unrounded(self):
-        table = self._run(_COARSE_RES, "--out", "list", "-d", "none")
+        table = self._run(_COARSE_RES, "--point", "list", "-d", "none")
         element_type = table.schema.field("band_1").type.value_type
         self.assertEqual(element_type, pa.float32())
 
     def test_coarser_cells_collect_multiple_values(self):
-        table = self._run(_COARSE_RES, "--out", "list")
+        table = self._run(_COARSE_RES, "--point", "list")
         df = table.to_pandas()
         lengths = df["band_1"].map(len)
         self.assertTrue(
@@ -64,7 +90,7 @@ class TestOutList(TestRunthrough):
         )
 
     def test_list_values_are_pixel_values(self):
-        table = self._run(_COARSE_RES, "--out", "list")
+        table = self._run(_COARSE_RES, "--point", "list")
         df = table.to_pandas()
         all_values = [v for lst in df["band_1"] for v in lst]
         self.assertTrue(
@@ -74,8 +100,8 @@ class TestOutList(TestRunthrough):
 
     def test_finer_resolution_produces_shorter_lists(self):
         # At coarser resolution more pixels share a cell, so lists are longer on average.
-        coarse = self._run(_COARSE_RES, "--out", "list").to_pandas()
-        fine = self._run(_FINE_RES, "--out", "list").to_pandas()
+        coarse = self._run(_COARSE_RES, "--point", "list").to_pandas()
+        fine = self._run(_FINE_RES, "--point", "list").to_pandas()
         avg_coarse = coarse["band_1"].map(len).mean()
         avg_fine = fine["band_1"].map(len).mean()
         self.assertGreater(
@@ -85,7 +111,7 @@ class TestOutList(TestRunthrough):
         )
 
     def test_lists_are_sorted(self):
-        table = self._run(_COARSE_RES, "--out", "list")
+        table = self._run(_COARSE_RES, "--point", "list")
         df = table.to_pandas()
         for lst in df["band_1"]:
             lst = list(lst)
@@ -95,7 +121,7 @@ class TestOutList(TestRunthrough):
 
     def test_exit_code_zero(self):
         # Regression: --out list produces output and exits cleanly
-        table = self._run(_COARSE_RES, "--out", "list")
+        table = self._run(_COARSE_RES, "--point", "list")
         self.assertGreater(len(table), 0)
 
     def test_agg_ignored_warning_emitted(self):
@@ -109,8 +135,7 @@ class TestOutList(TestRunthrough):
                 str(TEST_OUTPUT_PATH),
                 "-r",
                 str(_COARSE_RES),
-                "--out",
-                "list",
+                "--point", "list",
                 "--agg",
                 "sum",
             ],
@@ -130,7 +155,7 @@ class TestOutListNodataExclusion(TestRunthrough):
         return read_output(TEST_OUTPUT_PATH).to_pandas()
 
     def test_nodata_sentinel_excluded_from_lists(self):
-        df = self._run(_COARSE_RES, "--out", "list")
+        df = self._run(_COARSE_RES, "--point", "list")
         all_values = [v for lst in df["band_1"] for v in lst]
         self.assertFalse(
             any(np.isclose(v, _NODATA) for v in all_values),
@@ -138,7 +163,7 @@ class TestOutListNodataExclusion(TestRunthrough):
         )
 
     def test_nodata_nan_excluded_from_lists(self):
-        df = self._run(_COARSE_RES, "--out", "list")
+        df = self._run(_COARSE_RES, "--point", "list")
         all_values = [v for lst in df["band_1"] for v in lst]
         self.assertFalse(
             any(np.isnan(v) for v in all_values),
@@ -156,7 +181,7 @@ class TestOutHistogram(TestRunthrough):
         return read_output(TEST_OUTPUT_PATH)
 
     def test_band_columns_are_struct_typed(self):
-        table = self._run(_COARSE_RES, "--out", "histogram")
+        table = self._run(_COARSE_RES, "--point", "histogram")
         band_field = table.schema.field("band_1")
         self.assertIsInstance(
             band_field.type,
@@ -165,45 +190,45 @@ class TestOutHistogram(TestRunthrough):
         )
 
     def test_struct_has_values_and_counts_fields(self):
-        table = self._run(_COARSE_RES, "--out", "histogram")
+        table = self._run(_COARSE_RES, "--point", "histogram")
         struct_type = table.schema.field("band_1").type
         field_names = {struct_type.field(i).name for i in range(struct_type.num_fields)}
         self.assertEqual(field_names, {"values", "counts"})
 
     def test_values_field_is_list_typed(self):
-        table = self._run(_COARSE_RES, "--out", "histogram")
+        table = self._run(_COARSE_RES, "--point", "histogram")
         struct_type = table.schema.field("band_1").type
         values_type = struct_type.field("values").type
         self.assertIsInstance(values_type, pa.ListType)
 
     def test_counts_field_is_list_of_int64(self):
-        table = self._run(_COARSE_RES, "--out", "histogram")
+        table = self._run(_COARSE_RES, "--point", "histogram")
         struct_type = table.schema.field("band_1").type
         counts_type = struct_type.field("counts").type
         self.assertIsInstance(counts_type, pa.ListType)
         self.assertEqual(counts_type.value_type, pa.int64())
 
     def test_values_element_type_is_float64_when_rounded(self):
-        table = self._run(_COARSE_RES, "--out", "histogram", "-d", "1")
+        table = self._run(_COARSE_RES, "--point", "histogram", "-d", "1")
         struct_type = table.schema.field("band_1").type
         values_element_type = struct_type.field("values").type.value_type
         self.assertEqual(values_element_type, pa.float64())
 
     def test_values_element_type_preserves_source_dtype_when_unrounded(self):
-        table = self._run(_COARSE_RES, "--out", "histogram", "-d", "none")
+        table = self._run(_COARSE_RES, "--point", "histogram", "-d", "none")
         struct_type = table.schema.field("band_1").type
         values_element_type = struct_type.field("values").type.value_type
         self.assertEqual(values_element_type, pa.float32())
 
     def test_counts_sum_equals_total_pixels(self):
         # Total counts across all cells must equal total number of non-nodata pixels.
-        table = self._run(_COARSE_RES, "--out", "histogram")
+        table = self._run(_COARSE_RES, "--point", "histogram")
         df = table.to_pandas()
         total_counts = sum(sum(row["band_1"]["counts"]) for _, row in df.iterrows())
         self.assertEqual(total_counts, _SIZE * _SIZE)
 
     def test_values_are_pixel_values(self):
-        table = self._run(_COARSE_RES, "--out", "histogram")
+        table = self._run(_COARSE_RES, "--point", "histogram")
         df = table.to_pandas()
         all_values = [v for row in df["band_1"] for v in row["values"]]
         self.assertTrue(
@@ -212,7 +237,7 @@ class TestOutHistogram(TestRunthrough):
         )
 
     def test_values_are_sorted(self):
-        table = self._run(_COARSE_RES, "--out", "histogram")
+        table = self._run(_COARSE_RES, "--point", "histogram")
         df = table.to_pandas()
         for row in df["band_1"]:
             vals = list(row["values"])
@@ -221,7 +246,7 @@ class TestOutHistogram(TestRunthrough):
             )
 
     def test_values_and_counts_same_length(self):
-        table = self._run(_COARSE_RES, "--out", "histogram")
+        table = self._run(_COARSE_RES, "--point", "histogram")
         df = table.to_pandas()
         for row in df["band_1"]:
             self.assertEqual(
@@ -231,7 +256,7 @@ class TestOutHistogram(TestRunthrough):
             )
 
     def test_exit_code_zero(self):
-        table = self._run(_COARSE_RES, "--out", "histogram")
+        table = self._run(_COARSE_RES, "--point", "histogram")
         self.assertGreater(len(table), 0)
 
     def test_agg_ignored_warning_emitted(self):
@@ -245,8 +270,7 @@ class TestOutHistogram(TestRunthrough):
                 str(TEST_OUTPUT_PATH),
                 "-r",
                 str(_COARSE_RES),
-                "--out",
-                "histogram",
+                "--point", "histogram",
                 "--agg",
                 "sum",
             ],
@@ -350,8 +374,7 @@ class TestMultiAgg(TestRunthrough):
                 str(TEST_OUTPUT_PATH),
                 "-r",
                 str(_COARSE_RES),
-                "--out",
-                "list",
+                "--point", "list",
             ],
             catch_exceptions=False,
         )
@@ -364,208 +387,387 @@ class TestOutListValidation(TestRunthrough):
         super().setUp()
         self._raster = self.make_temp_raster(_make_raster)
 
-    def test_inappropriate_combination_rejected(self):
+    def test_sample_list_rejected(self):
         runner = CliRunner()
         result = runner.invoke(
             cli,
-            [
-                "h3",
-                self._raster,
-                str(TEST_OUTPUT_PATH),
-                "-r",
-                str(_COARSE_RES),
-                "--semantics",
-                "cell_average",
-                "--transfer",
-                "assign_centers",
-                "--out",
-                "list",
-            ],
+            ["h3", self._raster, str(TEST_OUTPUT_PATH), "-r", str(_COARSE_RES),
+             "--sample", "--point", "list"],
         )
-        self.assertNotEqual(
-            result.exit_code,
-            0,
-            "cell_average + assign_centers is inappropriate and should be rejected",
-        )
+        self.assertNotEqual(result.exit_code, 0, "--sample --list should be rejected")
 
-    def test_unimplemented_valid_combination_rejected(self):
-        # cell_average + overlay_weighted is valid but not yet implemented
+    def test_overlay_weighted_list_rejected(self):
         runner = CliRunner()
         result = runner.invoke(
             cli,
-            [
-                "h3",
-                self._raster,
-                str(TEST_OUTPUT_PATH),
-                "-r",
-                str(_COARSE_RES),
-                "--semantics",
-                "cell_average",
-                "--transfer",
-                "overlay_weighted",
-                "--out",
-                "value",
-            ],
+            ["h3", self._raster, str(TEST_OUTPUT_PATH), "-r", str(_COARSE_RES),
+             "--overlay", "weighted", "--point", "list"],
         )
-        self.assertNotEqual(
-            result.exit_code,
-            0,
-            "cell_average + overlay_weighted is valid but not yet implemented",
-        )
+        self.assertNotEqual(result.exit_code, 0, "--overlay --weighted --list should be rejected")
 
-    def test_sample_point_sample_field_runs(self):
+    def test_sample_overlay_rejected(self):
+        runner = CliRunner()
+        result = runner.invoke(
+            cli,
+            ["h3", self._raster, str(TEST_OUTPUT_PATH), "-r", str(_COARSE_RES),
+             "--sample", "--overlay", "weighted"],
+        )
+        self.assertNotEqual(result.exit_code, 0, "--sample and --overlay should be mutually exclusive")
+
+    def test_sample_runs(self):
+        self.invoke_cli("h3", self._raster, TEST_OUTPUT_PATH, _COARSE_RES, "--sample")
+
+    def test_sample_bilinear_runs(self):
+        self.invoke_cli("h3", self._raster, TEST_OUTPUT_PATH, _COARSE_RES,
+                        "--sample", "bilinear")
+
+    def test_sample_bicubic_runs(self):
+        self.invoke_cli("h3", self._raster, TEST_OUTPUT_PATH, _COARSE_RES,
+                        "--sample", "bicubic")
+
+    def test_sample_lanczos_runs(self):
+        self.invoke_cli("h3", self._raster, TEST_OUTPUT_PATH, _COARSE_RES,
+                        "--sample", "lanczos")
+
+
+_CATEGORICAL_CLASSES = [1, 2, 3]
+
+def _make_categorical_raster(path: str) -> None:
+    # 10×10 uint8 raster with three equal classes (classes 1, 2, 3 in stripes).
+    # Each class occupies ~1/3 of the pixels so frac ≈ {1: 0.33, 2: 0.33, 3: 0.33}.
+    row = np.array([[1]*4 + [2]*3 + [3]*3], dtype=np.uint8)
+    data = np.tile(row, (_SIZE, 1)).reshape(1, _SIZE, _SIZE)
+    transform = from_bounds(*_BOUNDS, _SIZE, _SIZE)
+    with rasterio.open(
+        path, "w", driver="GTiff", height=_SIZE, width=_SIZE,
+        count=1, dtype="uint8", crs=CRS.from_epsg(4326), transform=transform,
+    ) as dst:
+        dst.write(data)
+
+
+def _set_band_name(path: str, band_name: str, band_index: int = 1) -> None:
+    ds = gdal.Open(path, gdal.GA_Update)
+    ds.GetRasterBand(band_index).SetDescription(band_name)
+    ds.FlushCache()
+    ds = None
+
+
+def _make_named_raster(path: str, band_name: str) -> None:
+    _make_raster(path)
+    _set_band_name(path, band_name)
+
+
+def _make_named_categorical_raster(path: str, band_name: str) -> None:
+    _make_categorical_raster(path)
+    _set_band_name(path, band_name)
+
+
+class TestOverlay(TestRunthrough):
+    """Smoke tests for --transfer overlay_weighted, overlay_mode, and mass_preserve."""
+
+    def setUp(self):
+        super().setUp()
+        self._raster = self.make_temp_raster(_make_raster)
+
+    def _run_overlay(self, *overlay_flags, **kw):
+        extra = kw.get("extra_args", ())
         self.invoke_cli(
             "h3",
             self._raster,
             TEST_OUTPUT_PATH,
             _COARSE_RES,
-            "--semantics",
-            "point_sample_field",
-            "--transfer",
-            "sample",
-            "--out",
-            "value",
+            "--overlay",
+            *overlay_flags,
+            *extra,
+        )
+        return read_output(TEST_OUTPUT_PATH)
+
+    def test_overlay_weighted_runs(self):
+        table = self._run_overlay("weighted")
+        df = table.to_pandas()
+        self.assertFalse(df.empty, "--overlay --weighted should produce output rows")
+        self.assertIn("band_1", df.columns)
+
+    def test_overlay_weighted_values_close_to_pixel(self):
+        # Uniform raster → all cell values should equal _PIXEL_VALUE
+        table = self._run_overlay("weighted")
+        df = table.to_pandas()
+        self.assertTrue(
+            np.allclose(df["band_1"].dropna(), _PIXEL_VALUE, atol=1e-3),
+            f"Expected ~{_PIXEL_VALUE}, got: {df['band_1'].unique()}",
         )
 
-    def test_sample_piecewise_constant_runs(self):
+    def test_overlay_mode_runs(self):
+        table = self._run_overlay("mode")
+        df = table.to_pandas()
+        self.assertFalse(df.empty, "--overlay --mode should produce output rows")
+
+    def test_mass_preserve_runs(self):
+        table = self._run_overlay("mass-preserve")
+        df = table.to_pandas()
+        self.assertFalse(df.empty, "--overlay --mass-preserve should produce output rows")
+
+    def test_mass_preserve_conserves_total(self):
+        # sum(cell values) must equal sum(pixel_value * pixel_area) from the raster.
+        # The raster is uniform (_PIXEL_VALUE) with no nodata, so the expected total
+        # is simply pixel_value * pixel_area * n_pixels.
+        import rasterio as _rio
+        table = self._run_overlay("mass-preserve", extra_args=("-d", "none"))
+        cell_total = table.to_pandas()["band_1"].sum()
+        with _rio.open(self._raster) as src:
+            raster_total = _PIXEL_VALUE * src.width * src.height
+        self.assertAlmostEqual(
+            cell_total, raster_total, delta=raster_total * 1e-4,
+            msg=f"mass_preserve total {cell_total:.6f} differs from raster total {raster_total:.6f}",
+        )
+
+    def test_valid_coverage_threshold_zero_keeps_all(self):
+        # threshold=0.0 is the no-op default; results should match unthresholded run
+        table_default = self._run_overlay("weighted")
+        table_zero = self._run_overlay("weighted", extra_args=("--valid-coverage-threshold", "0.0"))
+        self.assertEqual(
+            len(table_default),
+            len(table_zero),
+            "threshold=0.0 should not filter any cells",
+        )
+
+    def test_valid_coverage_threshold_filters_low_coverage_cells(self):
+        # Raster with 1/100 valid pixels → valid_frac ≈ 0.01 per cell.
+        # threshold=0.5 → those cells are nulled; emit policy keeps rows but as NaN.
+        raster = self.make_temp_raster(_make_mostly_nodata_raster)
+        self.invoke_cli("h3", raster, TEST_OUTPUT_PATH, _COARSE_RES,
+                        "--overlay", "weighted", "--nodata_policy", "emit", "-vct", "0.0")
+        n_valid_no_threshold = int(
+            read_output(TEST_OUTPUT_PATH).to_pandas()["band_1"].notna().sum()
+        )
+        self.invoke_cli("h3", raster, TEST_OUTPUT_PATH, _COARSE_RES,
+                        "--overlay", "weighted", "--nodata_policy", "emit", "-vct", "0.5")
+        n_valid_with_threshold = int(
+            read_output(TEST_OUTPUT_PATH).to_pandas()["band_1"].notna().sum()
+        )
+        self.assertLess(
+            n_valid_with_threshold,
+            n_valid_no_threshold,
+            "Higher threshold should produce fewer non-NaN cell values",
+        )
+
+    def test_valid_coverage_threshold_ignored_for_mass_preserve(self):
+        # mass_preserve must not filter by coverage — partial sums are correct values.
+        # threshold=0.9 should be ignored → same row count as threshold=0.0.
+        raster = self.make_temp_raster(_make_mostly_nodata_raster)
+        self.invoke_cli("h3", raster, TEST_OUTPUT_PATH, _COARSE_RES,
+                        "--overlay", "mass-preserve", "-vct", "0.0")
+        n_without = len(read_output(TEST_OUTPUT_PATH).to_pandas())
+        self.invoke_cli("h3", raster, TEST_OUTPUT_PATH, _COARSE_RES,
+                        "--overlay", "mass-preserve", "-vct", "0.9")
+        n_with = len(read_output(TEST_OUTPUT_PATH).to_pandas())
+        self.assertEqual(n_without, n_with,
+                         "mass_preserve should ignore coverage threshold")
+
+    def test_named_band_column_is_preserved(self):
+        band_name = "temperature"
+        raster = self.make_temp_raster(lambda p: _make_named_raster(p, band_name))
         self.invoke_cli(
-            "h3",
-            self._raster,
-            TEST_OUTPUT_PATH,
-            _COARSE_RES,
-            "--semantics",
-            "piecewise_constant",
-            "--transfer",
-            "sample",
-            "--out",
-            "value",
+            "h3", raster, TEST_OUTPUT_PATH, _COARSE_RES,
+            "--overlay", "weighted",
         )
+        table = read_output(TEST_OUTPUT_PATH)
+        self.assertIn(band_name, table.schema.names,
+                      "Named band should appear as output column")
+        self.assertNotIn("band_1", table.schema.names,
+                         "Generic 'band_1' should not appear when band has a name")
 
-    def test_sample_bilinear_point_sample_field_runs(self):
-        self.invoke_cli(
-            "h3",
-            self._raster,
-            TEST_OUTPUT_PATH,
-            _COARSE_RES,
-            "--semantics",
-            "point_sample_field",
-            "--transfer",
-            "sample",
-            "--interp",
-            "bilinear",
-            "--out",
-            "value",
-        )
-
-    def test_sample_bilinear_piecewise_constant_rejected(self):
+    def test_overlay_without_method_rejected(self):
         runner = CliRunner()
         result = runner.invoke(
             cli,
-            [
-                "h3",
-                self._raster,
-                str(TEST_OUTPUT_PATH),
-                "-r",
-                str(_COARSE_RES),
-                "--semantics",
-                "piecewise_constant",
-                "--transfer",
-                "sample",
-                "--interp",
-                "bilinear",
-                "--out",
-                "value",
-            ],
+            ["h3", self._raster, str(TEST_OUTPUT_PATH), "-r", str(_COARSE_RES), "--overlay"],
         )
-        self.assertNotEqual(
-            result.exit_code,
-            0,
-            "piecewise_constant + bilinear should be rejected",
-        )
+        self.assertNotEqual(result.exit_code, 0,
+                            "--overlay without a method flag should be rejected")
 
-    def test_sample_bicubic_point_sample_field_runs(self):
-        self.invoke_cli(
-            "h3",
-            self._raster,
-            TEST_OUTPUT_PATH,
-            _COARSE_RES,
-            "--semantics",
-            "point_sample_field",
-            "--transfer",
-            "sample",
-            "--interp",
-            "bicubic",
-            "--out",
-            "value",
-        )
-
-    def test_sample_bicubic_piecewise_constant_rejected(self):
+    def test_point_and_overlay_mutually_exclusive(self):
         runner = CliRunner()
         result = runner.invoke(
             cli,
-            [
-                "h3",
-                self._raster,
-                str(TEST_OUTPUT_PATH),
-                "-r",
-                str(_COARSE_RES),
-                "--semantics",
-                "piecewise_constant",
-                "--transfer",
-                "sample",
-                "--interp",
-                "bicubic",
-                "--out",
-                "value",
-            ],
+            ["h3", self._raster, str(TEST_OUTPUT_PATH), "-r", str(_COARSE_RES),
+             "--point", "list", "--overlay", "weighted"],
         )
-        self.assertNotEqual(
-            result.exit_code,
-            0,
-            "piecewise_constant + bicubic should be rejected",
-        )
+        self.assertNotEqual(result.exit_code, 0,
+                            "--point and --overlay should be mutually exclusive")
 
-    def test_sample_lanczos_point_sample_field_runs(self):
+
+class TestFractionCover(TestRunthrough):
+    """Tests for --overlay --fractions."""
+
+    def setUp(self):
+        super().setUp()
+        self._raster = self.make_temp_raster(_make_categorical_raster)
+
+    def _run(self, *extra_args):
         self.invoke_cli(
-            "h3",
-            self._raster,
-            TEST_OUTPUT_PATH,
-            _COARSE_RES,
-            "--semantics",
-            "point_sample_field",
-            "--transfer",
-            "sample",
-            "--interp",
-            "lanczos",
-            "--out",
-            "value",
+            "h3", self._raster, TEST_OUTPUT_PATH, _COARSE_RES,
+            "--overlay", "fractions",
+            *extra_args,
+        )
+        return read_output(TEST_OUTPUT_PATH)
+
+    def test_runs_and_produces_rows(self):
+        table = self._run()
+        self.assertGreater(len(table), 0)
+
+    def test_band_column_is_struct_typed(self):
+        table = self._run()
+        field = table.schema.field("band_1")
+        self.assertIsInstance(field.type, pa.StructType, f"Expected struct type, got {field.type}")
+
+    def test_classes_field_is_list_of_int64(self):
+        table = self._run()
+        struct_type = table.schema.field("band_1").type
+        classes_type = struct_type.field("classes").type
+        self.assertIsInstance(classes_type, pa.ListType)
+        self.assertEqual(classes_type.value_type, pa.int64())
+
+    def test_fractions_field_is_list_of_float64(self):
+        table = self._run()
+        struct_type = table.schema.field("band_1").type
+        fractions_type = struct_type.field("fractions").type
+        self.assertIsInstance(fractions_type, pa.ListType)
+        self.assertEqual(fractions_type.value_type, pa.float64())
+
+    def test_fractions_sum_at_most_one(self):
+        # Fractions represent fraction of total cell area, so partial-coverage
+        # cells (outside raster or over nodata) may sum to less than 1.0.
+        # Run without rounding so no precision-loss obscures the invariant.
+        table = self._run("-d", "none")
+        df = table.to_pandas()
+        for row in df["band_1"]:
+            if row is not None:
+                total = sum(row["fractions"])
+                self.assertLessEqual(total, 1.0 + 1e-5,
+                                     "Class fractions must not exceed 1.0")
+                self.assertGreater(total, 0.0,
+                                   "Non-null fractions must be positive")
+
+    def test_partial_coverage_sums_less_than_one(self):
+        # At res 5, H3 cells (~252 km²) are much larger than the ~80 km² test raster,
+        # so valid_frac ≈ 0.33 and fractions should sum well below 1.0.
+        table = self._run()
+        df = table.to_pandas()
+        sums = [sum(row["fractions"]) for row in df["band_1"] if row is not None]
+        self.assertTrue(
+            any(s < 0.9 for s in sums),
+            "Expected at least one partially-covered cell with fraction sum < 0.9",
         )
 
-    def test_sample_lanczos_piecewise_constant_rejected(self):
-        runner = CliRunner()
-        result = runner.invoke(
-            cli,
-            [
-                "h3",
-                self._raster,
-                str(TEST_OUTPUT_PATH),
-                "-r",
-                str(_COARSE_RES),
-                "--semantics",
-                "piecewise_constant",
-                "--transfer",
-                "sample",
-                "--interp",
-                "lanczos",
-                "--out",
-                "value",
-            ],
+    def test_decimals_applied_to_fractions(self):
+        table = self._run("-d", "3")
+        df = table.to_pandas()
+        for row in df["band_1"]:
+            if row is not None:
+                for f in row["fractions"]:
+                    self.assertAlmostEqual(f, round(f, 3), places=10,
+                                           msg=f"Fraction {f} not rounded to 3 dp")
+
+    def test_all_keys_are_valid_classes(self):
+        table = self._run()
+        df = table.to_pandas()
+        for row in df["band_1"]:
+            if row is not None:
+                for k in row["classes"]:
+                    self.assertIn(k, _CATEGORICAL_CLASSES,
+                                  f"Unexpected class key {k}")
+
+    def test_named_band_column_is_preserved(self):
+        band_name = "landcover"
+        raster = self.make_temp_raster(lambda p: _make_named_categorical_raster(p, band_name))
+        self.invoke_cli(
+            "h3", raster, TEST_OUTPUT_PATH, _COARSE_RES,
+            "--overlay", "fractions",
         )
-        self.assertNotEqual(
-            result.exit_code,
-            0,
-            "piecewise_constant + lanczos should be rejected",
+        table = read_output(TEST_OUTPUT_PATH)
+        self.assertIn(band_name, table.schema.names,
+                      "Named band should appear as output column for fractions")
+        self.assertNotIn("band_1", table.schema.names,
+                         "Generic 'band_1' should not appear when band has a name")
+        field = table.schema.field(band_name)
+        self.assertIsInstance(field.type, pa.StructType,
+                              f"Named band column should be struct type, got {field.type}")
+
+
+class TestOverlayCollect(TestRunthrough):
+    """Tests for --overlay --list and --overlay --histogram."""
+
+    def setUp(self):
+        super().setUp()
+        self._raster = self.make_temp_raster(_make_raster)
+
+    def _run_list(self, *extra_args):
+        self.invoke_cli(
+            "h3", self._raster, TEST_OUTPUT_PATH, _COARSE_RES,
+            "--overlay", "list",
+            *extra_args,
         )
+        return read_output(TEST_OUTPUT_PATH)
+
+    def _run_histogram(self, *extra_args):
+        self.invoke_cli(
+            "h3", self._raster, TEST_OUTPUT_PATH, _COARSE_RES,
+            "--overlay", "histogram",
+            *extra_args,
+        )
+        return read_output(TEST_OUTPUT_PATH)
+
+    def test_overlay_list_produces_list_column(self):
+        table = self._run_list()
+        self.assertGreater(len(table), 0, "--overlay --list produced no rows")
+        field = table.schema.field("band_1")
+        self.assertIsInstance(field.type, pa.ListType,
+                              f"Expected list type, got {field.type}")
+
+    def test_overlay_list_values_are_numeric(self):
+        table = self._run_list()
+        df = table.to_pandas()
+        for val in df["band_1"].dropna():
+            self.assertTrue(hasattr(val, "__len__"), f"Expected sequence, got {type(val)}")
+            self.assertGreater(len(val), 0, "List column should not contain empty lists")
+
+    def test_overlay_histogram_produces_struct_column(self):
+        table = self._run_histogram()
+        self.assertGreater(len(table), 0, "--overlay --histogram produced no rows")
+        field = table.schema.field("band_1")
+        self.assertIsInstance(field.type, pa.StructType,
+                              f"Expected struct type, got {field.type}")
+
+    def test_overlay_histogram_has_values_and_counts_fields(self):
+        table = self._run_histogram()
+        struct_type = table.schema.field("band_1").type
+        field_names = {struct_type.field(i).name for i in range(struct_type.num_fields)}
+        self.assertIn("values", field_names)
+        self.assertIn("counts", field_names)
+
+    def test_overlay_histogram_counts_are_positive_integers(self):
+        table = self._run_histogram()
+        df = table.to_pandas()
+        for row in df["band_1"]:
+            if row is not None:
+                for c in row["counts"]:
+                    self.assertGreater(c, 0, "Histogram count must be positive")
+
+    def test_overlay_list_and_histogram_same_total_values(self):
+        list_table = self._run_list()
+        hist_table = self._run_histogram()
+        list_df = list_table.to_pandas()
+        hist_df = hist_table.to_pandas()
+        self.assertEqual(len(list_df), len(hist_df))
+        for lst, hist in zip(list_df["band_1"], hist_df["band_1"]):
+            if lst is None and hist is None:
+                continue
+            self.assertEqual(
+                len(lst),
+                sum(hist["counts"]),
+                "Total value count in list should equal sum of histogram counts",
+            )
 
 
 class TestNegativeDecimals(TestRunthrough):
@@ -608,12 +810,12 @@ class TestNegativeDecimals(TestRunthrough):
         )
 
     def test_d_neg1_list_element_type_is_int64(self):
-        table = self._run("--out", "list", "-d", "-1")
+        table = self._run("--point", "list", "-d", "-1")
         element_type = table.schema.field("band_1").type.value_type
         self.assertEqual(element_type, pa.int64())
 
     def test_d_neg1_list_values_rounded_to_tens(self):
-        table = self._run("--out", "list", "-d", "-1")
+        table = self._run("--point", "list", "-d", "-1")
         df = table.to_pandas()
         all_values = [v for lst in df["band_1"] for v in lst]
         self.assertTrue(
@@ -622,6 +824,6 @@ class TestNegativeDecimals(TestRunthrough):
         )
 
     def test_d_neg1_histogram_values_type_is_int64(self):
-        table = self._run("--out", "histogram", "-d", "-1")
+        table = self._run("--point", "histogram", "-d", "-1")
         hist_type = table.schema.field("band_1").type
         self.assertEqual(hist_type.field("values").type.value_type, pa.int64())

@@ -132,25 +132,6 @@ class ResolutionMode(StrEnum):
     MIN_DIFF = "min-diff"
 
 
-class Semantics(StrEnum):
-    POINT_CENTER_STRICT = "point_center_strict"
-    POINT_SAMPLE_FIELD = "point_sample_field"
-    CELL_AVERAGE = "cell_average"
-    PIECEWISE_CONSTANT = "piecewise_constant"
-    FRACTION_COVER = "fraction_cover"
-    COUNT_TOTAL = "count_total"
-    DENSITY = "density"
-    EVENT_INDICATOR = "event_indicator"
-
-
-class Transfer(StrEnum):
-    ASSIGN_CENTERS = "assign_centers"
-    SAMPLE = "sample"
-    OVERLAY_WEIGHTED = "overlay_weighted"
-    OVERLAY_MODE = "overlay_mode"
-    MASS_PRESERVE = "mass_preserve"
-
-
 class Interp(StrEnum):
     NN = "nn"
     BILINEAR = "bilinear"
@@ -165,90 +146,9 @@ class OutputSchema(StrEnum):
     LIST = "list"
 
 
-INAPPROPRIATE: set = {
-    # point_center_strict: only assign_centers is appropriate
-    ("point_center_strict", "sample"),
-    ("point_center_strict", "overlay_weighted"),
-    ("point_center_strict", "overlay_mode"),
-    ("point_center_strict", "mass_preserve"),
-    # point_sample_field: assign_centers treats pixels as non-interpolatable points
-    ("point_sample_field", "assign_centers"),
-    # cell_average: must use area-weighted overlay
-    ("cell_average", "assign_centers"),
-    ("cell_average", "sample"),
-    ("cell_average", "overlay_mode"),
-    ("cell_average", "mass_preserve"),
-    # piecewise_constant: assign_centers ignores pixel area; mass wrong
-    # Note: sample --interp nn is valid; sample --interp bilinear/bicubic is not.
-    # Interp-specific restrictions are enforced separately when non-nn interp is added.
-    ("piecewise_constant", "assign_centers"),
-    ("piecewise_constant", "mass_preserve"),
-    # fraction_cover: values are areal fractions; point-based methods are wrong
-    ("fraction_cover", "assign_centers"),
-    ("fraction_cover", "sample"),
-    ("fraction_cover", "overlay_mode"),
-    ("fraction_cover", "mass_preserve"),
-    # count_total: totals require mass preservation; sampling breaks conservation
-    ("count_total", "assign_centers"),
-    ("count_total", "sample"),
-    ("count_total", "overlay_weighted"),
-    ("count_total", "overlay_mode"),
-    # density: per-area intensity; assign_centers and overlay_mode are wrong
-    ("density", "assign_centers"),
-    ("density", "overlay_mode"),
-    ("density", "mass_preserve"),
-}
-
-INAPPROPRIATE_INTERP: set = {
-    # piecewise_constant: smooth interpolation between categorical values is meaningless
-    ("piecewise_constant", "sample", "bilinear"),
-    ("piecewise_constant", "sample", "bicubic"),
-    ("piecewise_constant", "sample", "lanczos"),
-    # event_indicator: smooth interpolation of discrete events produces fractional nonsense
-    ("event_indicator", "sample", "bilinear"),
-    ("event_indicator", "sample", "bicubic"),
-    ("event_indicator", "sample", "lanczos"),
-}
-
-OVERLAY_TRANSFERS: set = {Transfer.OVERLAY_WEIGHTED, Transfer.OVERLAY_MODE, Transfer.MASS_PRESERVE}
-
-# Maps semantics → the exactextract statistic used for --transfer overlay_*.
-# Drives op selection in common.py so semantics fully determines the algorithm.
-OVERLAY_OP: dict[str, str] = {
-    Semantics.CELL_AVERAGE:       "mean",
-    Semantics.DENSITY:            "mean",
-    Semantics.FRACTION_COVER:     "frac",
-    Semantics.PIECEWISE_CONSTANT: "majority",
-    Semantics.EVENT_INDICATOR:    "majority",
-    Semantics.COUNT_TOTAL:        "sum",
-}
-
-IMPLEMENTED: set = {
-    ("point_center_strict", "assign_centers", "value"),
-    ("point_center_strict", "assign_centers", "list"),
-    ("point_center_strict", "assign_centers", "histogram"),
-    ("event_indicator", "assign_centers", "value"),
-    ("event_indicator", "assign_centers", "list"),
-    ("event_indicator", "assign_centers", "histogram"),
-    # sample transfer uses 4-tuples: (semantics, transfer, interp, out)
-    ("point_sample_field", "sample", "nn", "value"),
-    ("piecewise_constant", "sample", "nn", "value"),
-    ("event_indicator", "sample", "nn", "value"),
-    ("density", "sample", "nn", "value"),
-    ("density", "sample", "bilinear", "value"),
-    ("density", "sample", "bicubic", "value"),
-    ("density", "sample", "lanczos", "value"),
-    ("point_sample_field", "sample", "bilinear", "value"),
-    ("point_sample_field", "sample", "bicubic", "value"),
-    ("point_sample_field", "sample", "lanczos", "value"),
-    # overlay transfer uses 3-tuples: (semantics, transfer, out)
-    ("cell_average", "overlay_weighted", "value"),
-    ("density", "overlay_weighted", "value"),
-    ("piecewise_constant", "overlay_mode", "value"),
-    ("event_indicator", "overlay_mode", "value"),
-    ("count_total", "mass_preserve", "value"),
-    ("fraction_cover", "overlay_weighted", "fractions"),
-}
+_OVERLAY_TRANSFER_KEYS: frozenset = frozenset({
+    "overlay_weighted", "overlay_mode", "mass_preserve", "overlay_collect",
+})
 
 
 # Surface area of the WGS84 oblate spheroid in m²
