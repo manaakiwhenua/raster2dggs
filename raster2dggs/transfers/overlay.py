@@ -316,7 +316,9 @@ class _OverlayIndexer:
         try:
             self.close()
         except Exception:
-            pass
+            # Suppress destructor-time errors (e.g., interpreter shutdown), but keep
+            # a debug trace for troubleshooting.
+            LOGGER.debug("Ignoring exception during _OverlayIndexer.__del__", exc_info=True)
 
     def process_window(self, window):
         """Compute overlay stats for all DGGS cells overlapping this raster window."""
