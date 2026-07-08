@@ -1,5 +1,5 @@
 """
-CLI smoke tests for --transfer sample across all DGGS implementations.
+CLI smoke tests for --sample across all DGGS implementations.
 
 Each DGGS has a different cells_in_bbox / cells_to_lonlat_arrays
 implementation. These end-to-end tests verify the full pipeline produces valid
@@ -33,7 +33,7 @@ def _make_raster(path: str) -> None:
 
 class _SampleSmoke(TestRunthrough):
     """
-    Base class for per-DGGS --transfer sample smoke tests.
+    Base class for per-DGGS --sample smoke tests.
 
     Subclasses set:
       dggs       — CLI subcommand name (e.g. "h3")
@@ -57,12 +57,7 @@ class _SampleSmoke(TestRunthrough):
             self._raster,
             TEST_OUTPUT_PATH,
             self.resolution,
-            "--semantics",
-            "point_sample_field",
-            "--transfer",
-            "sample",
-            "--out",
-            "value",
+            "--sample",
             *extra_args,
         )
 
@@ -74,7 +69,7 @@ class _SampleSmoke(TestRunthrough):
         result = self._run()
         self.assertEqual(result.exit_code, 0, result.output)
         table = pq.read_table(str(TEST_OUTPUT_PATH))
-        self.assertGreater(len(table), 0, "--transfer sample produced no output rows")
+        self.assertGreater(len(table), 0, "--sample produced no output rows")
 
     def test_output_values_match_pixel(self):
         result = self._run()
@@ -93,7 +88,7 @@ class _SampleSmoke(TestRunthrough):
         self.assertIn(
             "--agg",
             result.output,
-            "--agg warning should be emitted when combined with --transfer sample",
+            "--agg warning should be emitted when combined with --sample",
         )
 
 
@@ -183,7 +178,7 @@ class TestHEALPixSample(_SampleSmoke, unittest.TestCase):
 
 class _SampleBilinearSmoke(_SampleSmoke):
     """
-    Base class for --transfer sample --interp bilinear smoke tests.
+    Base class for --sample --interp bilinear smoke tests.
 
     Inherits all _SampleSmoke tests; overrides _run to add --interp bilinear.
     Because the raster is uniform, bilinear and NN produce identical values,
@@ -196,14 +191,8 @@ class _SampleBilinearSmoke(_SampleSmoke):
             self._raster,
             TEST_OUTPUT_PATH,
             self.resolution,
-            "--semantics",
-            "point_sample_field",
-            "--transfer",
-            "sample",
-            "--interp",
+            "--sample",
             "bilinear",
-            "--out",
-            "value",
             *extra_args,
         )
 
@@ -217,10 +206,10 @@ class TestH3SampleBilinear(_SampleBilinearSmoke, unittest.TestCase):
 
 class _SampleBicubicSmoke(_SampleSmoke):
     """
-    Base class for --transfer sample --interp cubic smoke tests.
+    Base class for --sample --interp bicubic smoke tests.
 
-    Inherits all _SampleSmoke tests; overrides _run to add --interp cubic.
-    Because the raster is uniform, cubic and NN produce identical values,
+    Inherits all _SampleSmoke tests; overrides _run to add --interp bicubic.
+    Because the raster is uniform, bicubic and NN produce identical values,
     so the same value assertions apply.
     """
 
@@ -230,14 +219,8 @@ class _SampleBicubicSmoke(_SampleSmoke):
             self._raster,
             TEST_OUTPUT_PATH,
             self.resolution,
-            "--semantics",
-            "point_sample_field",
-            "--transfer",
-            "sample",
-            "--interp",
+            "--sample",
             "bicubic",
-            "--out",
-            "value",
             *extra_args,
         )
 
@@ -251,7 +234,7 @@ class TestH3SampleBicubic(_SampleBicubicSmoke, unittest.TestCase):
 
 class _SampleLanczosSmoke(_SampleSmoke):
     """
-    Base class for --transfer sample --interp lanczos smoke tests.
+    Base class for --sample --interp lanczos smoke tests.
 
     Inherits all _SampleSmoke tests; overrides _run to add --interp lanczos.
     Because the raster is uniform, Lanczos and NN produce identical values,
@@ -264,14 +247,8 @@ class _SampleLanczosSmoke(_SampleSmoke):
             self._raster,
             TEST_OUTPUT_PATH,
             self.resolution,
-            "--semantics",
-            "point_sample_field",
-            "--transfer",
-            "sample",
-            "--interp",
+            "--sample",
             "lanczos",
-            "--out",
-            "value",
             *extra_args,
         )
 

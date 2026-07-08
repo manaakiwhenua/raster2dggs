@@ -31,6 +31,8 @@ rasterio = "^1.4"
 dask-expr = "^2"
 numpy = "^2"
 geoarrow-pyarrow = "^0.2.0"
+exactextract = ">=0.3"
+antimeridian = ">=0.3"
 h3 = { version = "^4", optional = true }
 rhppandas = {version = "^0.2", optional = true}
 rhealpixdggs = {version = "^0.6", optional = true}

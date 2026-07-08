@@ -41,7 +41,9 @@ from raster2dggs.indexers.rasterindexer import _is_nan
 LOGGER = logging.getLogger(__name__)
 click_log.basic_config(LOGGER)
 
-from raster2dggs.interpolation import _SampleIndexer
+from raster2dggs.transfers.assign_centers import _AssignCentersIndexer
+from raster2dggs.transfers.interpolation import _SampleIndexer
+from raster2dggs.transfers.overlay import _OverlayIndexer
 
 
 class ParentResolutionException(Exception):
@@ -188,6 +190,75 @@ def create_aggfuncs(
     return result
 
 
+def resolve_to_internal(
+    point: Optional[str],
+    overlay: Optional[str],
+    sample: Optional[str],
+) -> dict:
+    """Map CLI flags to the internal (transfer_key, op, out_key) triple."""
+    if overlay is not None:
+        return {
+            const.OverlayMode.WEIGHTED: {
+                "transfer": const.Transfer.OVERLAY_WEIGHTED,
+                "op": const.Op.MEAN,
+                "out": const.OutputSchema.VALUE,
+            },
+            const.OverlayMode.MODE: {
+                "transfer": const.Transfer.OVERLAY_MODE,
+                "op": const.Op.MAJORITY,
+                "out": const.OutputSchema.VALUE,
+            },
+            const.OverlayMode.MASS_PRESERVE: {
+                "transfer": const.Transfer.MASS_PRESERVE,
+                "op": const.Op.SUM,
+                "out": const.OutputSchema.VALUE,
+            },
+            const.OverlayMode.DENSITY_PRESERVE: {
+                "transfer": const.Transfer.OVERLAY_WEIGHTED,
+                "op": const.Op.WSUM,
+                "out": const.OutputSchema.VALUE,
+            },
+            const.OverlayMode.FRACTIONS: {
+                "transfer": const.Transfer.OVERLAY_WEIGHTED,
+                "op": const.Op.FRAC,
+                "out": const.OutputSchema.FRACTIONS,
+            },
+            const.OverlayMode.LIST: {
+                "transfer": const.Transfer.OVERLAY_COLLECT,
+                "op": const.Op.VALUES,
+                "out": const.OutputSchema.LIST,
+            },
+            const.OverlayMode.HISTOGRAM: {
+                "transfer": const.Transfer.OVERLAY_COLLECT,
+                "op": const.Op.VALUES,
+                "out": const.OutputSchema.HISTOGRAM,
+            },
+        }[overlay]
+    if sample is not None:
+        return {
+            "transfer": const.Transfer.SAMPLE,
+            "op": None,
+            "out": const.OutputSchema.VALUE,
+            "interp": sample,
+        }
+    # point (default)
+    out = const.OutputSchema(point) if point is not None else const.OutputSchema.VALUE
+    return {"transfer": const.Transfer.ASSIGN_CENTERS, "op": None, "out": out}
+
+
+def validate_config(
+    point: Optional[str],
+    overlay: Optional[str],
+    sample: Optional[str],
+) -> None:
+    if overlay is not None and sample is not None:
+        raise click.UsageError("--overlay and --sample are mutually exclusive")
+    if point is not None and overlay is not None:
+        raise click.UsageError("--point and --overlay are mutually exclusive")
+    if point is not None and sample is not None:
+        raise click.UsageError("--point and --sample are mutually exclusive")
+
+
 def assemble_kwargs(
     compression: str,
     threads: int,
@@ -196,10 +267,10 @@ def assemble_kwargs(
     overwrite: bool,
     compact: bool,
     geo: str,
-    semantics: str = const.Semantics.POINT_CENTER_STRICT,
-    transfer: str = const.Transfer.ASSIGN_CENTERS,
-    interp: str = const.Interp.NN,
-    out: str = const.OutputSchema.VALUE,
+    point: Optional[str] = None,
+    overlay: Optional[str] = None,
+    sample: Optional[str] = None,
+    valid_coverage_threshold: float = 0.0,
 ) -> dict:
     return {
         "compression": compression,
@@ -209,10 +280,10 @@ def assemble_kwargs(
         "overwrite": overwrite,
         "compact": compact,
         "geo": geo if geo != "none" else None,
-        "semantics": semantics,
-        "transfer": transfer,
-        "interp": interp,
-        "out": out,
+        "point": point,
+        "overlay": overlay,
+        "sample": sample,
+        "valid_coverage_threshold": valid_coverage_threshold,
     }
 
 
@@ -302,7 +373,19 @@ def _build_output_meta(
     compact: bool,
     interp: str,
 ) -> tuple[pd.DataFrame, str]:
-    if transfer == const.Transfer.SAMPLE or (out == "value" and len(aggfuncs) == 1):
+    if (
+        transfer == const.Transfer.SAMPLE
+        or (
+            transfer in const.OVERLAY_TRANSFER_KEYS
+            and out
+            not in (
+                const.OutputSchema.FRACTIONS,
+                const.OutputSchema.LIST,
+                const.OutputSchema.HISTOGRAM,
+            )
+        )
+        or (out == const.OutputSchema.VALUE and len(aggfuncs) == 1)
+    ):
         out_meta = pd.DataFrame(
             {
                 partition_col: pd.Series([], dtype="string"),
@@ -325,6 +408,8 @@ def _build_output_meta(
         _compacting = "/compacting" if compact else ""
         if transfer == const.Transfer.SAMPLE:
             tqdm_label = f"Sampling ({interp}){_compacting}"
+        elif transfer in const.OVERLAY_TRANSFER_KEYS:
+            tqdm_label = f"Overlay{_compacting}"
         else:
             tqdm_label = f"Aggregating{_compacting}"
     else:
@@ -337,7 +422,7 @@ def _build_output_meta(
         )
         tqdm_label = (
             "Collecting"
-            if out != "value"
+            if out != const.OutputSchema.VALUE
             else f"Aggregating{'/compacting' if compact else ''}"
         )
     out_meta.index = pd.Index([], name=index_col, dtype="string")
@@ -359,7 +444,15 @@ def _build_write_schema(
         pa.field(index_col, pa.string()),
         pa.field(partition_col, pa.string()),
     ]
-    if out == "list":
+    if out == const.OutputSchema.FRACTIONS:
+        frac_struct = pa.struct(
+            [
+                pa.field("classes", pa.list_(pa.int64())),
+                pa.field("fractions", pa.list_(pa.float64())),
+            ]
+        )
+        return pa.schema(common_fields + [pa.field(c, frac_struct) for c in band_cols])
+    if out == const.OutputSchema.LIST:
         return pa.schema(
             common_fields
             + [
@@ -367,7 +460,7 @@ def _build_write_schema(
                 for c in band_cols
             ]
         )
-    if out == "histogram":
+    if out == const.OutputSchema.HISTOGRAM:
         return pa.schema(
             common_fields
             + [
@@ -489,7 +582,7 @@ def address_boundary_issues(
     # Capture source dtypes before map_partitions changes them.
     source_dtypes = {c: ddf[c].dtype for c in band_cols}
 
-    out = kwargs.get("out", "value")
+    out = kwargs.get("out", const.OutputSchema.VALUE)
     transfer = kwargs.get("transfer", const.Transfer.ASSIGN_CENTERS)
     decimals = kwargs.get("decimals")
     aggfuncs = kwargs.get("aggfuncs", [("mean", "mean")])
@@ -508,13 +601,13 @@ def address_boundary_issues(
     )
 
     with TqdmCallback(desc=tqdm_label):
-        if transfer == const.Transfer.SAMPLE:
+        if transfer == const.Transfer.SAMPLE or transfer in const.OVERLAY_TRANSFER_KEYS:
             mp_func = indexer.parent_groupby_nn
             mp_args = (resolution, parent_res, decimals)
-        elif out == "list":
+        elif out == const.OutputSchema.LIST:
             mp_func = indexer.parent_groupby_list
             mp_args = (resolution, parent_res, decimals)
-        elif out == "histogram":
+        elif out == const.OutputSchema.HISTOGRAM:
             mp_func = indexer.parent_groupby_histogram
             mp_args = (resolution, parent_res, decimals)
         else:
@@ -554,33 +647,6 @@ def address_boundary_issues(
     return output
 
 
-def validate_transfer_config(
-    semantics: str, transfer: str, interp: str, out: str
-) -> None:
-    if (semantics, transfer) in const.INAPPROPRIATE:
-        raise click.UsageError(
-            f"--transfer {transfer!r} is inappropriate for --semantics {semantics!r}. "
-            f"See the semantics × transfer matrix in the documentation."
-        )
-    if (semantics, transfer, interp) in const.INAPPROPRIATE_INTERP:
-        raise click.UsageError(
-            f"--transfer {transfer!r} --interp {interp!r} is inappropriate for "
-            f"--semantics {semantics!r}. "
-            f"See the semantics × transfer matrix in the documentation."
-        )
-    lookup = (
-        (semantics, transfer, interp, out)
-        if transfer == const.Transfer.SAMPLE
-        else (semantics, transfer, out)
-    )
-    if lookup not in const.IMPLEMENTED:
-        raise NotImplementedError(
-            f"--semantics {semantics!r} / --transfer {transfer!r}"
-            + (f" / --interp {interp!r}" if transfer == const.Transfer.SAMPLE else "")
-            + f" / --out {out!r} is a valid combination but is not yet implemented."
-        )
-
-
 def initial_index(
     dggs: str,
     raster_input: Union[Path, str],
@@ -602,22 +668,27 @@ def initial_index(
     the output of this "stage 1" processing) to a secondary function
     that addresses issues at the boundaries of raster windows.
     """
-    validate_transfer_config(
-        kwargs["semantics"],
-        kwargs["transfer"],
-        kwargs.get("interp", const.Interp.NN),
-        kwargs["out"],
+    validate_config(
+        kwargs.get("point"),
+        kwargs.get("overlay"),
+        kwargs.get("sample"),
     )
+    internal = resolve_to_internal(
+        kwargs.get("point"),
+        kwargs.get("overlay"),
+        kwargs.get("sample"),
+    )
+    kwargs = {**kwargs, **internal}
 
     indexer = idxfactory.indexer_instance(dggs)
 
     if (
-        kwargs["transfer"] == const.Transfer.SAMPLE
+        kwargs["transfer"] in {const.Transfer.SAMPLE, *const.OVERLAY_TRANSFER_KEYS}
         and not indexer.SUPPORTS_CELL_ENUMERATION
     ):
         raise click.UsageError(
-            f"--transfer sample requires spatial cell enumeration, which is not "
-            f"supported by the {dggs!r} DGGS."
+            f"--transfer {kwargs['transfer']!r} requires spatial cell enumeration, "
+            f"which is not supported by the {dggs!r} DGGS."
         )
 
     LOGGER.info(
@@ -726,22 +797,6 @@ def initial_index(
                         compression=compression,
                     )
 
-                def process(window):
-                    sdf = da.rio.isel_window(window)
-                    result = indexer.index_func(
-                        sdf,
-                        resolution,
-                        parent_res,
-                        nodata,
-                        band_labels=selected_labels,
-                        nodata_policy=nodata_policy,
-                        emit_nodata_value=emit_nodata_value,
-                        transformer=transformer,
-                    )
-                    _write_result(result, window)
-                    return None
-
-                ctx = None
                 if kwargs["transfer"] == const.Transfer.SAMPLE:
                     ctx = _SampleIndexer(
                         src=src,
@@ -756,8 +811,6 @@ def initial_index(
                         emit_nodata_value=emit_nodata_value,
                         write_result=_write_result,
                     )
-
-                if kwargs["transfer"] == const.Transfer.SAMPLE:
                     interp = kwargs.get("interp", const.Interp.NN)
                     if interp == const.Interp.BILINEAR:
                         stage1_func = ctx.process_bilinear
@@ -767,8 +820,37 @@ def initial_index(
                         stage1_func = ctx.process_lanczos
                     else:
                         stage1_func = ctx.process_nn
+                elif kwargs["transfer"] in const.OVERLAY_TRANSFER_KEYS:
+                    ctx = _OverlayIndexer(
+                        raster_input=str(raster_input),
+                        indexer=indexer,
+                        resolution=resolution,
+                        parent_res=parent_res,
+                        selected_labels=selected_labels,
+                        selected_indices=tuple(selected_indices),
+                        nodata_policy=nodata_policy,
+                        emit_nodata_value=emit_nodata_value,
+                        write_result=_write_result,
+                        op=kwargs["op"],
+                        out=kwargs["out"],
+                        min_valid_coverage=kwargs.get("valid_coverage_threshold", 0.0),
+                        decimals=kwargs.get("decimals"),
+                    )
+                    stage1_func = ctx.process_window
                 else:
-                    stage1_func = process
+                    ctx = _AssignCentersIndexer(
+                        da=da,
+                        indexer=indexer,
+                        resolution=resolution,
+                        parent_res=parent_res,
+                        nodata=nodata,
+                        selected_labels=selected_labels,
+                        nodata_policy=nodata_policy,
+                        emit_nodata_value=emit_nodata_value,
+                        transformer=transformer,
+                        write_result=_write_result,
+                    )
+                    stage1_func = ctx.process_window
                 try:
                     with ThreadPoolExecutor(
                         max_workers=kwargs["threads"]
@@ -779,15 +861,14 @@ def initial_index(
                             pbar.update(1)
                 finally:
                     da.close()
-                    # da, transformer, and process are closure cells and won't
-                    # be freed by reference counting alone if they're in a dask
-                    # task-graph cycle.  Explicitly delete all three and collect
-                    # now, while still inside rio.open(), so the GDAL/PROJ
-                    # objects they hold are torn down during normal execution
-                    # rather than at interpreter shutdown (which causes a
-                    # silent "Error in sys.excepthook" crash for non-WGS84
-                    # rasters).
-                    del da, transformer, process, ctx, stage1_func
+                    # da and transformer are held by ctx as dataclass fields and
+                    # won't be freed by reference counting alone if they're in a
+                    # dask task-graph cycle.  Explicitly delete the locals and ctx
+                    # now, while still inside rio.open(), so the GDAL/PROJ objects
+                    # they hold are torn down during normal execution rather than at
+                    # interpreter shutdown (which causes a silent "Error in
+                    # sys.excepthook" crash for non-WGS84 rasters).
+                    del da, transformer, ctx, stage1_func
                     gc.collect()
             LOGGER.debug("Stage 1 (primary indexing) complete")
             return address_boundary_issues(

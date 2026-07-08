@@ -132,15 +132,21 @@ class ResolutionMode(StrEnum):
     MIN_DIFF = "min-diff"
 
 
-class Semantics(StrEnum):
-    POINT_CENTER_STRICT = "point_center_strict"
-    POINT_SAMPLE_FIELD = "point_sample_field"
-    CELL_AVERAGE = "cell_average"
-    PIECEWISE_CONSTANT = "piecewise_constant"
-    FRACTION_COVER = "fraction_cover"
-    COUNT_TOTAL = "count_total"
-    DENSITY = "density"
-    EVENT_INDICATOR = "event_indicator"
+class Interp(StrEnum):
+    NN = "nn"
+    BILINEAR = "bilinear"
+    BICUBIC = "bicubic"
+    LANCZOS = "lanczos"
+
+
+class OverlayMode(StrEnum):
+    WEIGHTED = "weighted"
+    MODE = "mode"
+    MASS_PRESERVE = "mass-preserve"
+    DENSITY_PRESERVE = "density-preserve"
+    FRACTIONS = "fractions"
+    LIST = "list"
+    HISTOGRAM = "histogram"
 
 
 class Transfer(StrEnum):
@@ -149,13 +155,16 @@ class Transfer(StrEnum):
     OVERLAY_WEIGHTED = "overlay_weighted"
     OVERLAY_MODE = "overlay_mode"
     MASS_PRESERVE = "mass_preserve"
+    OVERLAY_COLLECT = "overlay_collect"
 
 
-class Interp(StrEnum):
-    NN = "nn"
-    BILINEAR = "bilinear"
-    BICUBIC = "bicubic"
-    LANCZOS = "lanczos"
+class Op(StrEnum):
+    MEAN = "mean"
+    MAJORITY = "majority"
+    SUM = "sum"
+    WSUM = "wsum"
+    FRAC = "frac"
+    VALUES = "values"
 
 
 class OutputSchema(StrEnum):
@@ -165,70 +174,20 @@ class OutputSchema(StrEnum):
     LIST = "list"
 
 
-INAPPROPRIATE: set = {
-    # point_center_strict: only assign_centers is appropriate
-    ("point_center_strict", "sample"),
-    ("point_center_strict", "overlay_weighted"),
-    ("point_center_strict", "overlay_mode"),
-    ("point_center_strict", "mass_preserve"),
-    # point_sample_field: assign_centers treats pixels as non-interpolatable points
-    ("point_sample_field", "assign_centers"),
-    # cell_average: must use area-weighted overlay
-    ("cell_average", "assign_centers"),
-    ("cell_average", "sample"),
-    ("cell_average", "overlay_mode"),
-    ("cell_average", "mass_preserve"),
-    # piecewise_constant: assign_centers ignores pixel area; mass wrong
-    # Note: sample --interp nn is valid; sample --interp bilinear/bicubic is not.
-    # Interp-specific restrictions are enforced separately when non-nn interp is added.
-    ("piecewise_constant", "assign_centers"),
-    ("piecewise_constant", "mass_preserve"),
-    # fraction_cover: values are areal fractions; point-based methods are wrong
-    ("fraction_cover", "assign_centers"),
-    ("fraction_cover", "sample"),
-    ("fraction_cover", "overlay_mode"),
-    ("fraction_cover", "mass_preserve"),
-    # count_total: totals require mass preservation; sampling breaks conservation
-    ("count_total", "assign_centers"),
-    ("count_total", "sample"),
-    ("count_total", "overlay_weighted"),
-    ("count_total", "overlay_mode"),
-    # density: per-area intensity; assign_centers and overlay_mode are wrong
-    ("density", "assign_centers"),
-    ("density", "overlay_mode"),
-    ("density", "mass_preserve"),
-}
-
-INAPPROPRIATE_INTERP: set = {
-    # piecewise_constant: smooth interpolation between categorical values is meaningless
-    ("piecewise_constant", "sample", "bilinear"),
-    ("piecewise_constant", "sample", "bicubic"),
-    ("piecewise_constant", "sample", "lanczos"),
-    # event_indicator: smooth interpolation of discrete events produces fractional nonsense
-    ("event_indicator", "sample", "bilinear"),
-    ("event_indicator", "sample", "bicubic"),
-    ("event_indicator", "sample", "lanczos"),
-}
-
-IMPLEMENTED: set = {
-    ("point_center_strict", "assign_centers", "value"),
-    ("point_center_strict", "assign_centers", "list"),
-    ("point_center_strict", "assign_centers", "histogram"),
-    ("event_indicator", "assign_centers", "value"),
-    ("event_indicator", "assign_centers", "list"),
-    ("event_indicator", "assign_centers", "histogram"),
-    # sample transfer uses 4-tuples: (semantics, transfer, interp, out)
-    ("point_sample_field", "sample", "nn", "value"),
-    ("piecewise_constant", "sample", "nn", "value"),
-    ("event_indicator", "sample", "nn", "value"),
-    ("density", "sample", "nn", "value"),
-    ("density", "sample", "bilinear", "value"),
-    ("density", "sample", "bicubic", "value"),
-    ("density", "sample", "lanczos", "value"),
-    ("point_sample_field", "sample", "bilinear", "value"),
-    ("point_sample_field", "sample", "bicubic", "value"),
-    ("point_sample_field", "sample", "lanczos", "value"),
-}
+# The four distinct internal transfer implementations for overlay.
+# Multiple OverlayMode values can map to the same Transfer (e.g. 'weighted',
+# 'density-preserve', and 'fractions' all use OVERLAY_WEIGHTED; 'list' and
+# 'histogram' both use OVERLAY_COLLECT). A positive set so that adding a new
+# transfer type requires an explicit decision here rather than updating every
+# negative check against Transfer.SAMPLE / Transfer.ASSIGN_CENTERS.
+OVERLAY_TRANSFER_KEYS: frozenset = frozenset(
+    {
+        Transfer.OVERLAY_WEIGHTED,
+        Transfer.OVERLAY_MODE,
+        Transfer.MASS_PRESERVE,
+        Transfer.OVERLAY_COLLECT,
+    }
+)
 
 
 # Surface area of the WGS84 oblate spheroid in m²
