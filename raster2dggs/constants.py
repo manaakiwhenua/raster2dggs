@@ -180,7 +180,7 @@ class OutputSchema(StrEnum):
 # 'histogram' both use OVERLAY_COLLECT). A positive set so that adding a new
 # transfer type requires an explicit decision here rather than updating every
 # negative check against Transfer.SAMPLE / Transfer.ASSIGN_CENTERS.
-_OVERLAY_TRANSFER_KEYS: frozenset = frozenset(
+OVERLAY_TRANSFER_KEYS: frozenset = frozenset(
     {
         Transfer.OVERLAY_WEIGHTED,
         Transfer.OVERLAY_MODE,

@@ -32,7 +32,6 @@ from rasterio.warp import transform_bounds, transform as warp_transform
 from shapely.geometry import Polygon, shape
 
 import raster2dggs.constants as const
-from raster2dggs.constants import Op, OutputSchema
 from raster2dggs.interfaces import IRasterIndexer
 
 LOGGER = logging.getLogger(__name__)
@@ -95,7 +94,7 @@ def _build_collect_table(
             arrays[col] = pa.array(result_df[col].tolist())
     for idx, col in zip(selected_indices, band_cols):
         elem_type = _pa_elem_type(src_dtypes[idx - 1], decimals)
-        if out == OutputSchema.LIST:
+        if out == const.OutputSchema.LIST:
             arrays[col] = pa.array(result_df[col].tolist(), type=pa.list_(elem_type))
         else:
             hist_type = pa.struct(
@@ -150,8 +149,8 @@ class _OverlayIndexer:
     nodata_policy: str
     emit_nodata_value: Optional[Any]
     write_result: Callable
-    op: Op
-    out: OutputSchema = OutputSchema.VALUE
+    op: const.Op
+    out: const.OutputSchema = const.OutputSchema.VALUE
     min_valid_coverage: float = 0.0
     decimals: Optional[int] = None
 
@@ -160,9 +159,9 @@ class _OverlayIndexer:
         # values representing partial mass, not missing data. Filtering would break
         # the conservation property the transfer is designed to enforce.
         self._apply_coverage_threshold = (
-            self.min_valid_coverage > 0.0 and self.op != Op.SUM
+            self.min_valid_coverage > 0.0 and self.op != const.Op.SUM
         )
-        if self.min_valid_coverage > 0.0 and self.op == Op.SUM:
+        if self.min_valid_coverage > 0.0 and self.op == const.Op.SUM:
             LOGGER.warning(
                 "--valid-coverage-threshold has no effect with --transfer mass_preserve "
                 "(partial sums are correct values; filtering them would break mass conservation)"
@@ -175,7 +174,9 @@ class _OverlayIndexer:
             self._src_band_count = src.count
             self._src_dtypes = src.dtypes
 
-            if (self.op == Op.MEAN and src.crs.is_geographic) or self.op == Op.WSUM:
+            if (
+                self.op == const.Op.MEAN and src.crs.is_geographic
+            ) or self.op == const.Op.WSUM:
                 # Pixel-area weights raster for exactextract weighted_mean / weighted_sum.
                 # For geographic CRS: geodesic area varies by row (latitude); use pyproj.
                 # For projected CRS (wsum only): pixel area is constant from the transform.
@@ -219,7 +220,7 @@ class _OverlayIndexer:
                     areas.max(),
                 )
 
-            if self._apply_coverage_threshold or self.op == Op.FRAC:
+            if self._apply_coverage_threshold or self.op == const.Op.FRAC:
                 # Densified boundary polygon of the raster footprint in WGS84.
                 # Sampling n_edge points per edge (in pixel space) and reprojecting
                 # them all correctly captures curved boundaries for projected CRS
@@ -279,7 +280,9 @@ class _OverlayIndexer:
         #   unweighted: "{op}" (single-band) or "band_{i}_{op}" (multi-band)
         #   weighted:   "weighted_{op}" (single-band) or "band_{i}_weight_weighted_{op}" (multi-band)
         if self._geodesic_weights_path is not None:
-            weighted_agg = "weighted_sum" if self.op == Op.WSUM else "weighted_mean"
+            weighted_agg = (
+                "weighted_sum" if self.op == const.Op.WSUM else "weighted_mean"
+            )
             if self._src_band_count == 1:
                 self._col_rename = {weighted_agg: self.selected_labels[0]}
             else:
@@ -295,14 +298,25 @@ class _OverlayIndexer:
                 for idx, label in zip(self.selected_indices, self.selected_labels)
             }
 
-    def __del__(self):
+    def _cleanup_temp_files(self):
         for path_attr in ("_coverage_mask_path", "_geodesic_weights_path"):
             path = getattr(self, path_attr, None)
             if path is not None:
                 try:
                     os.unlink(path)
                 except OSError:
-                    pass
+                    pass  # already deleted or interpreter shutting down — nothing to do
+                finally:
+                    setattr(self, path_attr, None)
+
+    def close(self):
+        self._cleanup_temp_files()
+
+    def __del__(self):
+        try:
+            self.close()
+        except Exception:
+            pass
 
     def process_window(self, window):
         """Compute overlay stats for all DGGS cells overlapping this raster window."""
@@ -349,10 +363,10 @@ class _OverlayIndexer:
         # reproject explicitly so intersections are computed in the correct coordinate space.
         gdf = gdf_wgs84.to_crs(self._src_crs)
 
-        is_frac = self.op == Op.FRAC
-        is_collect = self.op == Op.VALUES
+        is_frac = self.op == const.Op.FRAC
+        is_collect = self.op == const.Op.VALUES
         is_geodesic = self._geodesic_weights_path is not None
-        weighted_agg = "weighted_sum" if self.op == Op.WSUM else "weighted_mean"
+        weighted_agg = "weighted_sum" if self.op == const.Op.WSUM else "weighted_mean"
         if is_frac:
             main_ops = ["frac", "unique"]
         elif is_geodesic:
@@ -463,7 +477,7 @@ class _OverlayIndexer:
             for idx, label in zip(self.selected_indices, self.selected_labels):
                 vc = "values" if self._src_band_count == 1 else f"band_{idx}_values"
                 raw = result_df[vc]
-                if self.out == OutputSchema.LIST:
+                if self.out == const.OutputSchema.LIST:
                     result_df[label] = [
                         (
                             (

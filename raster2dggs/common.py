@@ -33,7 +33,6 @@ from rasterio.warp import transform_bounds
 from rasterio.transform import rowcol
 
 import raster2dggs.constants as const
-from raster2dggs.constants import Transfer, Op, OutputSchema, OverlayMode
 import raster2dggs.indexerfactory as idxfactory
 
 from raster2dggs.interfaces import IRasterIndexer
@@ -199,52 +198,52 @@ def resolve_to_internal(
     """Map CLI flags to the internal (transfer_key, op, out_key) triple."""
     if overlay is not None:
         return {
-            OverlayMode.WEIGHTED: {
-                "transfer": Transfer.OVERLAY_WEIGHTED,
-                "op": Op.MEAN,
-                "out": OutputSchema.VALUE,
+            const.OverlayMode.WEIGHTED: {
+                "transfer": const.Transfer.OVERLAY_WEIGHTED,
+                "op": const.Op.MEAN,
+                "out": const.OutputSchema.VALUE,
             },
-            OverlayMode.MODE: {
-                "transfer": Transfer.OVERLAY_MODE,
-                "op": Op.MAJORITY,
-                "out": OutputSchema.VALUE,
+            const.OverlayMode.MODE: {
+                "transfer": const.Transfer.OVERLAY_MODE,
+                "op": const.Op.MAJORITY,
+                "out": const.OutputSchema.VALUE,
             },
-            OverlayMode.MASS_PRESERVE: {
-                "transfer": Transfer.MASS_PRESERVE,
-                "op": Op.SUM,
-                "out": OutputSchema.VALUE,
+            const.OverlayMode.MASS_PRESERVE: {
+                "transfer": const.Transfer.MASS_PRESERVE,
+                "op": const.Op.SUM,
+                "out": const.OutputSchema.VALUE,
             },
-            OverlayMode.DENSITY_PRESERVE: {
-                "transfer": Transfer.OVERLAY_WEIGHTED,
-                "op": Op.WSUM,
-                "out": OutputSchema.VALUE,
+            const.OverlayMode.DENSITY_PRESERVE: {
+                "transfer": const.Transfer.OVERLAY_WEIGHTED,
+                "op": const.Op.WSUM,
+                "out": const.OutputSchema.VALUE,
             },
-            OverlayMode.FRACTIONS: {
-                "transfer": Transfer.OVERLAY_WEIGHTED,
-                "op": Op.FRAC,
-                "out": OutputSchema.FRACTIONS,
+            const.OverlayMode.FRACTIONS: {
+                "transfer": const.Transfer.OVERLAY_WEIGHTED,
+                "op": const.Op.FRAC,
+                "out": const.OutputSchema.FRACTIONS,
             },
-            OverlayMode.LIST: {
-                "transfer": Transfer.OVERLAY_COLLECT,
-                "op": Op.VALUES,
-                "out": OutputSchema.LIST,
+            const.OverlayMode.LIST: {
+                "transfer": const.Transfer.OVERLAY_COLLECT,
+                "op": const.Op.VALUES,
+                "out": const.OutputSchema.LIST,
             },
-            OverlayMode.HISTOGRAM: {
-                "transfer": Transfer.OVERLAY_COLLECT,
-                "op": Op.VALUES,
-                "out": OutputSchema.HISTOGRAM,
+            const.OverlayMode.HISTOGRAM: {
+                "transfer": const.Transfer.OVERLAY_COLLECT,
+                "op": const.Op.VALUES,
+                "out": const.OutputSchema.HISTOGRAM,
             },
         }[overlay]
     if sample is not None:
         return {
-            "transfer": Transfer.SAMPLE,
+            "transfer": const.Transfer.SAMPLE,
             "op": None,
-            "out": OutputSchema.VALUE,
+            "out": const.OutputSchema.VALUE,
             "interp": sample,
         }
     # point (default)
-    out = OutputSchema(point) if point is not None else OutputSchema.VALUE
-    return {"transfer": Transfer.ASSIGN_CENTERS, "op": None, "out": out}
+    out = const.OutputSchema(point) if point is not None else const.OutputSchema.VALUE
+    return {"transfer": const.Transfer.ASSIGN_CENTERS, "op": None, "out": out}
 
 
 def validate_config(
@@ -375,13 +374,17 @@ def _build_output_meta(
     interp: str,
 ) -> tuple[pd.DataFrame, str]:
     if (
-        transfer == Transfer.SAMPLE
+        transfer == const.Transfer.SAMPLE
         or (
-            transfer in const._OVERLAY_TRANSFER_KEYS
+            transfer in const.OVERLAY_TRANSFER_KEYS
             and out
-            not in (OutputSchema.FRACTIONS, OutputSchema.LIST, OutputSchema.HISTOGRAM)
+            not in (
+                const.OutputSchema.FRACTIONS,
+                const.OutputSchema.LIST,
+                const.OutputSchema.HISTOGRAM,
+            )
         )
-        or (out == OutputSchema.VALUE and len(aggfuncs) == 1)
+        or (out == const.OutputSchema.VALUE and len(aggfuncs) == 1)
     ):
         out_meta = pd.DataFrame(
             {
@@ -403,9 +406,9 @@ def _build_output_meta(
             }
         )
         _compacting = "/compacting" if compact else ""
-        if transfer == Transfer.SAMPLE:
+        if transfer == const.Transfer.SAMPLE:
             tqdm_label = f"Sampling ({interp}){_compacting}"
-        elif transfer in const._OVERLAY_TRANSFER_KEYS:
+        elif transfer in const.OVERLAY_TRANSFER_KEYS:
             tqdm_label = f"Overlay{_compacting}"
         else:
             tqdm_label = f"Aggregating{_compacting}"
@@ -419,7 +422,7 @@ def _build_output_meta(
         )
         tqdm_label = (
             "Collecting"
-            if out != OutputSchema.VALUE
+            if out != const.OutputSchema.VALUE
             else f"Aggregating{'/compacting' if compact else ''}"
         )
     out_meta.index = pd.Index([], name=index_col, dtype="string")
@@ -441,7 +444,7 @@ def _build_write_schema(
         pa.field(index_col, pa.string()),
         pa.field(partition_col, pa.string()),
     ]
-    if out == OutputSchema.FRACTIONS:
+    if out == const.OutputSchema.FRACTIONS:
         frac_struct = pa.struct(
             [
                 pa.field("classes", pa.list_(pa.int64())),
@@ -449,7 +452,7 @@ def _build_write_schema(
             ]
         )
         return pa.schema(common_fields + [pa.field(c, frac_struct) for c in band_cols])
-    if out == OutputSchema.LIST:
+    if out == const.OutputSchema.LIST:
         return pa.schema(
             common_fields
             + [
@@ -457,7 +460,7 @@ def _build_write_schema(
                 for c in band_cols
             ]
         )
-    if out == OutputSchema.HISTOGRAM:
+    if out == const.OutputSchema.HISTOGRAM:
         return pa.schema(
             common_fields
             + [
@@ -579,8 +582,8 @@ def address_boundary_issues(
     # Capture source dtypes before map_partitions changes them.
     source_dtypes = {c: ddf[c].dtype for c in band_cols}
 
-    out = kwargs.get("out", OutputSchema.VALUE)
-    transfer = kwargs.get("transfer", Transfer.ASSIGN_CENTERS)
+    out = kwargs.get("out", const.OutputSchema.VALUE)
+    transfer = kwargs.get("transfer", const.Transfer.ASSIGN_CENTERS)
     decimals = kwargs.get("decimals")
     aggfuncs = kwargs.get("aggfuncs", [("mean", "mean")])
 
@@ -598,13 +601,13 @@ def address_boundary_issues(
     )
 
     with TqdmCallback(desc=tqdm_label):
-        if transfer == Transfer.SAMPLE or transfer in const._OVERLAY_TRANSFER_KEYS:
+        if transfer == const.Transfer.SAMPLE or transfer in const.OVERLAY_TRANSFER_KEYS:
             mp_func = indexer.parent_groupby_nn
             mp_args = (resolution, parent_res, decimals)
-        elif out == OutputSchema.LIST:
+        elif out == const.OutputSchema.LIST:
             mp_func = indexer.parent_groupby_list
             mp_args = (resolution, parent_res, decimals)
-        elif out == OutputSchema.HISTOGRAM:
+        elif out == const.OutputSchema.HISTOGRAM:
             mp_func = indexer.parent_groupby_histogram
             mp_args = (resolution, parent_res, decimals)
         else:
@@ -680,7 +683,7 @@ def initial_index(
     indexer = idxfactory.indexer_instance(dggs)
 
     if (
-        kwargs["transfer"] in {Transfer.SAMPLE, *const._OVERLAY_TRANSFER_KEYS}
+        kwargs["transfer"] in {const.Transfer.SAMPLE, *const.OVERLAY_TRANSFER_KEYS}
         and not indexer.SUPPORTS_CELL_ENUMERATION
     ):
         raise click.UsageError(
@@ -741,7 +744,7 @@ def initial_index(
                     src.crs, "EPSG:4326", always_xy=True
                 )
                 LOGGER.debug("Coordinate transformer: %s → EPSG:4326", src.crs)
-                if kwargs["transfer"] == Transfer.SAMPLE:
+                if kwargs["transfer"] == const.Transfer.SAMPLE:
                     inverse_transformer = pyproj.Transformer.from_crs(
                         "EPSG:4326", src.crs, always_xy=True
                     )
@@ -794,7 +797,7 @@ def initial_index(
                         compression=compression,
                     )
 
-                if kwargs["transfer"] == Transfer.SAMPLE:
+                if kwargs["transfer"] == const.Transfer.SAMPLE:
                     ctx = _SampleIndexer(
                         src=src,
                         da=da,
@@ -817,7 +820,7 @@ def initial_index(
                         stage1_func = ctx.process_lanczos
                     else:
                         stage1_func = ctx.process_nn
-                elif kwargs["transfer"] in const._OVERLAY_TRANSFER_KEYS:
+                elif kwargs["transfer"] in const.OVERLAY_TRANSFER_KEYS:
                     ctx = _OverlayIndexer(
                         raster_input=str(raster_input),
                         indexer=indexer,
