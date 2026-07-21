@@ -1,5 +1,6 @@
 __pycache__
 dist
+CLAUDE.md
 conda*
 .conda*
 .vscode/
