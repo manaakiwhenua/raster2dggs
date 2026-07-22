@@ -326,6 +326,20 @@ GDAL_CACHEMAX=512 raster2dggs h3 input.tif output/ -r 8 --overlay weighted
 
 The value is in megabytes. The default is 64 MB. For large rasters or high DGGS resolutions where each window covers many cells, a larger cache can significantly reduce processing time.
 
+**Check your input's internal tiling.** raster2dggs processes one GDAL block at a time (`src.block_windows()`), for every mode — `--point`, `--sample`, and `--overlay` alike. Some GeoTIFFs (particularly ones exported without explicit tiling options) are stored as *strips* — one block per row — rather than square tiles. A strip-encoded raster can produce thousands of tiny windows instead of a few hundred properly-sized ones, and since each window carries its own per-window overhead (more so for `--overlay`, which re-derives the set of overlapping DGGS cells per window), this can turn an otherwise-quick job into one that appears to hang. Check with:
+
+```bash
+gdalinfo input.tif | grep Block=
+```
+
+`Block=<width>x1` (block height of 1) means it's strip-encoded. If so, re-tile it first:
+
+```bash
+gdal_translate -co TILED=YES -co BLOCKXSIZE=256 -co BLOCKYSIZE=256 input.tif input_tiled.tif
+```
+
+(If `gdal_translate` warns about the CRS definition not matching the EPSG registry, prefer re-tiling via `rasterio` directly instead, copying `src.profile`/`src.crs` as-is, to avoid GDAL rewriting the projection metadata.)
+
 #### Valid-data coverage threshold (`-vct` / `--valid-coverage-threshold`)
 
 By default (`-vct 0.0`) any cell with at least one valid pixel in its overlap area receives a value. Use `--valid-coverage-threshold` to require a minimum fraction of the cell's raster-overlapping area to have valid (non-nodata) data:
@@ -709,6 +723,16 @@ raster2dggs h3 --resolution 7 --point list -d 2 input.tif ./output
 Histogram of contributing pixel values per cell:
 ```bash
 raster2dggs h3 --resolution 7 --point histogram -d 0 input.tif ./output
+```
+
+Numeric histogram of a continuous field (e.g. DEM), binned into 100 m intervals:
+```bash
+raster2dggs h3 --resolution 8 --point histogram --hist-width 100 input.tif ./output
+```
+
+Area-weighted histogram per cell, explicit bins, normalised so each cell's bins sum to ~1:
+```bash
+raster2dggs h3 --resolution 8 --overlay histogram --hist-bins 0,500,1000,1500,2000,inf --hist-weight area --hist-normalize valid-overlap -d none input.tif ./output
 ```
 
 Nearest-neighbour sampling for a continuous field (e.g. DEM, temperature grid):
