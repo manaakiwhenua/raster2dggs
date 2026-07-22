@@ -361,7 +361,9 @@ The threshold is applied **per band**: a cell may receive a valid value for one 
 
 With binning active, each populated bin's own bounds are reported directly (as two parallel arrays, `left`/`right`) alongside its weight, rather than requiring you to already know the bin configuration to interpret a row. Every bin, in every band and every row of a given output, is half-open `[left, right)`, except the very last bin overall, which is also closed on the right — a fixed rule of the tool (matching `numpy.histogram`'s convention), not something that can vary bin-to-bin, so it isn't stored per bin.
 
-Only non-empty bins are reported, and a bin's position in the arrays isn't fixed — cell A might have `[20,50)` at index 0, cell B at index 3, cell C not at all. To pull out a specific bin's value (e.g. in a QGIS expression or a SQL query), search by value rather than by position, e.g. in QGIS:
+Only non-empty bins are reported, and a bin's position in the arrays isn't fixed — cell A might have `[20,50)` at index 0, cell B at index 3, cell C not at all. So pull out a specific bin's value by searching for it, not by a fixed array index.
+
+For example, to style a layer in QGIS by the `[20,50)` bin's `area_share` — open the file as a vector layer (QGIS's native GeoParquet/Parquet support needs QGIS ≥ 3.32 with a recent enough GDAL), then use this as the expression in the Field Calculator (to materialise a new field) or as a data-defined override on a symbol/label property:
 
 ```
 with_variable('idx', array_find("band_1.left", 20),
@@ -369,7 +371,15 @@ with_variable('idx', array_find("band_1.left", 20),
 )
 ```
 
-(the `ELSE 0` handles a cell that had nothing in that bin at all, since it's sparse, not an error — and note the `@idx` references to the variable, not `'idx'`/`"idx"`: single quotes are a QGIS string literal, double quotes are a field reference, and neither is the same as `@idx`, the actual variable reference. If `with_variable` still doesn't resolve inside the `CASE` in your QGIS version/context, repeat the `array_find` call instead of relying on the variable: `CASE WHEN array_find("band_1.left", 20) >= 0 THEN array_get("band_1.area_share", array_find("band_1.left", 20)) ELSE 0 END`.)
+`"band_1.left"`/`"band_1.area_share"` are the dotted names GDAL's Parquet driver gives to struct sub-fields — check the actual field names for your file in QGIS's Fields panel/Browser, since the band column name (`band_1` here) depends on your raster's band labels. `with_variable`'s first argument, `'idx'` (the name being *defined*), stays a single-quoted string; every later *use* of it must be `@idx` — QGIS variables always take the `@` prefix, and `'idx'`/`"idx"` (string literal / field reference) are different things that will fail. The `ELSE 0` handles a cell with nothing in that bin at all — sparse, not an error.
+
+If `with_variable` doesn't resolve inside the `CASE` for you (a known QGIS scoping quirk in some versions/contexts), skip it and just repeat the search:
+
+```
+CASE WHEN array_find("band_1.left", 20) >= 0
+     THEN array_get("band_1.area_share", array_find("band_1.left", 20))
+     ELSE 0 END
+```
 
 **Weighting** (`--hist-weight`, `--overlay histogram` only):
 - `count` (default) — each contributing pixel counts as 1.
