@@ -269,6 +269,7 @@ def validate_config(
     hist_bins: Optional[Sequence[float]] = None,
     hist_width: Optional[float] = None,
     hist_weight: Optional[str] = None,
+    hist_normalize: Optional[str] = None,
 ) -> None:
     if overlay is not None and sample is not None:
         raise click.UsageError("--overlay and --sample are mutually exclusive")
@@ -282,6 +283,15 @@ def validate_config(
         raise click.UsageError(
             "--hist-weight area requires --overlay histogram "
             "(area weighting is undefined for --point/--sample)"
+        )
+    if (
+        hist_weight == const.HistWeight.COUNT
+        and hist_normalize == const.HistNormalize.CELL_AREA
+    ):
+        raise click.UsageError(
+            "--hist-weight count with --hist-normalize cell-area is not supported "
+            "(a pixel count divided by area is a density, not a count or a fraction -- "
+            "use --hist-weight area instead)"
         )
 
 
@@ -498,22 +508,13 @@ def _build_write_schema(
             ]
         )
     if out == const.OutputSchema.HISTOGRAM:
-        fields = []
-        for c in band_cols:
-            values_type, counts_type = histogram.hist_arrow_types(
-                hist_spec, decimals, source_dtypes[c]
+        fields = [
+            pa.field(
+                c,
+                histogram.histogram_struct_type(hist_spec, decimals, source_dtypes[c]),
             )
-            fields.append(
-                pa.field(
-                    c,
-                    pa.struct(
-                        [
-                            pa.field("values", pa.list_(values_type)),
-                            pa.field("counts", pa.list_(counts_type)),
-                        ]
-                    ),
-                )
-            )
+            for c in band_cols
+        ]
         return pa.schema(common_fields + fields)
     if len(aggfuncs) > 1:
         return pa.schema(
@@ -736,6 +737,7 @@ def initial_index(
         kwargs.get("hist_bins"),
         kwargs.get("hist_width"),
         kwargs.get("hist_weight"),
+        kwargs.get("hist_normalize"),
     )
     internal = resolve_to_internal(
         kwargs.get("point"),

@@ -355,11 +355,21 @@ The threshold is applied **per band**: a cell may receive a valid value for one 
 
 `--point histogram` and `--overlay histogram` count *exact* pixel values by default — useful for categorical rasters (land cover classes, masks), but not meaningful for continuous data (elevation, temperature), where every pixel is likely to have a distinct value. Pass `--hist-bins` or `--hist-width` to bin continuous values into a proper numeric histogram instead:
 
-- `--hist-bins EDGE,EDGE[,...]` — explicit ascending bin edges, e.g. `--hist-bins 0,10,20,50`. Bins are half-open `[a, b)`; the last bin is closed (a value exactly equal to the final edge is included, not dropped). Values outside `[first_edge, last_edge]` are dropped — use `-inf`/`inf` as the first/last edge to catch everything. Output `values` are the *lower* edge of each populated bin (only non-empty bins are reported).
+- `--hist-bins EDGE,EDGE[,...]` — explicit ascending bin edges, e.g. `--hist-bins 0,10,20,50`. Bins are half-open `[a, b)`; the last bin is closed (a value exactly equal to the final edge is included, not dropped). Values outside `[first_edge, last_edge]` are dropped — use `-inf`/`inf` as the first/last edge to catch everything.
 - `--hist-width FLOAT` (with optional `--hist-origin FLOAT`, default `0.0`) — uniform-width bins `[origin + k·width, origin + (k+1)·width)`. Unlike explicit edges, this is unbounded — every finite value falls into some bin, so nothing is dropped.
 - `--hist-bins` and `--hist-width` are mutually exclusive.
 
-With no `--hist-bins`/`--hist-width`, behaviour is unchanged (exact-value counts).
+With binning active, each populated bin's own bounds are reported directly (as two parallel arrays, `left`/`right`) alongside its weight, rather than requiring you to already know the bin configuration to interpret a row. Every bin, in every band and every row of a given output, is half-open `[left, right)`, except the very last bin overall, which is also closed on the right — a fixed rule of the tool (matching `numpy.histogram`'s convention), not something that can vary bin-to-bin, so it isn't stored per bin.
+
+Only non-empty bins are reported, and a bin's position in the arrays isn't fixed — cell A might have `[20,50)` at index 0, cell B at index 3, cell C not at all. To pull out a specific bin's value (e.g. in a QGIS expression or a SQL query), search by value rather than by position, e.g. in QGIS:
+
+```
+with_variable('idx', array_find("band_1.left", 20),
+  CASE WHEN @idx >= 0 THEN array_get("band_1.area_share", @idx) ELSE 0 END
+)
+```
+
+(the `ELSE 0` handles a cell that had nothing in that bin at all, since it's sparse, not an error — and note the `@idx` references to the variable, not `'idx'`/`"idx"`: single quotes are a QGIS string literal, double quotes are a field reference, and neither is the same as `@idx`, the actual variable reference. If `with_variable` still doesn't resolve inside the `CASE` in your QGIS version/context, repeat the `array_find` call instead of relying on the variable: `CASE WHEN array_find("band_1.left", 20) >= 0 THEN array_get("band_1.area_share", array_find("band_1.left", 20)) ELSE 0 END`.)
 
 **Weighting** (`--hist-weight`, `--overlay histogram` only):
 - `count` (default) — each contributing pixel counts as 1.
@@ -367,10 +377,25 @@ With no `--hist-bins`/`--hist-width`, behaviour is unchanged (exact-value counts
 
 **Normalization** (`--hist-normalize`, either mode):
 - `none` (default) — raw counts (or area weights).
-- `cell-area` — divide by the DGGS cell's own area in m², giving a density-like value per bin.
+- `cell-area` — divide by the DGGS cell's own area in m², giving a density-like value per bin. Only valid with `--hist-weight area` (an area divided by area is a meaningful fraction; a pixel *count* divided by area is a density in a different, less useful unit, so this combination is rejected).
 - `valid-overlap` — divide by the total weight of all valid contributing pixels, so a cell's bins sum to ≤ 1 (< 1 if some values were dropped as out-of-range by `--hist-bins`).
 
-`counts` becomes `float64` (rather than `int64`) whenever weighting or normalization is active, since the result is no longer a plain pixel count. `-d`/`--decimals` rounds `counts` in that case but never rounds bin edges (`values`) themselves.
+Both the bins field(s) and the weight field are named for what they actually contain, rather than using fixed terms.
+
+| `--hist-bins`/`--hist-width` | bins field(s) | `--hist-weight` | `--hist-normalize` | weight field | weight type |
+|---|---|---|---|---|---|
+| not set | `values: list<T>` | `count` | `none` | `counts` | `int64` |
+| not set | `values: list<T>` | `count` | `valid-overlap` | `count_frac` | `float64` |
+| not set | `values: list<T>` | `area` | `none` | `area` | `float64` |
+| not set | `values: list<T>` | `area` | `cell-area` | `area_frac` | `float64` |
+| not set | `values: list<T>` | `area` | `valid-overlap` | `area_share` | `float64` |
+| set | `left: list<float64>`, `right: list<float64>` | `count` | `none` | `counts` | `int64` |
+| set | `left: list<float64>`, `right: list<float64>` | `count` | `valid-overlap` | `count_frac` | `float64` |
+| set | `left: list<float64>`, `right: list<float64>` | `area` | `none` | `area` | `float64` |
+| set | `left: list<float64>`, `right: list<float64>` | `area` | `cell-area` | `area_frac` | `float64` |
+| set | `left: list<float64>`, `right: list<float64>` | `area` | `valid-overlap` | `area_share` | `float64` |
+
+`-d`/`--decimals` rounds the weight field when it's `float64`, but never rounds `values`/`left`/`right` themselves.
 
 ```bash
 # Explicit bins, elevation histogram per cell
@@ -380,7 +405,7 @@ raster2dggs h3 dem.tif output/ -r 8 --point histogram --hist-bins 0,500,1000,150
 raster2dggs h3 dem.tif output/ -r 8 --overlay histogram --hist-width 100 --hist-weight area --hist-normalize valid-overlap -d none
 ```
 
-The bin configuration (mode, edges/width/origin, weight, normalize) is recorded once as Parquet schema metadata under the `raster2dggs:histogram` key, so output files remain self-describing.
+The bin configuration (mode, edges/width/origin, weight, normalize) is also recorded once as Parquet schema metadata under the `raster2dggs:histogram` key.
 
 This option has no effect for `--overlay mass-preserve`. Partial sums produced by `mass-preserve` are correct values representing the fraction of mass within the cell–raster intersection; filtering them out would break the mass-conservation guarantee. `--overlay density-preserve` respects the threshold normally — a cell with insufficient valid coverage will be nulled.
 

@@ -352,11 +352,10 @@ class RasterIndexer(IRasterIndexer):
     ) -> pd.DataFrame:
         """
         Collect contributing pixel values per DGGS cell into a histogram.
-        Used with --out histogram. Each band column becomes a dict
-        {"values": [...], "counts": [...]} -- see
-        raster2dggs.histogram.build_histogram for the binning/weighting/
-        normalization semantics controlled by hist_spec (None gives an
-        exact-value, unweighted histogram).
+        Used with --out histogram. Each band column becomes the dict built by
+        raster2dggs.histogram.build_histogram, which also documents the
+        binning/weighting/normalization semantics controlled by hist_spec
+        (None gives an exact-value, unweighted histogram).
         """
         gb = self._collect_lists(df, resolution, parent_res)
         cell_areas = None

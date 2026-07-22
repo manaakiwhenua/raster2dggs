@@ -32,7 +32,7 @@ from rasterio.warp import transform_bounds, transform as warp_transform
 from shapely.geometry import Polygon, shape
 
 import raster2dggs.constants as const
-from raster2dggs.histogram import HistogramSpec, build_histogram, hist_arrow_types
+from raster2dggs.histogram import HistogramSpec, build_histogram, histogram_struct_type
 from raster2dggs.interfaces import IRasterIndexer
 
 LOGGER = logging.getLogger(__name__)
@@ -89,15 +89,7 @@ def _build_collect_table(
             elem_type = _pa_elem_type(src_dtypes[idx - 1], decimals)
             arrays[col] = pa.array(result_df[col].tolist(), type=pa.list_(elem_type))
         else:
-            values_type, counts_type = hist_arrow_types(
-                hist_spec, decimals, src_dtypes[idx - 1]
-            )
-            hist_type = pa.struct(
-                [
-                    pa.field("values", pa.list_(values_type)),
-                    pa.field("counts", pa.list_(counts_type)),
-                ]
-            )
+            hist_type = histogram_struct_type(hist_spec, decimals, src_dtypes[idx - 1])
             arrays[col] = pa.array(result_df[col].tolist(), type=hist_type)
     return pa.table(arrays)
 
