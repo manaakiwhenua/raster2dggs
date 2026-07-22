@@ -174,6 +174,17 @@ class OutputSchema(StrEnum):
     LIST = "list"
 
 
+class HistWeight(StrEnum):
+    COUNT = "count"
+    AREA = "area"
+
+
+class HistNormalize(StrEnum):
+    NONE = "none"
+    CELL_AREA = "cell-area"
+    VALID_OVERLAP = "valid-overlap"
+
+
 # The four distinct internal transfer implementations for overlay.
 # Multiple OverlayMode values can map to the same Transfer (e.g. 'weighted',
 # 'density-preserve', and 'fractions' all use OVERLAY_WEIGHTED; 'list' and

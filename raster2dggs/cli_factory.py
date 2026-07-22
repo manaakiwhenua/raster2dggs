@@ -57,6 +57,29 @@ class DecimalsParamType(click.ParamType):
         return "INTEGER|none"
 
 
+class BinEdgesParamType(click.ParamType):
+    """Accepts 2+ strictly ascending, comma-separated bin edges (-inf/inf allowed)."""
+
+    name = "EDGES"
+
+    def convert(self, value, param, ctx):
+        if isinstance(value, tuple):
+            return value
+        parts = [p.strip() for p in str(value).split(",")]
+        try:
+            edges = tuple(float(p) for p in parts)
+        except ValueError:
+            self.fail(f"'{value}': expected comma-separated numbers", param, ctx)
+        if len(edges) < 2:
+            self.fail("--hist-bins requires at least 2 edges", param, ctx)
+        if any(b <= a for a, b in zip(edges, edges[1:])):
+            self.fail(f"'{value}': edges must be strictly ascending", param, ctx)
+        return edges
+
+    def get_metavar(self, param, ctx=None):
+        return "EDGE,EDGE[,...]"
+
+
 class ResolutionParamType(click.ParamType):
     """Accepts an integer resolution in [min_res, max_res] or a named auto-detection mode."""
 
@@ -166,6 +189,11 @@ def run_index(
     overlay: Optional[str],
     sample: Optional[str],
     valid_coverage_threshold: float = 0.0,
+    hist_bins: Optional[tuple] = None,
+    hist_width: Optional[float] = None,
+    hist_origin: float = 0.0,
+    hist_weight: str = "count",
+    hist_normalize: str = "none",
 ):
     tempfile.tempdir = tempdir if tempdir is not None else tempfile.tempdir
 
@@ -185,6 +213,11 @@ def run_index(
         overlay,
         sample,
         valid_coverage_threshold,
+        hist_bins,
+        hist_width,
+        hist_origin,
+        hist_weight,
+        hist_normalize,
     )
 
     common.initial_index(
@@ -361,6 +394,66 @@ def make_command(spec: DGGS_Spec):
         ),
     )
     @click.option(
+        "--hist-bins",
+        "hist_bins",
+        default=None,
+        type=BinEdgesParamType(),
+        metavar="EDGE,EDGE[,...]",
+        help=(
+            "Explicit ascending histogram bin edges for --point/--overlay histogram. "
+            "Bins are half-open [a, b); the last bin is closed. Values outside the "
+            "range are dropped. Use -inf/inf for open-ended end bins. "
+            "Mutually exclusive with --hist-width. Only meaningful with "
+            "--point histogram or --overlay histogram."
+        ),
+    )
+    @click.option(
+        "--hist-width",
+        "hist_width",
+        default=None,
+        type=float,
+        metavar="FLOAT",
+        help=(
+            "Uniform histogram bin width for --point/--overlay histogram. Bins are "
+            "[origin + k*width, origin + (k+1)*width); every finite value falls in a "
+            "bin (nothing is dropped). Mutually exclusive with --hist-bins."
+        ),
+    )
+    @click.option(
+        "--hist-origin",
+        "hist_origin",
+        default=0.0,
+        type=float,
+        show_default=True,
+        metavar="FLOAT",
+        help="Anchor for --hist-width bins (a bin edge is placed at this value).",
+    )
+    @click.option(
+        "--hist-weight",
+        "hist_weight",
+        default="count",
+        type=click.Choice([w.value for w in const.HistWeight]),
+        show_default=True,
+        help=(
+            "Histogram weighting: 'count' (number of contributing pixels), 'area' "
+            "(each pixel weighted by its overlap area with the cell, in m^2; "
+            "geodesic for geographic CRS). 'area' requires --overlay histogram."
+        ),
+    )
+    @click.option(
+        "--hist-normalize",
+        "hist_normalize",
+        default="none",
+        type=click.Choice([n.value for n in const.HistNormalize]),
+        show_default=True,
+        help=(
+            "Histogram normalization: 'none' (raw counts/weights), 'cell-area' "
+            "(divide by the DGGS cell's area in m^2), 'valid-overlap' (divide by "
+            "the total weight of all valid contributing pixels, so bins sum to <= 1). "
+            "Non-integer results make counts float64."
+        ),
+    )
+    @click.option(
         "-d",
         "--decimals",
         default=const.DEFAULTS["decimals"],
@@ -408,6 +501,11 @@ def make_command(spec: DGGS_Spec):
         overlay,
         sample,
         valid_coverage_threshold,
+        hist_bins,
+        hist_width,
+        hist_origin,
+        hist_weight,
+        hist_normalize,
     ):
         if isinstance(resolution, str):
             raster_path = common.resolve_input_path(raster_input)
@@ -443,6 +541,26 @@ def make_command(spec: DGGS_Spec):
                 "--nodata-fill has no effect when --nodata=omit (the default). "
                 "Add --nodata emit to write the specified value for nodata cells."
             )
+        hist_flag_names = {
+            "hist_bins": "--hist-bins",
+            "hist_width": "--hist-width",
+            "hist_origin": "--hist-origin",
+            "hist_weight": "--hist-weight",
+            "hist_normalize": "--hist-normalize",
+        }
+        hist_from_cli = {
+            p: ctx.get_parameter_source(p) == click.core.ParameterSource.COMMANDLINE
+            for p in hist_flag_names
+        }
+        is_histogram_out = point == "histogram" or overlay == "histogram"
+        if not is_histogram_out:
+            for pname, flag in hist_flag_names.items():
+                if hist_from_cli[pname]:
+                    common.LOGGER.warning(
+                        f"{flag}: no effect (output is not histogram)"
+                    )
+        elif hist_width is None and hist_from_cli["hist_origin"]:
+            common.LOGGER.warning("--hist-origin has no effect without --hist-width")
         return run_index(
             spec.name,
             raster_input,
@@ -464,6 +582,11 @@ def make_command(spec: DGGS_Spec):
             overlay,
             sample,
             valid_coverage_threshold,
+            hist_bins,
+            hist_width,
+            hist_origin,
+            hist_weight,
+            hist_normalize,
         )
 
     return cmd

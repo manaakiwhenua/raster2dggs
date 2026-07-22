@@ -33,6 +33,7 @@ from rasterio.warp import transform_bounds
 from rasterio.transform import rowcol
 
 import raster2dggs.constants as const
+import raster2dggs.histogram as histogram
 import raster2dggs.indexerfactory as idxfactory
 
 from raster2dggs.interfaces import IRasterIndexer
@@ -246,10 +247,28 @@ def resolve_to_internal(
     return {"transfer": const.Transfer.ASSIGN_CENTERS, "op": None, "out": out}
 
 
+def _build_histogram_spec(kwargs: dict) -> Optional[histogram.HistogramSpec]:
+    """Build a HistogramSpec from raw --hist-* CLI values, or None when the
+    resolved output isn't histogram (the --hist-* flags then have no effect)."""
+    if kwargs.get("out") != const.OutputSchema.HISTOGRAM:
+        return None
+    hist_bins = kwargs.get("hist_bins")
+    return histogram.HistogramSpec(
+        edges=tuple(hist_bins) if hist_bins else None,
+        width=kwargs.get("hist_width"),
+        origin=kwargs.get("hist_origin") or 0.0,
+        weight=kwargs.get("hist_weight") or const.HistWeight.COUNT,
+        normalize=kwargs.get("hist_normalize") or const.HistNormalize.NONE,
+    )
+
+
 def validate_config(
     point: Optional[str],
     overlay: Optional[str],
     sample: Optional[str],
+    hist_bins: Optional[Sequence[float]] = None,
+    hist_width: Optional[float] = None,
+    hist_weight: Optional[str] = None,
 ) -> None:
     if overlay is not None and sample is not None:
         raise click.UsageError("--overlay and --sample are mutually exclusive")
@@ -257,6 +276,13 @@ def validate_config(
         raise click.UsageError("--point and --overlay are mutually exclusive")
     if point is not None and sample is not None:
         raise click.UsageError("--point and --sample are mutually exclusive")
+    if hist_bins is not None and hist_width is not None:
+        raise click.UsageError("--hist-bins and --hist-width are mutually exclusive")
+    if hist_weight == const.HistWeight.AREA and overlay != const.OverlayMode.HISTOGRAM:
+        raise click.UsageError(
+            "--hist-weight area requires --overlay histogram "
+            "(area weighting is undefined for --point/--sample)"
+        )
 
 
 def assemble_kwargs(
@@ -271,6 +297,11 @@ def assemble_kwargs(
     overlay: Optional[str] = None,
     sample: Optional[str] = None,
     valid_coverage_threshold: float = 0.0,
+    hist_bins: Optional[Tuple[float, ...]] = None,
+    hist_width: Optional[float] = None,
+    hist_origin: float = 0.0,
+    hist_weight: str = "count",
+    hist_normalize: str = "none",
 ) -> dict:
     return {
         "compression": compression,
@@ -284,6 +315,11 @@ def assemble_kwargs(
         "overlay": overlay,
         "sample": sample,
         "valid_coverage_threshold": valid_coverage_threshold,
+        "hist_bins": hist_bins,
+        "hist_width": hist_width,
+        "hist_origin": hist_origin,
+        "hist_weight": hist_weight,
+        "hist_normalize": hist_normalize,
     }
 
 
@@ -439,6 +475,7 @@ def _build_write_schema(
     index_col: str,
     partition_col: str,
     out_meta: pd.DataFrame,
+    hist_spec: Optional[histogram.HistogramSpec] = None,
 ) -> pa.Schema:
     common_fields = [
         pa.field(index_col, pa.string()),
@@ -461,24 +498,23 @@ def _build_write_schema(
             ]
         )
     if out == const.OutputSchema.HISTOGRAM:
-        return pa.schema(
-            common_fields
-            + [
+        fields = []
+        for c in band_cols:
+            values_type, counts_type = histogram.hist_arrow_types(
+                hist_spec, decimals, source_dtypes[c]
+            )
+            fields.append(
                 pa.field(
                     c,
                     pa.struct(
                         [
-                            pa.field(
-                                "values",
-                                pa.list_(_element_type(source_dtypes[c], decimals)),
-                            ),
-                            pa.field("counts", pa.list_(pa.int64())),
+                            pa.field("values", pa.list_(values_type)),
+                            pa.field("counts", pa.list_(counts_type)),
                         ]
                     ),
                 )
-                for c in band_cols
-            ]
-        )
+            )
+        return pa.schema(common_fields + fields)
     if len(aggfuncs) > 1:
         return pa.schema(
             common_fields
@@ -580,7 +616,14 @@ def address_boundary_issues(
     )
     band_cols = [c for c in ddf.columns if not c.startswith(f"{indexer.dggs}_")]
     # Capture source dtypes before map_partitions changes them.
-    source_dtypes = {c: ddf[c].dtype for c in band_cols}
+    # Stage 1 output for --overlay list/histogram already holds aggregated
+    # python list/dict objects, so re-reading it here gives dtype "object" --
+    # not the original raster pixel dtype. Prefer the dtypes captured directly
+    # from the source raster (kwargs["source_pixel_dtypes"], set in
+    # initial_index) when available; they agree with ddf[c].dtype for every
+    # other output mode, where Stage 1 still holds unaggregated scalar values.
+    source_pixel_dtypes = kwargs.get("source_pixel_dtypes") or {}
+    source_dtypes = {c: source_pixel_dtypes.get(c, ddf[c].dtype) for c in band_cols}
 
     out = kwargs.get("out", const.OutputSchema.VALUE)
     transfer = kwargs.get("transfer", const.Transfer.ASSIGN_CENTERS)
@@ -609,7 +652,7 @@ def address_boundary_issues(
             mp_args = (resolution, parent_res, decimals)
         elif out == const.OutputSchema.HISTOGRAM:
             mp_func = indexer.parent_groupby_histogram
-            mp_args = (resolution, parent_res, decimals)
+            mp_args = (resolution, parent_res, decimals, kwargs.get("hist_spec"))
         else:
             mp_func = indexer.parent_groupby
             mp_args = (resolution, parent_res, aggfuncs, decimals)
@@ -621,6 +664,7 @@ def address_boundary_issues(
                 indexer.compaction, resolution, parent_res, meta=out_meta
             )
 
+        hist_spec = kwargs.get("hist_spec")
         write_schema = _build_write_schema(
             out=out,
             aggfuncs=aggfuncs,
@@ -630,7 +674,24 @@ def address_boundary_issues(
             index_col=index_col,
             partition_col=partition_col,
             out_meta=out_meta,
+            hist_spec=hist_spec,
         )
+        if out == const.OutputSchema.HISTOGRAM and hist_spec is not None:
+            hist_meta = {
+                "mode": "binned" if hist_spec.binned else "categorical",
+                "edges": list(hist_spec.edges) if hist_spec.edges else None,
+                "width": hist_spec.width,
+                "origin": hist_spec.origin,
+                "weight": str(hist_spec.weight),
+                "normalize": str(hist_spec.normalize),
+            }
+            existing_meta = write_schema.metadata or {}
+            write_schema = write_schema.with_metadata(
+                {
+                    **existing_meta,
+                    b"raster2dggs:histogram": json.dumps(hist_meta).encode("utf-8"),
+                }
+            )
 
         _write_output(
             ddf,
@@ -672,6 +733,9 @@ def initial_index(
         kwargs.get("point"),
         kwargs.get("overlay"),
         kwargs.get("sample"),
+        kwargs.get("hist_bins"),
+        kwargs.get("hist_width"),
+        kwargs.get("hist_weight"),
     )
     internal = resolve_to_internal(
         kwargs.get("point"),
@@ -679,6 +743,7 @@ def initial_index(
         kwargs.get("sample"),
     )
     kwargs = {**kwargs, **internal}
+    kwargs["hist_spec"] = _build_histogram_spec(kwargs)
 
     indexer = idxfactory.indexer_instance(dggs)
 
@@ -775,6 +840,10 @@ def initial_index(
                 )
 
                 selected_labels = tuple([labels_by_index[i] for i in selected_indices])
+                kwargs["source_pixel_dtypes"] = {
+                    label: np.dtype(src.dtypes[idx - 1])
+                    for idx, label in zip(selected_indices, selected_labels)
+                }
                 compression = kwargs["compression"]
                 nodata = src.nodata
 
@@ -835,6 +904,7 @@ def initial_index(
                         out=kwargs["out"],
                         min_valid_coverage=kwargs.get("valid_coverage_threshold", 0.0),
                         decimals=kwargs.get("decimals"),
+                        hist_spec=kwargs.get("hist_spec"),
                     )
                     stage1_func = ctx.process_window
                 else:

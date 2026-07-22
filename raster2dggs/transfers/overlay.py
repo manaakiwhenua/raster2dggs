@@ -32,6 +32,7 @@ from rasterio.warp import transform_bounds, transform as warp_transform
 from shapely.geometry import Polygon, shape
 
 import raster2dggs.constants as const
+from raster2dggs.histogram import HistogramSpec, build_histogram, hist_arrow_types
 from raster2dggs.interfaces import IRasterIndexer
 
 LOGGER = logging.getLogger(__name__)
@@ -61,16 +62,6 @@ def _frac_pairs(frac_arr, unique_arr, scale=1.0, decimals=None):
     return {"classes": [k for k, _ in pairs], "fractions": fracs}
 
 
-def _build_histogram(arr, decimals=None) -> Optional[dict]:
-    """Return {"values": [...], "counts": [...]} from a pixel-value array, or None if empty."""
-    if arr is None or len(arr) == 0:
-        return None
-    if decimals is not None:
-        arr = np.round(arr, decimals)
-    unique, counts = np.unique(arr, return_counts=True)
-    return {"values": unique.tolist(), "counts": counts.astype(np.int64).tolist()}
-
-
 def _pa_elem_type(numpy_dtype_str: str, decimals) -> pa.DataType:
     if decimals is not None and decimals <= 0:
         return pa.int64()
@@ -86,6 +77,7 @@ def _build_collect_table(
     selected_indices: tuple,
     out: str,
     decimals,
+    hist_spec: Optional[HistogramSpec] = None,
 ) -> pa.Table:
     """Build a PyArrow Table for --overlay --list or --overlay --histogram output."""
     arrays = {}
@@ -93,14 +85,17 @@ def _build_collect_table(
         if col not in band_cols:
             arrays[col] = pa.array(result_df[col].tolist())
     for idx, col in zip(selected_indices, band_cols):
-        elem_type = _pa_elem_type(src_dtypes[idx - 1], decimals)
         if out == const.OutputSchema.LIST:
+            elem_type = _pa_elem_type(src_dtypes[idx - 1], decimals)
             arrays[col] = pa.array(result_df[col].tolist(), type=pa.list_(elem_type))
         else:
+            values_type, counts_type = hist_arrow_types(
+                hist_spec, decimals, src_dtypes[idx - 1]
+            )
             hist_type = pa.struct(
                 [
-                    pa.field("values", pa.list_(elem_type)),
-                    pa.field("counts", pa.list_(pa.int64())),
+                    pa.field("values", pa.list_(values_type)),
+                    pa.field("counts", pa.list_(counts_type)),
                 ]
             )
             arrays[col] = pa.array(result_df[col].tolist(), type=hist_type)
@@ -153,6 +148,7 @@ class _OverlayIndexer:
     out: const.OutputSchema = const.OutputSchema.VALUE
     min_valid_coverage: float = 0.0
     decimals: Optional[int] = None
+    hist_spec: Optional[HistogramSpec] = None
 
     def __post_init__(self):
         # mass_preserve (sum) must not filter by coverage — partial sums are correct
@@ -174,10 +170,18 @@ class _OverlayIndexer:
             self._src_band_count = src.count
             self._src_dtypes = src.dtypes
 
+            wants_area_weighted_hist = (
+                self.op == const.Op.VALUES
+                and self.hist_spec is not None
+                and self.hist_spec.weight == const.HistWeight.AREA
+            )
             if (
-                self.op == const.Op.MEAN and src.crs.is_geographic
-            ) or self.op == const.Op.WSUM:
-                # Pixel-area weights raster for exactextract weighted_mean / weighted_sum.
+                (self.op == const.Op.MEAN and src.crs.is_geographic)
+                or self.op == const.Op.WSUM
+                or wants_area_weighted_hist
+            ):
+                # Pixel-area weights raster for exactextract weighted_mean / weighted_sum,
+                # or as the per-pixel area weight for --hist-weight area.
                 # For geographic CRS: geodesic area varies by row (latitude); use pyproj.
                 # For projected CRS (wsum only): pixel area is constant from the transform.
                 T = src.transform
@@ -279,7 +283,13 @@ class _OverlayIndexer:
         # exactextract column naming:
         #   unweighted: "{op}" (single-band) or "band_{i}_{op}" (multi-band)
         #   weighted:   "weighted_{op}" (single-band) or "band_{i}_weight_weighted_{op}" (multi-band)
-        if self._geodesic_weights_path is not None:
+        # Only MEAN/WSUM use the weighted-aggregate op names above -- a weights
+        # raster built for --hist-weight area (op VALUES) uses plain "values"/
+        # "coverage"/"weights" column names instead, handled separately below.
+        if self._geodesic_weights_path is not None and self.op in (
+            const.Op.MEAN,
+            const.Op.WSUM,
+        ):
             weighted_agg = (
                 "weighted_sum" if self.op == const.Op.WSUM else "weighted_mean"
             )
@@ -318,7 +328,9 @@ class _OverlayIndexer:
         except Exception:
             # Suppress destructor-time errors (e.g., interpreter shutdown), but keep
             # a debug trace for troubleshooting.
-            LOGGER.debug("Ignoring exception during _OverlayIndexer.__del__", exc_info=True)
+            LOGGER.debug(
+                "Ignoring exception during _OverlayIndexer.__del__", exc_info=True
+            )
 
     def process_window(self, window):
         """Compute overlay stats for all DGGS cells overlapping this raster window."""
@@ -368,9 +380,23 @@ class _OverlayIndexer:
         is_frac = self.op == const.Op.FRAC
         is_collect = self.op == const.Op.VALUES
         is_geodesic = self._geodesic_weights_path is not None
+        is_area_weighted_hist = (
+            is_collect
+            and self.hist_spec is not None
+            and self.hist_spec.weight == const.HistWeight.AREA
+        )
         weighted_agg = "weighted_sum" if self.op == const.Op.WSUM else "weighted_mean"
         if is_frac:
             main_ops = ["frac", "unique"]
+        elif is_collect:
+            # Collect ops (--overlay list/histogram) always use exactextract's plain
+            # "values"/"coverage"/"weights" array ops -- never the weighted-aggregate
+            # op names below, even when a weights raster exists for area weighting.
+            main_ops = (
+                ["values", "coverage", "weights"]
+                if is_area_weighted_hist
+                else ["values"]
+            )
         elif is_geodesic:
             main_ops = [weighted_agg]
         else:
@@ -429,15 +455,21 @@ class _OverlayIndexer:
             for idx in self.selected_indices:
                 if self._src_band_count == 1:
                     vf = cov_df["mean"] * raster_fracs
-                    main_col = weighted_agg if is_geodesic else self.op
+                    if is_collect:
+                        main_col = "values"
+                    else:
+                        main_col = weighted_agg if is_geodesic else self.op
                     unique_col = "unique"
                 else:
                     vf = cov_df[f"band_{idx}_mean"] * raster_fracs
-                    main_col = (
-                        f"band_{idx}_weight_{weighted_agg}"
-                        if is_geodesic
-                        else f"band_{idx}_{self.op}"
-                    )
+                    if is_collect:
+                        main_col = f"band_{idx}_values"
+                    else:
+                        main_col = (
+                            f"band_{idx}_weight_{weighted_agg}"
+                            if is_geodesic
+                            else f"band_{idx}_{self.op}"
+                        )
                     unique_col = f"band_{idx}_unique"
                 valid_frac_by_band[idx] = vf
                 if self._apply_coverage_threshold:
@@ -476,6 +508,16 @@ class _OverlayIndexer:
                 .any(axis=1)
             )
         elif is_collect:
+            cell_areas_by_id = None
+            if (
+                self.hist_spec is not None
+                and self.hist_spec.normalize == const.HistNormalize.CELL_AREA
+            ):
+                lons, lats = self.indexer.cells_to_lonlat_arrays(result_df["_cell_id"])
+                cell_areas_by_id = {
+                    cid: self.indexer.cell_area_m2(self.resolution, lat, lon)
+                    for cid, lat, lon in zip(result_df["_cell_id"], lats, lons)
+                }
             for idx, label in zip(self.selected_indices, self.selected_labels):
                 vc = "values" if self._src_band_count == 1 else f"band_{idx}_values"
                 raw = result_df[vc]
@@ -493,8 +535,42 @@ class _OverlayIndexer:
                         for arr in raw
                     ]
                 else:
+                    if is_area_weighted_hist:
+                        cc = (
+                            "coverage"
+                            if self._src_band_count == 1
+                            else f"band_{idx}_coverage"
+                        )
+                        wc = (
+                            "weights"
+                            if self._src_band_count == 1
+                            else f"band_{idx}_weights"
+                        )
+                        weight_arrs = [
+                            (
+                                (c * w)
+                                if (arr is not None and c is not None and w is not None)
+                                else None
+                            )
+                            for arr, c, w in zip(raw, result_df[cc], result_df[wc])
+                        ]
+                    else:
+                        weight_arrs = [None] * len(raw)
                     result_df[label] = [
-                        _build_histogram(arr, self.decimals) for arr in raw
+                        build_histogram(
+                            arr,
+                            weights=wgt,
+                            spec=self.hist_spec,
+                            decimals=self.decimals,
+                            cell_area=(
+                                cell_areas_by_id.get(cid)
+                                if cell_areas_by_id is not None
+                                else None
+                            ),
+                        )
+                        for arr, wgt, cid in zip(
+                            raw, weight_arrs, result_df["_cell_id"]
+                        )
                     ]
             result_df = result_df[["_cell_id"] + band_cols]
 
@@ -549,6 +625,7 @@ class _OverlayIndexer:
                 self.selected_indices,
                 self.out,
                 self.decimals,
+                hist_spec=self.hist_spec,
             )
         else:
             table = pa.Table.from_pandas(result_df, preserve_index=False)
