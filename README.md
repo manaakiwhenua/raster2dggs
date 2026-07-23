@@ -30,6 +30,7 @@ Contributions (particularly for additional DGGSs), suggestions, bug reports and 
 - [Sampling strategies](#sampling-strategies)
   - [Point sampling (default)](#point-sampling-default---point)
   - [Overlay (area-based)](#overlay-area-based---overlay)
+  - [Numeric (binned) histograms](#numeric-binned-histograms---hist-bins---hist-width)
   - [Windowed resampling](#windowed-resampling---sample)
 - [Visualising output](#visualising-output)
   - [DuckDB](#duckdb)
@@ -192,6 +193,35 @@ Options:
                                   are correct values — filtering them would
                                   break mass conservation).  [default: 0.0;
                                   0.0<=x<=1.0]
+  --hist-bins EDGE,EDGE[,...]     Explicit ascending histogram bin edges for
+                                  --point/--overlay histogram. Bins are half-
+                                  open [a, b); the last bin is closed. Values
+                                  outside the range are dropped. Use -inf/inf
+                                  for open-ended end bins. Mutually exclusive
+                                  with --hist-width. Only meaningful with
+                                  --point histogram or --overlay histogram.
+  --hist-width FLOAT              Uniform histogram bin width for
+                                  --point/--overlay histogram. Bins are
+                                  [origin + k*width, origin + (k+1)*width);
+                                  every finite value falls in a bin (nothing
+                                  is dropped). Mutually exclusive with
+                                  --hist-bins.
+  --hist-origin FLOAT             Anchor for --hist-width bins (a bin edge is
+                                  placed at this value).  [default: 0.0]
+  --hist-weight [count|area]      Histogram weighting: 'count' (number of
+                                  contributing pixels), 'area' (each pixel
+                                  weighted by its overlap area with the cell,
+                                  in m², geodesic for geographic CRS). 'area'
+                                  requires --overlay histogram.  [default:
+                                  count]
+  --hist-normalize [none|cell-area|valid-overlap]
+                                  Histogram normalization: 'none' (raw
+                                  counts/weights), 'cell-area' (divide by the
+                                  DGGS cell's area in m²), 'valid-overlap'
+                                  (divide by the total weight of all valid
+                                  contributing pixels, so bins sum to ≤ 1).
+                                  Non-integer results make counts float64.
+                                  [default: none]
   -d, --decimals INTEGER|none     Decimal places to round output values. 0 =
                                   integer; negative values round to tens (-1),
                                   hundreds (-2), etc. Use 'none' to disable
@@ -227,7 +257,7 @@ Each raster pixel centre is indexed to its containing DGGS cell. When multiple p
 **Output modes** (pass as `--point OUTPUT`):
 - *(no arg / `--point value`)* — scalar per cell per band; use `--agg min,max` etc. for multi-agg struct output
 - `--point list` — sorted list of all contributing pixel values: `list<T>` per band. `--agg` is ignored.
-- `--point histogram` — value-count histogram: `struct<values: list<T>, counts: list<int64>>` per band. `--agg` is ignored.
+- `--point histogram` — value-count histogram: `struct<values: list<T>, counts: list<int64>>` per band. `--agg` is ignored. Pass `--hist-bins`/`--hist-width` to bin continuous data instead of counting exact values — see [Numeric (binned) histograms](#numeric-binned-histograms---hist-bins---hist-width).
 
 ```bash
 # Default: mean of all contributing pixels
@@ -239,8 +269,11 @@ raster2dggs h3 input.tif output/ -r 9 --agg min,max
 # Sorted list of all pixel values per cell
 raster2dggs h3 input.tif output/ -r 7 --point list -d 2
 
-# Histogram of pixel values per cell
+# Histogram of pixel values per cell (categorical: exact value counts)
 raster2dggs h3 input.tif output/ -r 7 --point histogram -d 0
+
+# Histogram of continuous data, binned into 10-unit-wide bins
+raster2dggs h3 input.tif output/ -r 7 --point histogram --hist-width 10
 ```
 
 ### Overlay (area-based) — `--overlay METHOD`
@@ -255,7 +288,7 @@ Uses [exactextract](https://github.com/isciences/exactextract) to compute exact 
 | `density-preserve` | Scalar `T` per band | Density rasters (W/m², kg/km²) — integrates density × pixel area to give the cell total; geographic CRS uses geodesic pixel areas |
 | `fractions` | `struct<classes: list<int64>, fractions: list<float64>>` per band | Class area fractions within each DGGS cell |
 | `list` | `list<T>` per band | All overlapping pixel values as a sorted list (collect mode) |
-| `histogram` | `struct<values: list<T>, counts: list<int64>>` per band | Histogram of overlapping pixel values |
+| `histogram` | `struct<values: list<T>, counts: list<int64>>` per band | Histogram of overlapping pixel values. Add `--hist-bins`/`--hist-width` for continuous data, `--hist-weight area` to weight by overlap area instead of pixel count — see [Numeric (binned) histograms](#numeric-binned-histograms---hist-bins---hist-width) |
 
 ```bash
 # Area-weighted mean (intensive quantities)
@@ -276,8 +309,11 @@ raster2dggs h3 landcover.tif output/ -r 8 --overlay fractions
 # Collect all overlapping pixel values as a list
 raster2dggs h3 input.tif output/ -r 8 --overlay list
 
-# Histogram of all overlapping pixel values
+# Histogram of all overlapping pixel values (categorical: exact value counts)
 raster2dggs h3 input.tif output/ -r 8 --overlay histogram
+
+# Area-weighted histogram, binned into 10-unit-wide bins
+raster2dggs h3 input.tif output/ -r 8 --overlay histogram --hist-width 10 --hist-weight area
 ```
 
 #### Performance note
@@ -290,6 +326,20 @@ GDAL_CACHEMAX=512 raster2dggs h3 input.tif output/ -r 8 --overlay weighted
 
 The value is in megabytes. The default is 64 MB. For large rasters or high DGGS resolutions where each window covers many cells, a larger cache can significantly reduce processing time.
 
+**Check your input's internal tiling.** raster2dggs processes one GDAL block at a time (`src.block_windows()`), for every mode — `--point`, `--sample`, and `--overlay` alike. Some GeoTIFFs (particularly ones exported without explicit tiling options) are stored as *strips* — one block per row — rather than square tiles. A strip-encoded raster can produce thousands of tiny windows instead of a few hundred properly-sized ones, and since each window carries its own per-window overhead (more so for `--overlay`, which re-derives the set of overlapping DGGS cells per window), this can turn an otherwise-quick job into one that appears to hang. Check with:
+
+```bash
+gdalinfo input.tif | grep Block=
+```
+
+`Block=<width>x1` (block height of 1) means it's strip-encoded. If so, re-tile it first:
+
+```bash
+gdal_translate -co TILED=YES -co BLOCKXSIZE=256 -co BLOCKYSIZE=256 input.tif input_tiled.tif
+```
+
+(If `gdal_translate` warns about the CRS definition not matching the EPSG registry, prefer re-tiling via `rasterio` directly instead, copying `src.profile`/`src.crs` as-is, to avoid GDAL rewriting the projection metadata.)
+
 #### Valid-data coverage threshold (`-vct` / `--valid-coverage-threshold`)
 
 By default (`-vct 0.0`) any cell with at least one valid pixel in its overlap area receives a value. Use `--valid-coverage-threshold` to require a minimum fraction of the cell's raster-overlapping area to have valid (non-nodata) data:
@@ -300,6 +350,72 @@ raster2dggs h3 input.tif output/ -r 8 --overlay mode -vct 0.5
 ```
 
 The threshold is applied **per band**: a cell may receive a valid value for one band and be nulled for another if that band has sparser nodata. Nulled values are then handled by `--nodata` — the default `omit` drops rows where any band is null; `emit` keeps them as NaN (or `--nodata-fill` if set).
+
+### Numeric (binned) histograms — `--hist-bins`/`--hist-width`
+
+`--point histogram` and `--overlay histogram` count *exact* pixel values by default — useful for categorical rasters (land cover classes, masks), but not meaningful for continuous data (elevation, temperature), where every pixel is likely to have a distinct value. Pass `--hist-bins` or `--hist-width` to bin continuous values into a proper numeric histogram instead:
+
+- `--hist-bins EDGE,EDGE[,...]` — explicit ascending bin edges, e.g. `--hist-bins 0,10,20,50`. Bins are half-open `[a, b)`; the last bin is closed (a value exactly equal to the final edge is included, not dropped). Values outside `[first_edge, last_edge]` are dropped — use `-inf`/`inf` as the first/last edge to catch everything.
+- `--hist-width FLOAT` (with optional `--hist-origin FLOAT`, default `0.0`) — uniform-width bins `[origin + k·width, origin + (k+1)·width)`. Unlike explicit edges, this is unbounded — every finite value falls into some bin, so nothing is dropped.
+- `--hist-bins` and `--hist-width` are mutually exclusive.
+
+With binning active, each populated bin's own bounds are reported directly (as two parallel arrays, `left`/`right`) alongside its weight, rather than requiring you to already know the bin configuration to interpret a row. Every bin, in every band and every row of a given output, is half-open `[left, right)`, except the very last bin overall, which is also closed on the right — a fixed rule of the tool (matching `numpy.histogram`'s convention), not something that can vary bin-to-bin, so it isn't stored per bin.
+
+Only non-empty bins are reported, and a bin's position in the arrays isn't fixed — cell A might have `[20,50)` at index 0, cell B at index 3, cell C not at all. So pull out a specific bin's value by searching for it, not by a fixed array index.
+
+For example, to style a layer in QGIS by the `[20,50)` bin's `area_share` — open the file as a vector layer (QGIS's native GeoParquet/Parquet support needs QGIS ≥ 3.32 with a recent enough GDAL), then use this as the expression in the Field Calculator (to materialise a new field) or as a data-defined override on a symbol/label property:
+
+```
+with_variable('idx', array_find("band_1.left", 20),
+  CASE WHEN @idx >= 0 THEN array_get("band_1.area_share", @idx) ELSE 0 END
+)
+```
+
+`"band_1.left"`/`"band_1.area_share"` are the dotted names GDAL's Parquet driver gives to struct sub-fields — check the actual field names for your file in QGIS's Fields panel/Browser, since the band column name (`band_1` here) depends on your raster's band labels. `with_variable`'s first argument, `'idx'` (the name being *defined*), stays a single-quoted string; every later *use* of it must be `@idx` — QGIS variables always take the `@` prefix, and `'idx'`/`"idx"` (string literal / field reference) are different things that will fail. The `ELSE 0` handles a cell with nothing in that bin at all — sparse, not an error.
+
+If `with_variable` doesn't resolve inside the `CASE` for you (a known QGIS scoping quirk in some versions/contexts), skip it and just repeat the search:
+
+```
+CASE WHEN array_find("band_1.left", 20) >= 0
+     THEN array_get("band_1.area_share", array_find("band_1.left", 20))
+     ELSE 0 END
+```
+
+**Weighting** (`--hist-weight`, `--overlay histogram` only):
+- `count` (default) — each contributing pixel counts as 1.
+- `area` — each pixel is weighted by its overlap area with the cell, in m² (geodesic for geographic CRS rasters, matching `--overlay density-preserve`). Requires `--overlay histogram`; undefined for `--point histogram` since pixel-cell overlap area isn't computed on that path.
+
+**Normalization** (`--hist-normalize`, either mode):
+- `none` (default) — raw counts (or area weights).
+- `cell-area` — divide by the DGGS cell's own area in m², giving a density-like value per bin. Only valid with `--hist-weight area` (an area divided by area is a meaningful fraction; a pixel *count* divided by area is a density in a different, less useful unit, so this combination is rejected).
+- `valid-overlap` — divide by the total weight of all valid contributing pixels, so a cell's bins sum to ≤ 1 (< 1 if some values were dropped as out-of-range by `--hist-bins`).
+
+Both the bins field(s) and the weight field are named for what they actually contain, rather than using fixed terms.
+
+| `--hist-bins`/`--hist-width` | bins field(s) | `--hist-weight` | `--hist-normalize` | weight field | weight type |
+|---|---|---|---|---|---|
+| not set | `values: list<T>` | `count` | `none` | `counts` | `int64` |
+| not set | `values: list<T>` | `count` | `valid-overlap` | `count_frac` | `float64` |
+| not set | `values: list<T>` | `area` | `none` | `area` | `float64` |
+| not set | `values: list<T>` | `area` | `cell-area` | `area_frac` | `float64` |
+| not set | `values: list<T>` | `area` | `valid-overlap` | `area_share` | `float64` |
+| set | `left: list<float64>`, `right: list<float64>` | `count` | `none` | `counts` | `int64` |
+| set | `left: list<float64>`, `right: list<float64>` | `count` | `valid-overlap` | `count_frac` | `float64` |
+| set | `left: list<float64>`, `right: list<float64>` | `area` | `none` | `area` | `float64` |
+| set | `left: list<float64>`, `right: list<float64>` | `area` | `cell-area` | `area_frac` | `float64` |
+| set | `left: list<float64>`, `right: list<float64>` | `area` | `valid-overlap` | `area_share` | `float64` |
+
+`-d`/`--decimals` rounds the weight field when it's `float64`, but never rounds `values`/`left`/`right` themselves.
+
+```bash
+# Explicit bins, elevation histogram per cell
+raster2dggs h3 dem.tif output/ -r 8 --point histogram --hist-bins 0,500,1000,1500,2000,inf
+
+# Uniform 100 m bins, area-weighted, normalized so each cell's bins sum to ~1
+raster2dggs h3 dem.tif output/ -r 8 --overlay histogram --hist-width 100 --hist-weight area --hist-normalize valid-overlap -d none
+```
+
+The bin configuration (mode, edges/width/origin, weight, normalize) is also recorded once as Parquet schema metadata under the `raster2dggs:histogram` key.
 
 This option has no effect for `--overlay mass-preserve`. Partial sums produced by `mass-preserve` are correct values representing the fraction of mass within the cell–raster intersection; filtering them out would break the mass-conservation guarantee. `--overlay density-preserve` respects the threshold normally — a cell with insufficient valid coverage will be nulled.
 
@@ -642,6 +758,16 @@ raster2dggs h3 --resolution 7 --point list -d 2 input.tif ./output
 Histogram of contributing pixel values per cell:
 ```bash
 raster2dggs h3 --resolution 7 --point histogram -d 0 input.tif ./output
+```
+
+Numeric histogram of a continuous field (e.g. DEM), binned into 100 m intervals:
+```bash
+raster2dggs h3 --resolution 8 --point histogram --hist-width 100 input.tif ./output
+```
+
+Area-weighted histogram per cell, explicit bins, normalised so each cell's bins sum to ~1:
+```bash
+raster2dggs h3 --resolution 8 --overlay histogram --hist-bins 0,500,1000,1500,2000,inf --hist-weight area --hist-normalize valid-overlap -d none input.tif ./output
 ```
 
 Nearest-neighbour sampling for a continuous field (e.g. DEM, temperature grid):

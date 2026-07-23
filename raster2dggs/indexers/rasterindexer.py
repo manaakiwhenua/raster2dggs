@@ -7,6 +7,7 @@ import xarray as xr
 import numpy as np
 
 from .. import constants as const
+from ..histogram import HistogramSpec, build_histogram
 from ..interfaces import IRasterIndexer
 
 
@@ -267,7 +268,15 @@ class RasterIndexer(IRasterIndexer):
                 gb = gb.astype({c: "float64" for c in to_promote})
             gb = gb.round(decimals)
         else:
-            gb = gb.round(decimals).astype("Int64")
+            # Only cast numeric columns to Int64 -- object columns (e.g. list/dict
+            # values from --overlay list/histogram routed through this dedup path)
+            # must be left untouched; .astype("Int64") on the whole frame raises.
+            gb = gb.round(decimals)
+            to_cast = gb.select_dtypes(
+                include=["float32", "float64", "integer"]
+            ).columns
+            if len(to_cast):
+                gb = gb.astype({c: "Int64" for c in to_cast})
         gb = gb.reset_index(level=0)
         gb.index.name = index_col
         return gb
@@ -339,32 +348,39 @@ class RasterIndexer(IRasterIndexer):
         resolution: int,
         parent_res: int,
         decimals: Optional[int] = None,
+        hist_spec: Optional[HistogramSpec] = None,
     ) -> pd.DataFrame:
         """
-        Collect contributing pixel values per DGGS cell as a value-count histogram.
-        Used with --out histogram. Each band column becomes a dict
-        {"values": [sorted unique values], "counts": [corresponding counts]}.
+        Collect contributing pixel values per DGGS cell into a histogram.
+        Used with --out histogram. Each band column becomes the dict built by
+        raster2dggs.histogram.build_histogram, which also documents the
+        binning/weighting/normalization semantics controlled by hist_spec
+        (None gives an exact-value, unweighted histogram).
         """
         gb = self._collect_lists(df, resolution, parent_res)
+        cell_areas = None
+        if (
+            hist_spec is not None
+            and hist_spec.normalize == const.HistNormalize.CELL_AREA
+        ):
+            lons, lats = self.cells_to_lonlat_arrays(pd.Series(gb.index))
+            cell_areas = [
+                self.cell_area_m2(resolution, lat, lon) for lat, lon in zip(lats, lons)
+            ]
         for col in self.band_cols(gb):
-
-            def _to_hist(lst, _decimals=decimals):
-                if _decimals is not None and _decimals <= 0:
-                    vals = [int(round(float(v), _decimals)) for v in lst]
-                elif _decimals is not None:
-                    vals = [round(float(v), _decimals) for v in lst]
-                else:
-                    vals = list(lst)
-                counts: dict = {}
-                for v in vals:
-                    counts[v] = counts.get(v, 0) + 1
-                sorted_keys = sorted(counts.keys())
-                return {
-                    "values": sorted_keys,
-                    "counts": [counts[k] for k in sorted_keys],
-                }
-
-            gb[col] = gb[col].map(_to_hist)
+            if cell_areas is not None:
+                gb[col] = [
+                    build_histogram(
+                        vals, spec=hist_spec, decimals=decimals, cell_area=area
+                    )
+                    for vals, area in zip(gb[col], cell_areas)
+                ]
+            else:
+                gb[col] = gb[col].map(
+                    lambda vals: build_histogram(
+                        vals, spec=hist_spec, decimals=decimals
+                    )
+                )
         return gb
 
     @staticmethod

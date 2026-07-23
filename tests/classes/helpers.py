@@ -32,3 +32,25 @@ def make_raster(
         nodata=nodata,
     ) as dst:
         dst.write(data)
+
+
+def make_gradient_raster(
+    path: str,
+    bounds: tuple,
+    size: int,
+) -> None:
+    """Write a single-band float32 WGS84 GeoTIFF with continuous, non-uniform
+    values (0..size*size-1) for use in numeric histogram binning tests."""
+    data = np.arange(size * size, dtype=np.float32).reshape(1, size, size)
+    with rasterio.open(
+        path,
+        "w",
+        driver="GTiff",
+        height=size,
+        width=size,
+        count=1,
+        dtype="float32",
+        crs=CRS.from_epsg(4326),
+        transform=from_bounds(*bounds, size, size),
+    ) as dst:
+        dst.write(data)
