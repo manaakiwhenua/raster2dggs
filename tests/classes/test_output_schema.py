@@ -905,6 +905,22 @@ class TestOverlayCollect(TestRunthrough):
                 for c in row["counts"]:
                     self.assertGreater(c, 0, "Histogram count must be positive")
 
+    def test_overlay_list_no_decimals_does_not_crash(self):
+        # Regression test: _build_write_schema/_element_type used to resolve
+        # the "preserve source dtype" (-d none) branch against the Stage-2
+        # (post-aggregation) column dtype, which is `object` for collected
+        # list/histogram columns rather than the source raster's pixel
+        # dtype -- crashing pa.from_numpy_dtype. Fixed by capturing the real
+        # per-band dtypes at Stage 1 (kwargs["source_pixel_dtypes"]).
+        table = self._run_list("-d", "none")
+        field = table.schema.field("band_1")
+        self.assertEqual(field.type.value_type, pa.float32())
+
+    def test_overlay_histogram_no_decimals_does_not_crash(self):
+        table = self._run_histogram("-d", "none")
+        struct_type = table.schema.field("band_1").type
+        self.assertEqual(struct_type.field("values").type, pa.list_(pa.float32()))
+
     def test_overlay_list_and_histogram_same_total_values(self):
         list_table = self._run_list()
         hist_table = self._run_histogram()
