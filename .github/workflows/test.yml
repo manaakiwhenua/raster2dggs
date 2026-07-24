@@ -1,0 +1,52 @@
+name: test
+
+on: [push]
+
+permissions:
+  contents: read
+
+jobs:
+  pytest:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        shell: bash -l {0}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up conda environment with GDAL 3.13.1
+        uses: conda-incubator/setup-miniconda@v3
+        with:
+          miniforge-version: latest
+          python-version: "3.12"
+          channels: conda-forge
+          channel-priority: strict
+
+      - name: Install GDAL from conda-forge
+        run: conda install -y gdal=3.13.1 -c conda-forge
+
+      - name: Install Poetry
+        run: pip install poetry
+
+      - name: Install dependencies
+        run: poetry install --with dev --all-extras
+
+      - name: Run test suite
+        run: |
+          export PROJ_DATA="$CONDA_PREFIX/share/proj"
+          poetry run python -m pytest
+
+  black:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install black
+        run: pip install black
+
+      - name: Check formatting
+        run: black --check .
