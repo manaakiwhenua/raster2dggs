@@ -200,7 +200,7 @@ class DGGALRasterIndexer(RasterIndexer):
         return result
 
     def cell_area_m2(self, resolution: int, lat: float, lon: float) -> float:
-        zone = self.dggrs.getZoneFromWGS84Centroid(resolution, dggal.GeoPoint(lon, lat))
+        zone = self.dggrs.getZoneFromWGS84Centroid(resolution, dggal.GeoPoint(lat, lon))
         geo_points: List[dggal.GeoPoint] = self.dggrs.getZoneRefinedWGS84Vertices(
             zone, 0
         )
