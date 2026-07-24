@@ -1,4 +1,8 @@
-import a5_fast as a5py
+"""
+@author: ndemaio
+"""
+
+import a5 as a5py
 import numpy as np
 import pandas as pd
 import shapely
@@ -13,8 +17,12 @@ class A5RasterIndexer(RasterIndexer):
     """
 
     def _index_window(self, wide, resolution: int, parent_res: int):
-        flat_coords = np.column_stack([wide["x"], wide["y"]]).ravel().tolist()
-        cells = a5py.lonlat_to_cell_batch(flat_coords, resolution)
+        # pya5 has no batch lonlat_to_cell API, so this is a per-point loop
+        # (~200us/point).
+        cells = [
+            a5py.lonlat_to_cell((lon, lat), resolution)
+            for lon, lat in zip(wide["x"], wide["y"])
+        ]
         a5_parent = [a5py.cell_to_parent(cell, parent_res) for cell in cells]
         wide = wide.drop(columns=["x", "y"])
         wide[self.index_col(resolution)] = pd.Series(
@@ -33,7 +41,7 @@ class A5RasterIndexer(RasterIndexer):
         Implementation of interface function.
         """
         cell_level = a5py.get_resolution(cell)
-        return 4 ** (desired_resolution - cell_level)
+        return a5py.get_num_children(cell_level, desired_resolution)
 
     def valid_set(self, cells: set) -> set[str]:
         """
@@ -98,59 +106,27 @@ class A5RasterIndexer(RasterIndexer):
         Return A5 cell IDs (hex strings) at the given resolution whose centres
         fall within the WGS84 bounding box.
 
-        Uses a top-down recursive descent from the 12 res-0 cells, pruning
-        branches where the cell centroid cannot possibly be inside the bbox
-        at the target resolution.
-
-        NOTE: the upstream A5 API exposes a native ``polygonToCells`` function
-        (https://a5geo.org/docs/api-reference/regions#polygontocells) that
-        returns compacted cells whose centres lie inside a polygon ring.  This
-        would be the preferred implementation, but ``a5-fast`` v0.2 (the
-        Python binding used here) does not yet include the region-covering
-        functions.  Replace this implementation with ``polygonToCells`` +
-        ``uncompact`` once a version of ``a5-fast`` that exposes it is
-        released.
+        Uses pya5's polygon_to_cells (dense boundary sampling + flood fill) to
+        find every cell whose centre lies in the bbox, then uncompact to expand
+        the (possibly-compacted) result to the target resolution.
         """
-        result = set()
-
-        def _cell_radius_deg(cell_res: int) -> float:
-            """Approximate half-width of an A5 cell in degrees."""
-            # A5: 12 * 4^res cells
-            n = 12 * (4**cell_res)
-            return (const.EARTH_DEGREE_SQUARE / n) ** 0.5 * 0.75
-
-        def _recurse(cell_u64: int, cell_res: int):
-            _lon, lat = a5py.cell_to_lonlat(cell_u64)
-            # a5py may return longitudes outside [-180, 180]; normalise.
-            lon = (_lon + 180.0) % 360.0 - 180.0
-            rad = _cell_radius_deg(cell_res)
-            if lat < min_lat - rad or lat > max_lat + rad:
-                return
-            # Antimeridian-safe lon test: check raw and ±360-shifted positions.
-            lon_in_range = (
-                (min_lon - rad <= lon <= max_lon + rad)
-                or (min_lon - rad <= lon + 360 <= max_lon + rad)
-                or (min_lon - rad <= lon - 360 <= max_lon + rad)
-            )
-            if not lon_in_range:
-                return
-
-            if cell_res == resolution:
-                if min_lat <= lat <= max_lat and min_lon <= lon <= max_lon:
-                    result.add(a5py.u64_to_hex(cell_u64))
-                return
-
-            for child in a5py.cell_to_children(cell_u64, cell_res + 1):
-                _recurse(child, cell_res + 1)
-
-        for c in a5py.get_res0_cells():
-            _recurse(c, 0)
-
-        return result
+        ring = [
+            (min_lon, min_lat),
+            (max_lon, min_lat),
+            (max_lon, max_lat),
+            (min_lon, max_lat),
+            (min_lon, min_lat),
+        ]
+        compacted = a5py.polygon_to_cells(ring, resolution)
+        cells = a5py.uncompact(compacted, resolution)
+        return {a5py.u64_to_hex(c) for c in cells}
 
     def cell_area_m2(self, resolution: int, lat: float, lon: float) -> float:
-        # A5 is equal-area: 12 cells at resolution 0, each subdividing by 4
-        return const.WGS84_SURFACE_AREA_M2 / (12 * 4**resolution)
+        # A5 is equal-area: every cell at a given resolution has the same area,
+        # so lat/lon are unused. Subdivision is aperture 5 from resolution 0 to
+        # 1 (12 pentagons -> 60 cells) and aperture 4 thereafter; pya5's
+        # cell_area() accounts for this directly.
+        return a5py.cell_area(resolution)
 
     @staticmethod
     def cells_to_lonlat_arrays(cells: pd.Series) -> tuple[np.ndarray, np.ndarray]:
