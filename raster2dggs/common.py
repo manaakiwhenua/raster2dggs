@@ -178,7 +178,7 @@ def create_aggfuncs(
     result = []
     for name in names:
         if name == "mode":
-            logging.warning(
+            LOGGER.warning(
                 "Mode aggregation: arbitrary behaviour: if there is more than one mode when aggregating, only the first value will be recorded."
             )
             result.append((name, _mode))
