@@ -118,7 +118,7 @@ def indexer_instance(dggs: str) -> IRasterIndexer:
         module = import_module(module_name)
     except ModuleNotFoundError as e:
         raise ImportError(
-            f"Mising dependency '{e.name}' for backend '{dggs}'.\n"
+            f"Missing dependency '{e.name}' for backend '{dggs}'.\n"
             f"Install optional dependencies: pip install 'raster2dggs[{extra}]' "
             f"(or 'raster2dggs[all]')."
         ) from e

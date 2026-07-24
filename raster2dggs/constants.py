@@ -16,10 +16,6 @@ MIN_ISEA9R, MAX_ISEA9R = (
     0,
     16,
 )
-MIN_ISEA9R, MAX_ISEA9R = (
-    0,
-    16,
-)
 MIN_ISEA3H, MAX_ISEA3H = (
     0,
     33,
@@ -36,10 +32,10 @@ MIN_IVEA4R, MAX_IVEA4R = (
     0,
     25,
 )
-MIN_IVEA9R, MAX_IVEA9R = {
+MIN_IVEA9R, MAX_IVEA9R = (
     0,
     16,
-}
+)
 MIN_IVEA3H, MAX_IVEA3H = (
     0,
     33,
