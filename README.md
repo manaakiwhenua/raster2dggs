@@ -663,6 +663,8 @@ Please run `black .` before committing.
 
 #### Tests
 
+[![test](https://github.com/manaakiwhenua/raster2dggs/actions/workflows/test.yml/badge.svg)](https://github.com/manaakiwhenua/raster2dggs/actions/workflows/test.yml)
+
 Tests are included. To run them, set up a poetry environment, then run from the project root:
 
 ```bash
