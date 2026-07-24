@@ -1,0 +1,36 @@
+name: run-tests
+
+on:
+  workflow_call:
+
+jobs:
+  pytest:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        shell: bash -l {0}
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Set up conda environment with GDAL 3.13.1
+        uses: conda-incubator/setup-miniconda@v4
+        with:
+          miniforge-version: latest
+          python-version: "3.12"
+          channels: conda-forge
+          channel-priority: strict
+          conda-remove-defaults: true
+
+      - name: Install GDAL from conda-forge
+        run: conda install -y gdal=3.13.1 -c conda-forge
+
+      - name: Install Poetry
+        run: pip install poetry
+
+      - name: Install dependencies
+        run: poetry install --with dev --all-extras
+
+      - name: Run test suite
+        run: |
+          export PROJ_DATA="$CONDA_PREFIX/share/proj"
+          poetry run python -m pytest
