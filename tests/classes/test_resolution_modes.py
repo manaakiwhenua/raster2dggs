@@ -1,3 +1,5 @@
+from typing import Callable, NamedTuple
+
 import pytest
 from click.testing import CliRunner
 
@@ -6,11 +8,10 @@ from classes.helpers import make_raster
 from data.datapaths import TEST_OUTPUT_PATH
 from raster2dggs.cli import cli
 from raster2dggs.cli_factory import SPECS
-from raster2dggs.constants import ResolutionMode, MIN_H3, MAX_H3
+from raster2dggs.constants import ResolutionMode
 import raster2dggs.indexerfactory as idxfactory
 from raster2dggs.indexerfactory import INDEXER_LOOKUP
 import raster2dggs.common as common
-from raster2dggs.indexers.h3rasterindexer import H3RasterIndexer
 
 # Small single-band WGS84 raster — pixel size ≈ 0.01° × 0.01° near Auckland
 _BOUNDS = (174.0, -41.1, 174.1, -41.0)  # (left, bottom, right, top)
@@ -112,87 +113,107 @@ class TestComputePixelAreaM2(TestRunthrough):
         self.assertLess(area, 2e6)
 
 
-class TestResolveModeInvariants(TestRunthrough):
+class _ResolveModeCtx(NamedTuple):
+    dggs: str
+    min_res: int
+    max_res: int
+    pixel_area: float
+    resolve: Callable[[str], int]
+    cell_area: Callable[[int], float]
+
+
+@pytest.fixture(params=_DGGS_NAMES)
+def resolve_mode_ctx(request, tmp_path):
+    dggs = request.param
+    try:
+        indexer = idxfactory.indexer_instance(dggs)
+    except ImportError:
+        pytest.skip(f"{dggs} extra not installed")
+    spec = _SPEC_BY_NAME[dggs]
+
+    raster_path = str(tmp_path / "raster.tif")
+    make_raster(raster_path, _BOUNDS, _SIZE, pixel_value=1.0)
+    pixel_area, clat, clon = common.compute_pixel_area_m2(raster_path)
+
+    def resolve(mode):
+        return common.resolve_resolution_mode(
+            mode, dggs, raster_path, spec.min_res, spec.max_res
+        )
+
+    def cell_area(res):
+        return indexer.cell_area_m2(res, clat, clon)
+
+    return _ResolveModeCtx(
+        dggs, spec.min_res, spec.max_res, pixel_area, resolve, cell_area
+    )
+
+
+class TestResolveModeInvariants:
     """
     Each mode must satisfy its defining property against the pixel area of the
-    test raster.  We check invariants rather than hard-coded resolutions so the
-    tests don't break if Earth-model constants are refined.
+    test raster, for every DGGS implementation (not just H3). We check
+    invariants rather than hard-coded resolutions so the tests don't break
+    if Earth-model constants are refined.
     """
 
-    def setUp(self):
-        super().setUp()
-        self._tmp = self.make_temp_raster(_make_raster)
-        self.indexer = H3RasterIndexer("h3")
-        self.pixel_area, self.clat, self.clon = common.compute_pixel_area_m2(self._tmp)
+    def test_smaller_than_pixel_cell_is_smaller(self, resolve_mode_ctx):
+        c = resolve_mode_ctx
+        res = c.resolve("smaller-than-pixel")
+        assert (
+            c.cell_area(res) <= c.pixel_area
+        ), f"{c.dggs}: smaller-than-pixel selected cell must be <= pixel area"
 
-    def _resolve(self, mode):
-        return common.resolve_resolution_mode(mode, "h3", self._tmp, MIN_H3, MAX_H3)
+    def test_smaller_than_pixel_predecessor_is_larger(self, resolve_mode_ctx):
+        c = resolve_mode_ctx
+        res = c.resolve("smaller-than-pixel")
+        if res > c.min_res:
+            assert (
+                c.cell_area(res - 1) > c.pixel_area
+            ), f"{c.dggs}: smaller-than-pixel cell at res-1 must be > pixel area"
 
-    def _cell_area(self, res):
-        return self.indexer.cell_area_m2(res, self.clat, self.clon)
+    def test_larger_than_pixel_cell_is_larger(self, resolve_mode_ctx):
+        c = resolve_mode_ctx
+        res = c.resolve("larger-than-pixel")
+        assert (
+            c.cell_area(res) >= c.pixel_area
+        ), f"{c.dggs}: larger-than-pixel selected cell must be >= pixel area"
 
-    def test_smaller_than_pixel_cell_is_smaller(self):
-        res = self._resolve("smaller-than-pixel")
-        self.assertLessEqual(
-            self._cell_area(res),
-            self.pixel_area,
-            "smaller-than-pixel: selected cell must be <= pixel area",
+    def test_larger_than_pixel_successor_is_smaller(self, resolve_mode_ctx):
+        c = resolve_mode_ctx
+        res = c.resolve("larger-than-pixel")
+        if res < c.max_res:
+            assert (
+                c.cell_area(res + 1) < c.pixel_area
+            ), f"{c.dggs}: larger-than-pixel cell at res+1 must be < pixel area"
+
+    def test_larger_than_pixel_is_coarser_than_or_equal_to_smaller_than_pixel(
+        self, resolve_mode_ctx
+    ):
+        c = resolve_mode_ctx
+        res_smaller = c.resolve("smaller-than-pixel")
+        res_larger = c.resolve("larger-than-pixel")
+        assert res_larger <= res_smaller, (
+            f"{c.dggs}: larger-than-pixel resolution must be <= "
+            "smaller-than-pixel resolution"
         )
 
-    def test_smaller_than_pixel_predecessor_is_larger(self):
-        res = self._resolve("smaller-than-pixel")
-        if res > MIN_H3:
-            self.assertGreater(
-                self._cell_area(res - 1),
-                self.pixel_area,
-                "smaller-than-pixel: cell at res-1 must be > pixel area",
-            )
-
-    def test_larger_than_pixel_cell_is_larger(self):
-        res = self._resolve("larger-than-pixel")
-        self.assertGreaterEqual(
-            self._cell_area(res),
-            self.pixel_area,
-            "larger-than-pixel: selected cell must be >= pixel area",
-        )
-
-    def test_larger_than_pixel_successor_is_smaller(self):
-        res = self._resolve("larger-than-pixel")
-        if res < MAX_H3:
-            self.assertLess(
-                self._cell_area(res + 1),
-                self.pixel_area,
-                "larger-than-pixel: cell at res+1 must be < pixel area",
-            )
-
-    def test_larger_than_pixel_is_coarser_than_or_equal_to_smaller_than_pixel(self):
-        res_smaller = self._resolve("smaller-than-pixel")
-        res_larger = self._resolve("larger-than-pixel")
-        self.assertLessEqual(
-            res_larger,
-            res_smaller,
-            "larger-than-pixel resolution must be <= smaller-than-pixel resolution",
-        )
-
-    def test_min_diff_minimises_area_difference(self):
-        res = self._resolve("min-diff")
-        best_diff = abs(self._cell_area(res) - self.pixel_area)
-        for other_res in range(MIN_H3, MAX_H3 + 1):
+    def test_min_diff_minimises_area_difference(self, resolve_mode_ctx):
+        c = resolve_mode_ctx
+        res = c.resolve("min-diff")
+        best_diff = abs(c.cell_area(res) - c.pixel_area)
+        for other_res in range(c.min_res, c.max_res + 1):
             if other_res == res:
                 continue
-            self.assertLessEqual(
-                best_diff,
-                abs(self._cell_area(other_res) - self.pixel_area),
-                f"min-diff res {res} is not the closest to pixel area "
-                f"(res {other_res} is closer)",
+            assert best_diff <= abs(c.cell_area(other_res) - c.pixel_area), (
+                f"{c.dggs}: min-diff res {res} is not the closest to pixel area "
+                f"(res {other_res} is closer)"
             )
 
-    def test_result_within_valid_range(self):
+    def test_result_within_valid_range(self, resolve_mode_ctx):
+        c = resolve_mode_ctx
         for mode in ResolutionMode:
-            with self.subTest(mode=mode):
-                res = self._resolve(mode)
-                self.assertGreaterEqual(res, MIN_H3)
-                self.assertLessEqual(res, MAX_H3)
+            res = c.resolve(mode)
+            assert c.min_res <= res <= c.max_res, f"{c.dggs}: mode {mode} out of range"
 
 
 class TestResolutionModeCLI(TestRunthrough):
