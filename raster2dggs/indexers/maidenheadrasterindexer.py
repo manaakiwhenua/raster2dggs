@@ -14,7 +14,8 @@ class MaidenheadRasterIndexer(RasterIndexer):
 
     def _index_window(self, wide, resolution: int, parent_res: int):
         maidenhead = [
-            mh.to_maiden(lat, lon, resolution) for lat, lon in zip(wide["y"], wide["x"])
+            mh.to_maiden(lat, lon, resolution)
+            for lat, lon in zip(wide["y"], wide["x"], strict=True)
         ]
         maidenhead_parent = [self.cell_to_parent(m, parent_res) for m in maidenhead]
         wide = wide.drop(columns=["x", "y"])

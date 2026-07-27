@@ -1,14 +1,14 @@
 import numpy as np
 import pyarrow as pa
 import rasterio
+from classes.base import TestRunthrough, read_output
+from classes.helpers import make_raster
 from click.testing import CliRunner
+from data.datapaths import TEST_OUTPUT_PATH
 from osgeo import gdal
 from rasterio.crs import CRS
 from rasterio.transform import from_bounds
 
-from classes.base import TestRunthrough, read_output
-from classes.helpers import make_raster
-from data.datapaths import TEST_OUTPUT_PATH
 from raster2dggs.cli import cli
 
 # 10×10 pixel Float32 raster in EPSG:4326 near Auckland
@@ -927,7 +927,7 @@ class TestOverlayCollect(TestRunthrough):
         list_df = list_table.to_pandas()
         hist_df = hist_table.to_pandas()
         self.assertEqual(len(list_df), len(hist_df))
-        for lst, hist in zip(list_df["band_1"], hist_df["band_1"]):
+        for lst, hist in zip(list_df["band_1"], hist_df["band_1"], strict=True):
             if lst is None and hist is None:
                 continue
             self.assertEqual(

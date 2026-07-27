@@ -8,7 +8,8 @@ method callable by ThreadPoolExecutor.map.
 from __future__ import annotations
 
 import dataclasses
-from typing import Any, Callable, Optional
+from collections.abc import Callable
+from typing import Any
 
 import pyproj
 import xarray as xr
@@ -30,7 +31,7 @@ class _AssignCentersIndexer:
     nodata: Any
     selected_labels: tuple
     nodata_policy: str
-    emit_nodata_value: Optional[Any]
+    emit_nodata_value: Any | None
     transformer: pyproj.Transformer
     write_result: Callable
 
@@ -48,4 +49,3 @@ class _AssignCentersIndexer:
             transformer=self.transformer,
         )
         self.write_result(result, window)
-        return None

@@ -27,7 +27,7 @@ aren't counts.
 from __future__ import annotations
 
 import dataclasses
-from typing import Optional, Sequence, Union
+from collections.abc import Sequence
 
 import numpy as np
 import pyarrow as pa
@@ -39,8 +39,8 @@ import raster2dggs.constants as const
 class HistogramSpec:
     """Primitives-only so it tokenizes cleanly across a dask task graph."""
 
-    edges: Optional[tuple] = None  # explicit ascending bin edges
-    width: Optional[float] = None  # uniform bin width
+    edges: tuple | None = None  # explicit ascending bin edges
+    width: float | None = None  # uniform bin width
     origin: float = 0.0  # anchor for width-mode bins
     weight: str = const.HistWeight.COUNT
     normalize: str = const.HistNormalize.NONE
@@ -59,7 +59,7 @@ _WEIGHT_FIELD_NAMES = {
 }
 
 
-def weight_field_name(spec: Optional[HistogramSpec]) -> str:
+def weight_field_name(spec: HistogramSpec | None) -> str:
     """Name of the per-bin weight field for this spec's (weight, normalize)
     combination -- chosen so the field describes what the numbers are (a
     plain pixel count, an area in m^2, or a fraction of some denominator)."""
@@ -75,11 +75,11 @@ def weight_field_name(spec: Optional[HistogramSpec]) -> str:
 
 def build_histogram(
     values: Sequence[float],
-    weights: Optional[Sequence[float]] = None,
-    spec: Optional[HistogramSpec] = None,
-    decimals: Optional[int] = None,
-    cell_area: Optional[float] = None,
-) -> Optional[dict]:
+    weights: Sequence[float] | None = None,
+    spec: HistogramSpec | None = None,
+    decimals: int | None = None,
+    cell_area: float | None = None,
+) -> dict | None:
     """
     Build a histogram from contributing pixel values (and optional per-pixel
     weights). See module docstring for the returned shape.
@@ -152,7 +152,7 @@ def build_histogram(
 
 
 def histogram_struct_type(
-    spec: Optional[HistogramSpec], decimals: Optional[int], source_dtype
+    spec: HistogramSpec | None, decimals: int | None, source_dtype
 ) -> pa.StructType:
     """Arrow struct type for a histogram column, matching build_histogram's
     output shape for the given spec/decimals/source dtype."""
@@ -192,7 +192,7 @@ def _weighted_groupby(keys: np.ndarray, w: np.ndarray) -> tuple[np.ndarray, np.n
 
 
 def _categorical(
-    arr: np.ndarray, w: np.ndarray, decimals: Optional[int]
+    arr: np.ndarray, w: np.ndarray, decimals: int | None
 ) -> tuple[list, np.ndarray]:
     if decimals is not None and decimals <= 0:
         keys = np.round(arr, decimals).astype(np.int64)
@@ -205,7 +205,7 @@ def _categorical(
 
 
 def _binned_explicit(
-    arr: np.ndarray, w: np.ndarray, edges: Union[tuple, Sequence[float]]
+    arr: np.ndarray, w: np.ndarray, edges: tuple | Sequence[float]
 ) -> tuple[list, list, np.ndarray]:
     edges_arr = np.asarray(edges, dtype=np.float64)
     # numpy's own bin convention: half-open [a, b) except the last bin,

@@ -1,50 +1,44 @@
-import gc
-import os
 import errno
-import tempfile
+import gc
+import json
 import logging
-import numpy as np
-import rioxarray
-import dask
+import os
+import shutil
+import tempfile
+from collections.abc import Callable, Sequence
+from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
+from typing import Any
+from urllib.parse import urlparse
+
 import click
 import click_log
-import shutil
-
-import rasterio as rio
+import dask
+import dask.dataframe as dd
+import numpy as np
 import pandas as pd
 import pyarrow as pa
-import pyarrow.parquet as pq
 import pyarrow.dataset as ds
-import json
-import shapely
+import pyarrow.parquet as pq
 import pyproj
-
-from typing import Any, Union, Optional, Sequence, Callable, List, Tuple
-from pathlib import Path
+import rasterio as rio
+import rioxarray
+import shapely
+import xarray as xr
+from rasterio.warp import transform_bounds
 from tqdm import tqdm
 from tqdm.dask import TqdmCallback
-import dask.dataframe as dd
-import xarray as xr
-
-from concurrent.futures import ThreadPoolExecutor
-
-from urllib.parse import urlparse
-from rasterio.warp import transform_bounds
-from rasterio.transform import rowcol
 
 import raster2dggs.constants as const
 import raster2dggs.histogram as histogram
 import raster2dggs.indexerfactory as idxfactory
-
 from raster2dggs.interfaces import IRasterIndexer
-from raster2dggs.indexers.rasterindexer import _is_nan
-
-LOGGER = logging.getLogger(__name__)
-click_log.basic_config(LOGGER)
-
 from raster2dggs.transfers.assign_centers import _AssignCentersIndexer
 from raster2dggs.transfers.interpolation import _SampleIndexer
 from raster2dggs.transfers.overlay import _OverlayIndexer
+
+LOGGER = logging.getLogger(__name__)
+click_log.basic_config(LOGGER)
 
 
 class ParentResolutionException(Exception):
@@ -130,13 +124,11 @@ def resolve_resolution_mode(
 def check_resolutions(resolution: int, parent_res: int) -> None:
     if parent_res is not None and not int(parent_res) < int(resolution):
         raise ParentResolutionException(
-            "Parent resolution ({pr}) must be less than target resolution ({r})".format(
-                pr=parent_res, r=resolution
-            )
+            f"Parent resolution ({parent_res}) must be less than target resolution ({resolution})"
         )
 
 
-def resolve_input_path(raster_input: Union[str, Path]) -> Union[str, Path]:
+def resolve_input_path(raster_input: str | Path) -> str | Path:
     if not Path(raster_input).exists():
         if not urlparse(raster_input).scheme:
             LOGGER.warning(
@@ -154,9 +146,9 @@ def resolve_input_path(raster_input: Union[str, Path]) -> Union[str, Path]:
 
 
 def create_aggfuncs(
-    names: Tuple[str, ...],
-    decimals: Optional[int] = None,
-) -> List[Tuple[str, Union[str, Callable]]]:
+    names: tuple[str, ...],
+    decimals: int | None = None,
+) -> list[tuple[str, str | Callable]]:
     """Convert a tuple of aggfunc name strings to (name, callable_or_str) pairs."""
 
     def _mode(x: pd.Series) -> Any:
@@ -192,9 +184,9 @@ def create_aggfuncs(
 
 
 def resolve_to_internal(
-    point: Optional[str],
-    overlay: Optional[str],
-    sample: Optional[str],
+    point: str | None,
+    overlay: str | None,
+    sample: str | None,
 ) -> dict:
     """Map CLI flags to the internal (transfer_key, op, out_key) triple."""
     if overlay is not None:
@@ -247,7 +239,7 @@ def resolve_to_internal(
     return {"transfer": const.Transfer.ASSIGN_CENTERS, "op": None, "out": out}
 
 
-def _build_histogram_spec(kwargs: dict) -> Optional[histogram.HistogramSpec]:
+def _build_histogram_spec(kwargs: dict) -> histogram.HistogramSpec | None:
     """Build a HistogramSpec from raw --hist-* CLI values, or None when the
     resolved output isn't histogram (the --hist-* flags then have no effect)."""
     if kwargs.get("out") != const.OutputSchema.HISTOGRAM:
@@ -263,13 +255,13 @@ def _build_histogram_spec(kwargs: dict) -> Optional[histogram.HistogramSpec]:
 
 
 def validate_config(
-    point: Optional[str],
-    overlay: Optional[str],
-    sample: Optional[str],
-    hist_bins: Optional[Sequence[float]] = None,
-    hist_width: Optional[float] = None,
-    hist_weight: Optional[str] = None,
-    hist_normalize: Optional[str] = None,
+    point: str | None,
+    overlay: str | None,
+    sample: str | None,
+    hist_bins: Sequence[float] | None = None,
+    hist_width: float | None = None,
+    hist_weight: str | None = None,
+    hist_normalize: str | None = None,
 ) -> None:
     if overlay is not None and sample is not None:
         raise click.UsageError("--overlay and --sample are mutually exclusive")
@@ -298,17 +290,17 @@ def validate_config(
 def assemble_kwargs(
     compression: str,
     threads: int,
-    aggfuncs: List[Tuple[str, Union[str, Callable]]],
+    aggfuncs: list[tuple[str, str | Callable]],
     decimals: int,
     overwrite: bool,
     compact: bool,
     geo: str,
-    point: Optional[str] = None,
-    overlay: Optional[str] = None,
-    sample: Optional[str] = None,
+    point: str | None = None,
+    overlay: str | None = None,
+    sample: str | None = None,
     valid_coverage_threshold: float = 0.0,
-    hist_bins: Optional[Tuple[float, ...]] = None,
-    hist_width: Optional[float] = None,
+    hist_bins: tuple[float, ...] | None = None,
+    hist_width: float | None = None,
     hist_origin: float = 0.0,
     hist_weight: str = "count",
     hist_normalize: str = "none",
@@ -336,7 +328,7 @@ def assemble_kwargs(
 def write_partition_as_geoparquet(
     pdf: pd.DataFrame,
     geom_func,
-    base_dir: Union[str, Path],
+    base_dir: str | Path,
     partition_col_name: str,
     compression: str,
     schema: pa.Schema,
@@ -485,7 +477,7 @@ def _build_write_schema(
     index_col: str,
     partition_col: str,
     out_meta: pd.DataFrame,
-    hist_spec: Optional[histogram.HistogramSpec] = None,
+    hist_spec: histogram.HistogramSpec | None = None,
 ) -> pa.Schema:
     common_fields = [
         pa.field(index_col, pa.string()),
@@ -711,13 +703,13 @@ def address_boundary_issues(
 
 def initial_index(
     dggs: str,
-    raster_input: Union[Path, str],
+    raster_input: Path | str,
     output: Path,
     resolution: int,
-    parent_res: Union[None, int],
-    bands: Optional[Sequence[Union[int, str]]] = None,
+    parent_res: None | int,
+    bands: Sequence[int | str] | None = None,
     nodata_policy: str = "omit",
-    emit_nodata_value: Optional[Union[int, float]] = None,
+    emit_nodata_value: int | float | None = None,
     **kwargs,
 ) -> Path:
     """
@@ -794,7 +786,7 @@ def initial_index(
                         except KeyError as e:
                             raise ValueError(
                                 f"Requested band name not found: {e.args[0]}"
-                            )
+                            ) from e
                     # Validate
                     for i in selected_indices:
                         if i < 1 or i > count:
@@ -844,7 +836,9 @@ def initial_index(
                 selected_labels = tuple([labels_by_index[i] for i in selected_indices])
                 kwargs["source_pixel_dtypes"] = {
                     label: np.dtype(src.dtypes[idx - 1])
-                    for idx, label in zip(selected_indices, selected_labels)
+                    for idx, label in zip(
+                        selected_indices, selected_labels, strict=True
+                    )
                 }
                 compression = kwargs["compression"]
                 nodata = src.nodata

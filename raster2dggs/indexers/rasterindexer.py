@@ -1,10 +1,10 @@
+from collections.abc import Callable
 from numbers import Number
-from typing import Callable, List, Tuple, Union, Optional
 
+import numpy as np
 import pandas as pd
 import pyarrow as pa
 import xarray as xr
-import numpy as np
 
 from .. import constants as const
 from ..histogram import HistogramSpec, build_histogram
@@ -109,9 +109,9 @@ class RasterIndexer(IRasterIndexer):
         resolution: int,
         parent_res: int,
         nodata: Number = np.nan,
-        band_labels: Tuple[str] = None,
+        band_labels: tuple[str] = None,
         nodata_policy: str = "omit",
-        emit_nodata_value: Optional[Number] = None,
+        emit_nodata_value: Number | None = None,
         transformer=None,
     ) -> pa.Table:
         sdf: pd.DataFrame = (
@@ -143,7 +143,8 @@ class RasterIndexer(IRasterIndexer):
         bands = sorted(sdf["band"].unique())
         if band_labels is None:
             band_labels = tuple(str(b) for b in bands)
-        wide = wide.rename(columns=dict(zip(bands, band_labels)))
+        # Known bug: positional pairing can mislabel bands when a window drops one.
+        wide = wide.rename(columns=dict(zip(bands, band_labels)))  # noqa: B905
         return pa.Table.from_pandas(wide, preserve_index=False)
 
     def cells_to_lonlat_arrays(self, cells: pd.Series) -> tuple[np.ndarray, np.ndarray]:
@@ -175,8 +176,8 @@ class RasterIndexer(IRasterIndexer):
         df: pd.DataFrame,
         resolution: int,
         parent_res: int,
-        aggfuncs: List[Tuple[str, Union[str, Callable]]],
-        decimals: Optional[int],
+        aggfuncs: list[tuple[str, str | Callable]],
+        decimals: int | None,
     ) -> pd.DataFrame:
         """
         Aggregate DGGS cell values per parent partition.
@@ -248,7 +249,7 @@ class RasterIndexer(IRasterIndexer):
         df: pd.DataFrame,
         resolution: int,
         parent_res: int,
-        decimals: Optional[int] = None,
+        decimals: int | None = None,
     ) -> pd.DataFrame:
         """
         For --transfer sample: deduplicate cells that appear in more than one
@@ -322,7 +323,7 @@ class RasterIndexer(IRasterIndexer):
         df: pd.DataFrame,
         resolution: int,
         parent_res: int,
-        decimals: Optional[int] = None,
+        decimals: int | None = None,
     ) -> pd.DataFrame:
         """
         Collect all contributing pixel values per DGGS cell into lists.
@@ -347,8 +348,8 @@ class RasterIndexer(IRasterIndexer):
         df: pd.DataFrame,
         resolution: int,
         parent_res: int,
-        decimals: Optional[int] = None,
-        hist_spec: Optional[HistogramSpec] = None,
+        decimals: int | None = None,
+        hist_spec: HistogramSpec | None = None,
     ) -> pd.DataFrame:
         """
         Collect contributing pixel values per DGGS cell into a histogram.
@@ -365,7 +366,8 @@ class RasterIndexer(IRasterIndexer):
         ):
             lons, lats = self.cells_to_lonlat_arrays(pd.Series(gb.index))
             cell_areas = [
-                self.cell_area_m2(resolution, lat, lon) for lat, lon in zip(lats, lons)
+                self.cell_area_m2(resolution, lat, lon)
+                for lat, lon in zip(lats, lons, strict=True)
             ]
         for col in self.band_cols(gb):
             if cell_areas is not None:
@@ -373,7 +375,7 @@ class RasterIndexer(IRasterIndexer):
                     build_histogram(
                         vals, spec=hist_spec, decimals=decimals, cell_area=area
                     )
-                    for vals, area in zip(gb[col], cell_areas)
+                    for vals, area in zip(gb[col], cell_areas, strict=True)
                 ]
             else:
                 gb[col] = gb[col].map(

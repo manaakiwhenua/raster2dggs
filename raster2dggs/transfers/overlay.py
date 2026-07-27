@@ -18,17 +18,19 @@ import math
 import os
 import tempfile
 import warnings
-from typing import Any, Callable, Optional
+from collections.abc import Callable
+from typing import Any
 
 import antimeridian
-from exactextract import exact_extract
 import geopandas as gpd
 import numpy as np
 import pandas as pd
 import pyarrow as pa
 import pyproj
 import rasterio as rio
-from rasterio.warp import transform_bounds, transform as warp_transform
+from exactextract import exact_extract
+from rasterio.warp import transform as warp_transform
+from rasterio.warp import transform_bounds
 from shapely.geometry import Polygon, shape
 
 import raster2dggs.constants as const
@@ -55,7 +57,7 @@ def _frac_pairs(frac_arr, unique_arr, scale=1.0, decimals=None):
         return None
     if scale <= 0.0:
         return None
-    pairs = sorted(zip(unique_arr.tolist(), frac_arr.tolist()))
+    pairs = sorted(zip(unique_arr.tolist(), frac_arr.tolist(), strict=True))
     fracs = [v * scale for _, v in pairs]
     if decimals is not None:
         fracs = [round(f, decimals) for f in fracs]
@@ -77,14 +79,14 @@ def _build_collect_table(
     selected_indices: tuple,
     out: str,
     decimals,
-    hist_spec: Optional[HistogramSpec] = None,
+    hist_spec: HistogramSpec | None = None,
 ) -> pa.Table:
     """Build a PyArrow Table for --overlay --list or --overlay --histogram output."""
     arrays = {}
     for col in result_df.columns:
         if col not in band_cols:
             arrays[col] = pa.array(result_df[col].tolist())
-    for idx, col in zip(selected_indices, band_cols):
+    for idx, col in zip(selected_indices, band_cols, strict=True):
         if out == const.OutputSchema.LIST:
             elem_type = _pa_elem_type(src_dtypes[idx - 1], decimals)
             arrays[col] = pa.array(result_df[col].tolist(), type=pa.list_(elem_type))
@@ -134,13 +136,13 @@ class _OverlayIndexer:
     selected_labels: tuple
     selected_indices: tuple
     nodata_policy: str
-    emit_nodata_value: Optional[Any]
+    emit_nodata_value: Any | None
     write_result: Callable
     op: const.Op
     out: const.OutputSchema = const.OutputSchema.VALUE
     min_valid_coverage: float = 0.0
-    decimals: Optional[int] = None
-    hist_spec: Optional[HistogramSpec] = None
+    decimals: int | None = None
+    hist_spec: HistogramSpec | None = None
 
     def __post_init__(self):
         # mass_preserve (sum) must not filter by coverage — partial sums are correct
@@ -248,7 +250,7 @@ class _OverlayIndexer:
                     src.transform, perim_row, perim_col, offset="ul"
                 )
                 lons, lats = warp_transform(src.crs, "EPSG:4326", list(xs), list(ys))
-                self._raster_footprint_wgs84 = Polygon(zip(lons, lats))
+                self._raster_footprint_wgs84 = Polygon(zip(lons, lats, strict=True))
 
                 # Build a per-band binary validity mask (1.0=valid, 0.0=nodata) written
                 # to a real temp file so exactextract can compute mean(mask) = valid data
@@ -290,14 +292,18 @@ class _OverlayIndexer:
             else:
                 self._col_rename = {
                     f"band_{idx}_weight_{weighted_agg}": label
-                    for idx, label in zip(self.selected_indices, self.selected_labels)
+                    for idx, label in zip(
+                        self.selected_indices, self.selected_labels, strict=True
+                    )
                 }
         elif self._src_band_count == 1:
             self._col_rename = {self.op: self.selected_labels[0]}
         else:
             self._col_rename = {
                 f"band_{idx}_{self.op}": label
-                for idx, label in zip(self.selected_indices, self.selected_labels)
+                for idx, label in zip(
+                    self.selected_indices, self.selected_labels, strict=True
+                )
             }
 
     def _cleanup_temp_files(self):
@@ -480,7 +486,9 @@ class _OverlayIndexer:
             # Merge parallel frac/unique arrays into sorted struct pairs, scaling
             # each fraction by valid_frac so fractions represent fraction of the
             # total cell area covered by each class.
-            for idx, label in zip(self.selected_indices, self.selected_labels):
+            for idx, label in zip(
+                self.selected_indices, self.selected_labels, strict=True
+            ):
                 fc = "frac" if self._src_band_count == 1 else f"band_{idx}_frac"
                 uc = "unique" if self._src_band_count == 1 else f"band_{idx}_unique"
                 vf_values = (
@@ -488,7 +496,9 @@ class _OverlayIndexer:
                 )
                 result_df[label] = [
                     _frac_pairs(f, u, scale=s, decimals=self.decimals)
-                    for f, u, s in zip(result_df[fc], result_df[uc], vf_values)
+                    for f, u, s in zip(
+                        result_df[fc], result_df[uc], vf_values, strict=True
+                    )
                 ]
             result_df = result_df[["_cell_id"] + band_cols]
 
@@ -508,9 +518,13 @@ class _OverlayIndexer:
                 lons, lats = self.indexer.cells_to_lonlat_arrays(result_df["_cell_id"])
                 cell_areas_by_id = {
                     cid: self.indexer.cell_area_m2(self.resolution, lat, lon)
-                    for cid, lat, lon in zip(result_df["_cell_id"], lats, lons)
+                    for cid, lat, lon in zip(
+                        result_df["_cell_id"], lats, lons, strict=True
+                    )
                 }
-            for idx, label in zip(self.selected_indices, self.selected_labels):
+            for idx, label in zip(
+                self.selected_indices, self.selected_labels, strict=True
+            ):
                 vc = "values" if self._src_band_count == 1 else f"band_{idx}_values"
                 raw = result_df[vc]
                 if self.out == const.OutputSchema.LIST:
@@ -544,7 +558,9 @@ class _OverlayIndexer:
                                 if (arr is not None and c is not None and w is not None)
                                 else None
                             )
-                            for arr, c, w in zip(raw, result_df[cc], result_df[wc])
+                            for arr, c, w in zip(
+                                raw, result_df[cc], result_df[wc], strict=True
+                            )
                         ]
                     else:
                         weight_arrs = [None] * len(raw)
@@ -561,7 +577,7 @@ class _OverlayIndexer:
                             ),
                         )
                         for arr, wgt, cid in zip(
-                            raw, weight_arrs, result_df["_cell_id"]
+                            raw, weight_arrs, result_df["_cell_id"], strict=True
                         )
                     ]
             result_df = result_df[["_cell_id"] + band_cols]

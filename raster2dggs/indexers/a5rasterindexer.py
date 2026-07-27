@@ -42,7 +42,7 @@ class A5RasterIndexer(RasterIndexer):
         # (~200us/point).
         cells = [
             a5py.lonlat_to_cell((lon, lat), resolution)
-            for lon, lat in zip(wide["x"], wide["y"])
+            for lon, lat in zip(wide["x"], wide["y"], strict=True)
         ]
         a5_parent = [a5py.cell_to_parent(cell, parent_res) for cell in cells]
         wide = wide.drop(columns=["x", "y"])

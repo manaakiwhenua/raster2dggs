@@ -24,14 +24,14 @@ Usage:
   python make_sample_rasters.py --outdir sample_rasters --seed 7
 """
 
-import os
 import argparse
 import math
-import numpy as np
+import os
 
+import numpy as np
 import rasterio
-from rasterio.transform import from_origin
 from rasterio.crs import CRS
+from rasterio.transform import from_origin
 
 try:
     from scipy.ndimage import gaussian_filter
