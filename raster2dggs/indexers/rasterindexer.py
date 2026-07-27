@@ -143,7 +143,7 @@ class RasterIndexer(IRasterIndexer):
         bands = sorted(sdf["band"].unique())
         if band_labels is None:
             band_labels = tuple(str(b) for b in bands)
-        # Known bug: positional pairing can mislabel bands when a window drops one.
+        # Known bug (#88): positional pairing can mislabel bands when a window drops one.
         wide = wide.rename(columns=dict(zip(bands, band_labels)))  # noqa: B905
         return pa.Table.from_pandas(wide, preserve_index=False)
 
