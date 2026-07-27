@@ -1,5 +1,3 @@
-import importlib
-
 import pytest
 from click.testing import CliRunner
 
@@ -8,7 +6,8 @@ from classes.helpers import make_raster
 from data.datapaths import TEST_OUTPUT_PATH
 from raster2dggs.cli import cli
 from raster2dggs.cli_factory import SPECS
-from raster2dggs.constants import ResolutionMode
+from raster2dggs.constants import ResolutionMode, MIN_H3, MAX_H3
+import raster2dggs.indexerfactory as idxfactory
 from raster2dggs.indexerfactory import INDEXER_LOOKUP
 import raster2dggs.common as common
 from raster2dggs.indexers.h3rasterindexer import H3RasterIndexer
@@ -16,7 +15,6 @@ from raster2dggs.indexers.h3rasterindexer import H3RasterIndexer
 # Small single-band WGS84 raster — pixel size ≈ 0.01° × 0.01° near Auckland
 _BOUNDS = (174.0, -41.1, 174.1, -41.0)  # (left, bottom, right, top)
 _SIZE = 10  # 10 × 10 pixels
-_H3_MIN, _H3_MAX = 0, 15
 
 
 def _make_raster(path: str) -> None:
@@ -33,29 +31,28 @@ def _one_dggs_per_indexer_module():
     resolution 0), both previously invisible here because this test only ever
     instantiated H3RasterIndexer."""
     seen_modules = set()
-    cases = []
-    for name, (module_path, class_name, _extra) in INDEXER_LOOKUP.items():
+    names = []
+    for name, (module_path, _class_name, _extra) in INDEXER_LOOKUP.items():
         if module_path in seen_modules:
             continue
         seen_modules.add(module_path)
-        cases.append((name, module_path, class_name))
-    return cases
+        names.append(name)
+    return names
 
 
 _SPEC_BY_NAME = {s.name: s for s in SPECS}
-_DGGS_CASES = _one_dggs_per_indexer_module()
+_DGGS_NAMES = _one_dggs_per_indexer_module()
 
 
-@pytest.fixture(params=_DGGS_CASES, ids=[c[0] for c in _DGGS_CASES])
+@pytest.fixture(params=_DGGS_NAMES)
 def cell_area_indexer(request):
-    dggs, module_path, class_name = request.param
+    dggs = request.param
     try:
-        mod = importlib.import_module(module_path)
-        cls = getattr(mod, class_name)
+        indexer = idxfactory.indexer_instance(dggs)
     except ImportError:
         pytest.skip(f"{dggs} extra not installed")
     spec = _SPEC_BY_NAME[dggs]
-    return cls(dggs), spec.min_res, spec.max_res
+    return indexer, spec.min_res, spec.max_res
 
 
 class TestCellAreaM2:
@@ -129,7 +126,7 @@ class TestResolveModeInvariants(TestRunthrough):
         self.pixel_area, self.clat, self.clon = common.compute_pixel_area_m2(self._tmp)
 
     def _resolve(self, mode):
-        return common.resolve_resolution_mode(mode, "h3", self._tmp, _H3_MIN, _H3_MAX)
+        return common.resolve_resolution_mode(mode, "h3", self._tmp, MIN_H3, MAX_H3)
 
     def _cell_area(self, res):
         return self.indexer.cell_area_m2(res, self.clat, self.clon)
@@ -144,7 +141,7 @@ class TestResolveModeInvariants(TestRunthrough):
 
     def test_smaller_than_pixel_predecessor_is_larger(self):
         res = self._resolve("smaller-than-pixel")
-        if res > _H3_MIN:
+        if res > MIN_H3:
             self.assertGreater(
                 self._cell_area(res - 1),
                 self.pixel_area,
@@ -161,7 +158,7 @@ class TestResolveModeInvariants(TestRunthrough):
 
     def test_larger_than_pixel_successor_is_smaller(self):
         res = self._resolve("larger-than-pixel")
-        if res < _H3_MAX:
+        if res < MAX_H3:
             self.assertLess(
                 self._cell_area(res + 1),
                 self.pixel_area,
@@ -180,7 +177,7 @@ class TestResolveModeInvariants(TestRunthrough):
     def test_min_diff_minimises_area_difference(self):
         res = self._resolve("min-diff")
         best_diff = abs(self._cell_area(res) - self.pixel_area)
-        for other_res in range(_H3_MIN, _H3_MAX + 1):
+        for other_res in range(MIN_H3, MAX_H3 + 1):
             if other_res == res:
                 continue
             self.assertLessEqual(
@@ -194,8 +191,8 @@ class TestResolveModeInvariants(TestRunthrough):
         for mode in ResolutionMode:
             with self.subTest(mode=mode):
                 res = self._resolve(mode)
-                self.assertGreaterEqual(res, _H3_MIN)
-                self.assertLessEqual(res, _H3_MAX)
+                self.assertGreaterEqual(res, MIN_H3)
+                self.assertLessEqual(res, MAX_H3)
 
 
 class TestResolutionModeCLI(TestRunthrough):
