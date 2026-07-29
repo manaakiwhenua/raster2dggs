@@ -16,7 +16,7 @@ class H3RasterIndexer(RasterIndexer):
         partition_col = self.partition_col(parent_res)
         cells = [
             h3py.latlng_to_cell(lat, lon, resolution)
-            for lat, lon in zip(wide["y"], wide["x"])
+            for lat, lon in zip(wide["y"], wide["x"], strict=True)
         ]
         wide = wide.drop(columns=["x", "y"])
         wide[index_col] = cells

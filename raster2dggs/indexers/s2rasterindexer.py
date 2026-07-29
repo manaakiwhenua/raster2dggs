@@ -1,9 +1,9 @@
 import math
 from math import ceil
 
-import s2sphere
 import numpy as np
 import pandas as pd
+import s2sphere
 import shapely
 
 import raster2dggs.constants as const
@@ -18,7 +18,7 @@ class S2RasterIndexer(RasterIndexer):
     def _index_window(self, wide, resolution: int, parent_res: int):
         cells = [
             s2sphere.CellId.from_lat_lng(s2sphere.LatLng.from_degrees(lat, lon))
-            for lat, lon in zip(wide["y"], wide["x"])
+            for lat, lon in zip(wide["y"], wide["x"], strict=True)
         ]
         wide = wide.drop(columns=["x", "y"])
         wide[self.index_col(resolution)] = pd.Series(

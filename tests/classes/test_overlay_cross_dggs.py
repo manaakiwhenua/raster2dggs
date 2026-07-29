@@ -18,11 +18,11 @@ regardless of how the cells are split.
 
 import pytest
 import rasterio
-from click.testing import CliRunner
-
 from classes.base import clear_folder
 from classes.helpers import make_raster
+from click.testing import CliRunner
 from data.datapaths import TEST_OUTPUT_PATH
+
 from raster2dggs.cli import cli
 from raster2dggs.cli_factory import SPECS
 from raster2dggs.indexerfactory import INDEXER_LOOKUP

@@ -1,9 +1,8 @@
 from importlib import import_module
-from typing import Dict, Tuple, Type
 
 from raster2dggs.interfaces import IRasterIndexer
 
-INDEXER_LOOKUP: Dict[str, Tuple[str, str, str]] = {
+INDEXER_LOOKUP: dict[str, tuple[str, str, str]] = {
     "h3": ("raster2dggs.indexers.h3rasterindexer", "H3RasterIndexer", "h3"),
     "rhp": ("raster2dggs.indexers.rhprasterindexer", "RHPRasterIndexer", "rhp"),
     "geohash": (
@@ -122,5 +121,5 @@ def indexer_instance(dggs: str) -> IRasterIndexer:
             f"Install optional dependencies: pip install 'raster2dggs[{extra}]' "
             f"(or 'raster2dggs[all]')."
         ) from e
-    indexer: Type[IRasterIndexer] = getattr(module, class_name)
+    indexer: type[IRasterIndexer] = getattr(module, class_name)
     return indexer(dggs)

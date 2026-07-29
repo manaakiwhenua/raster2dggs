@@ -1,12 +1,12 @@
 import tempfile
+from collections.abc import Callable
 from pathlib import Path
-from typing import Callable
-from unittest import *
+from unittest import TestCase
 
 import pyarrow.parquet as pq
 from click.testing import CliRunner
+from data.datapaths import TEST_OUTPUT_PATH
 
-from data.datapaths import *
 from raster2dggs.cli import cli
 
 

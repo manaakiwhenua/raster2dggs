@@ -1,11 +1,10 @@
 import functools
 import threading
 
-import rhppandas  # Necessary import despite lack of explicit use
-
 import numpy as np
-import rhealpixdggs.rhp_wrappers as rhpw
 import pandas as pd
+import rhealpixdggs.rhp_wrappers as rhpw
+import rhppandas  # noqa: F401 -- registers the .rhp pandas accessor as a side effect
 import shapely
 from rhealpixdggs.dggs import WGS84_003
 

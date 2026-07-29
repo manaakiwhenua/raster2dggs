@@ -1,6 +1,5 @@
 from abc import abstractmethod
-from functools import lru_cache
-from typing import List
+from functools import cache, lru_cache
 
 import dggal
 import numpy as np
@@ -27,11 +26,10 @@ class DGGALRasterIndexer(RasterIndexer):
     def dggrs(self) -> dggal.DGGRS:
         raise NotImplementedError
 
-    @lru_cache(maxsize=None)
+    @cache  # noqa: B019 -- keyed on self; fine since one instance lives per CLI invocation
     def _get_parent(self, zone: int) -> int | None:
         """
         Get immediate parent with caching.
-        Used recursively, the LRU cache will naturally evict leaf cells which don't benefit from caching.
         """
         # NB  All zones of GNOSIS Global Grid and *9R have single parents, whereas *3H zones have one parent if they are a centroid child, and three parents otherwise if they are a vertex child.
         # *7H zones have one parent "logically" but possibly more "geometrically". *7H zones are considered to have only one parent for the purposes of this tool, which conforms to the same assumption as H3, which has a refinement ratio of 7.
@@ -57,7 +55,7 @@ class DGGALRasterIndexer(RasterIndexer):
     def _index_window(self, wide, resolution: int, parent_res: int):
         cells = [
             self.dggrs.getZoneFromWGS84Centroid(resolution, dggal.GeoPoint(lon, lat))
-            for lon, lat in zip(wide["y"], wide["x"])
+            for lon, lat in zip(wide["y"], wide["x"], strict=True)
         ]  # Vectorised
         dggrs_parent = [
             self._get_ancestor(zone, resolution - parent_res) for zone in cells
@@ -201,7 +199,7 @@ class DGGALRasterIndexer(RasterIndexer):
 
     def cell_area_m2(self, resolution: int, lat: float, lon: float) -> float:
         zone = self.dggrs.getZoneFromWGS84Centroid(resolution, dggal.GeoPoint(lat, lon))
-        geo_points: List[dggal.GeoPoint] = self.dggrs.getZoneRefinedWGS84Vertices(
+        geo_points: list[dggal.GeoPoint] = self.dggrs.getZoneRefinedWGS84Vertices(
             zone, 0
         )
         polygon = shapely.Polygon([(p.lon, p.lat) for p in geo_points])
@@ -230,7 +228,7 @@ class DGGALRasterIndexer(RasterIndexer):
     def cell_to_polygon(
         self, cell: str, edgeRefinement: int = 0
     ) -> shapely.geometry.Polygon:
-        geo_points: List[dggal.GeoPoint] = self.dggrs.getZoneRefinedWGS84Vertices(
+        geo_points: list[dggal.GeoPoint] = self.dggrs.getZoneRefinedWGS84Vertices(
             self.dggrs.getZoneFromTextID(cell), edgeRefinement
         )
         return shapely.Polygon(tuple([(p.lon, p.lat) for p in geo_points]))

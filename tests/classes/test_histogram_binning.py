@@ -8,12 +8,12 @@ these tests focus on --hist-bins/--hist-width/--hist-weight/--hist-normalize.
 from unittest import TestCase
 
 import pyarrow as pa
-from click.testing import CliRunner
-
-import raster2dggs.constants as const
 from classes.base import TestRunthrough, read_output
 from classes.helpers import make_gradient_raster, make_raster
+from click.testing import CliRunner
 from data.datapaths import TEST_OUTPUT_PATH
+
+import raster2dggs.constants as const
 from raster2dggs.cli import cli
 from raster2dggs.histogram import HistogramSpec, build_histogram, weight_field_name
 
@@ -112,7 +112,7 @@ class TestPointHistBinsExplicit(_HistTestBase):
             self._gradient, "--point", "histogram", "--hist-bins", "0,25,50,75,100"
         )
         for hist in self._non_null_histograms(table):
-            for left, right in zip(hist["left"], hist["right"]):
+            for left, right in zip(hist["left"], hist["right"], strict=True):
                 self.assertIn(left, (0.0, 25.0, 50.0, 75.0))
                 self.assertIn(right, (25.0, 50.0, 75.0, 100.0))
                 self.assertEqual(right - left, 25.0)
@@ -156,7 +156,7 @@ class TestPointHistWidth(_HistTestBase):
     def test_edges_match_origin_plus_k_width(self):
         table = self._run(self._gradient, "--point", "histogram", "--hist-width", "25")
         for hist in self._non_null_histograms(table):
-            for left, right in zip(hist["left"], hist["right"]):
+            for left, right in zip(hist["left"], hist["right"], strict=True):
                 self.assertEqual(left % 25, 0.0)
                 self.assertEqual(right - left, 25.0)
 
@@ -339,10 +339,18 @@ class TestOverlayHistAreaWeight(_HistTestBase):
                 self.assertGreater(v, 0.0)
 
         hist_by_cell = dict(
-            zip(hist_table.to_pandas().index, hist_table.to_pandas()["band_1"])
+            zip(
+                hist_table.to_pandas().index,
+                hist_table.to_pandas()["band_1"],
+                strict=True,
+            )
         )
         frac_by_cell = dict(
-            zip(frac_table.to_pandas().index, frac_table.to_pandas()["band_1"])
+            zip(
+                frac_table.to_pandas().index,
+                frac_table.to_pandas()["band_1"],
+                strict=True,
+            )
         )
         compared = 0
         for cell_id, hist in hist_by_cell.items():

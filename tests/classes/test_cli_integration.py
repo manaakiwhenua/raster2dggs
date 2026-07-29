@@ -4,8 +4,8 @@ from threading import Event, Thread
 
 import pytest
 from classes.base import clear_folder
-from data.datapaths import *
 from click.testing import CliRunner
+from data.datapaths import TEST_FILE_PATH, TEST_OUTPUT_PATH
 
 from raster2dggs.cli import cli
 from raster2dggs.cli_factory import SPECS

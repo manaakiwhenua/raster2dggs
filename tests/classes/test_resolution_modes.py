@@ -1,17 +1,18 @@
-from typing import Callable, NamedTuple
+from collections.abc import Callable
+from typing import NamedTuple
 
 import pytest
-from click.testing import CliRunner
-
 from classes.base import TestRunthrough
 from classes.helpers import make_raster
+from click.testing import CliRunner
 from data.datapaths import TEST_OUTPUT_PATH
+
+import raster2dggs.common as common
+import raster2dggs.indexerfactory as idxfactory
 from raster2dggs.cli import cli
 from raster2dggs.cli_factory import SPECS
 from raster2dggs.constants import ResolutionMode
-import raster2dggs.indexerfactory as idxfactory
 from raster2dggs.indexerfactory import INDEXER_LOOKUP
-import raster2dggs.common as common
 
 # Small single-band WGS84 raster — pixel size ≈ 0.01° × 0.01° near Auckland
 _BOUNDS = (174.0, -41.1, 174.1, -41.0)  # (left, bottom, right, top)

@@ -1,13 +1,12 @@
-from dataclasses import dataclass
-import textwrap
 import tempfile
-from typing import List, Optional
+import textwrap
+from dataclasses import dataclass
 
 import click
 import click_log
 
-import raster2dggs.constants as const
 import raster2dggs.common as common
+import raster2dggs.constants as const
 from raster2dggs import __version__
 
 
@@ -72,7 +71,7 @@ class BinEdgesParamType(click.ParamType):
             self.fail(f"'{value}': expected comma-separated numbers", param, ctx)
         if len(edges) < 2:
             self.fail("--hist-bins requires at least 2 edges", param, ctx)
-        if any(b <= a for a, b in zip(edges, edges[1:])):
+        if any(b <= a for a, b in zip(edges, edges[1:], strict=False)):
             self.fail(f"'{value}': edges must be strictly ascending", param, ctx)
         return edges
 
@@ -122,11 +121,11 @@ class DGGS_Spec:
     min_res: int
     max_res: int
     default_parent_offset: int  # Chosen so as to be closest to containing 64K sub-zones
-    help: Optional[str] = None
-    short_help: Optional[str] = None
+    help: str | None = None
+    short_help: str | None = None
 
 
-SPECS: List[DGGS_Spec] = [
+SPECS: list[DGGS_Spec] = [
     DGGS_Spec("h3", "H3", const.MIN_H3, const.MAX_H3, 6),
     DGGS_Spec("rhp", "rHEALPix", const.MIN_RHP, const.MAX_RHP, 5),
     DGGS_Spec("geohash", "Geohash", const.MIN_GEOHASH, const.MAX_GEOHASH, 4),
@@ -176,7 +175,7 @@ def run_index(
     parent_res: int,
     band,
     nodata_policy: str,
-    emit_nodata_value: Optional[float],
+    emit_nodata_value: float | None,
     compression: str,
     threads: int,
     agg,
@@ -185,12 +184,12 @@ def run_index(
     compact: bool,
     geo: str,
     tempdir,
-    point: Optional[str],
-    overlay: Optional[str],
-    sample: Optional[str],
+    point: str | None,
+    overlay: str | None,
+    sample: str | None,
     valid_coverage_threshold: float = 0.0,
-    hist_bins: Optional[tuple] = None,
-    hist_width: Optional[float] = None,
+    hist_bins: tuple | None = None,
+    hist_width: float | None = None,
     hist_origin: float = 0.0,
     hist_weight: str = "count",
     hist_normalize: str = "none",

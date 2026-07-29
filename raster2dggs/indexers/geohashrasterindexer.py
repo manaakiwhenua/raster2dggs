@@ -15,7 +15,7 @@ class GeohashRasterIndexer(RasterIndexer):
     def _index_window(self, wide, resolution: int, parent_res: int):
         geohash = [
             gh.encode(lat, lon, precision=resolution)
-            for lat, lon in zip(wide["y"], wide["x"])
+            for lat, lon in zip(wide["y"], wide["x"], strict=True)
         ]
         wide = wide.drop(columns=["x", "y"])
         wide[self.index_col(resolution)] = pd.Series(geohash, index=wide.index)

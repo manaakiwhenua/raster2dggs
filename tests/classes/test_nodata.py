@@ -5,6 +5,7 @@ import pandas as pd
 from classes.base import TestRunthrough, read_output
 from classes.helpers import make_raster
 from data.datapaths import TEST_OUTPUT_PATH
+
 from raster2dggs.indexers.rasterindexer import _mask_is_nodata
 
 NODATA_SENTINEL = -9999.0

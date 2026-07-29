@@ -19,10 +19,9 @@ would be caught here before it reintroduces a real bug.
 
 import numpy as np
 import rasterio
-from rasterio.transform import from_origin
-
 from classes.base import TestRunthrough, read_output
 from data.datapaths import TEST_OUTPUT_PATH
+from rasterio.transform import from_origin
 
 _BOUNDS_ORIGIN = (174.0, -41.0)  # (left, top)
 _PIXEL_SIZE = 0.01

@@ -1,11 +1,11 @@
+from collections.abc import Callable
 from numbers import Number
-from typing import Callable, Tuple, Union, Optional
 
+import numpy as np
 import pandas as pd
 import pyarrow as pa
-import xarray as xr
-import numpy as np
 import shapely
+import xarray as xr
 
 
 class IRasterIndexer:
@@ -71,9 +71,9 @@ class IRasterIndexer:
         resolution: int,
         parent_res: int,
         nodata: Number = np.nan,
-        band_labels: Tuple[str] = None,
+        band_labels: tuple[str] = None,
         nodata_policy: str = "omit",
-        emit_nodata_value: Optional[Number] = None,
+        emit_nodata_value: Number | None = None,
         transformer=None,
     ) -> pa.Table:
         """
@@ -93,7 +93,7 @@ class IRasterIndexer:
         df: pd.DataFrame,
         resolution: int,
         parent_res: int,
-        decimals: Optional[int] = None,
+        decimals: int | None = None,
     ) -> pd.DataFrame:
         """
         For --transfer sample: deduplicate cells that appear in more than one
@@ -122,7 +122,7 @@ class IRasterIndexer:
         df,
         resolution: int,
         parent_res: int,
-        aggfunc: Union[str, Callable],
+        aggfunc: str | Callable,
         decimals: int,
     ) -> pd.DataFrame:
         """

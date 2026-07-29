@@ -15,7 +15,8 @@ common.py focused on orchestration.
 from __future__ import annotations
 
 import dataclasses
-from typing import Any, Callable, Optional
+from collections.abc import Callable
+from typing import Any
 
 import numpy as np
 import pandas as pd
@@ -88,7 +89,7 @@ class _SampleIndexer:
     parent_res: int
     selected_labels: tuple
     nodata_policy: str
-    emit_nodata_value: Optional[Any]
+    emit_nodata_value: Any | None
     write_result: Callable
     # Kernel tuning parameters — use field(default=…) so the dataclass
     # keeps all non-default fields before these.
@@ -210,7 +211,7 @@ class _SampleIndexer:
         if not np.any(in_win):
             return None
 
-        cells = [c for c, m in zip(cells, in_win) if m]
+        cells = [c for c, m in zip(cells, in_win, strict=True) if m]
         local_rows = local_rows[in_win]
         local_cols = local_cols[in_win]
 
@@ -256,7 +257,7 @@ class _SampleIndexer:
         if not np.any(in_win):
             return None
 
-        cells = [c for c, m in zip(cells, in_win) if m]
+        cells = [c for c, m in zip(cells, in_win, strict=True) if m]
         frac_rows = frac_rows[in_win]
         frac_cols = frac_cols[in_win]
 
@@ -381,7 +382,7 @@ class _SampleIndexer:
         if not np.any(in_win):
             return None
 
-        cells = [c for c, m in zip(cells, in_win) if m]
+        cells = [c for c, m in zip(cells, in_win, strict=True) if m]
         frac_rows = frac_rows[in_win]
         frac_cols = frac_cols[in_win]
 
@@ -466,7 +467,7 @@ class _SampleIndexer:
         if not np.any(in_win):
             return None
 
-        cells = [c for c, m in zip(cells, in_win) if m]
+        cells = [c for c, m in zip(cells, in_win, strict=True) if m]
         frac_rows = frac_rows[in_win]
         frac_cols = frac_cols[in_win]
 
