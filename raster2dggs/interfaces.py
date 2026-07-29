@@ -75,9 +75,17 @@ class IRasterIndexer:
         nodata_policy: str = "omit",
         emit_nodata_value: Number | None = None,
         transformer=None,
+        selected_indices: tuple[int] = None,
     ) -> pa.Table:
         """
         Function for primary indexation.
+
+        selected_indices must be given whenever band_labels is (and must be
+        the same length): it's the raster band index each label corresponds
+        to, used to rename output columns by band index rather than by
+        position, since a window can have fewer bands present than were
+        globally selected (e.g. a band that's entirely nodata within this
+        window).
         """
         raise NotImplementedError()
 

@@ -30,6 +30,7 @@ class _AssignCentersIndexer:
     parent_res: int
     nodata: Any
     selected_labels: tuple
+    selected_indices: tuple
     nodata_policy: str
     emit_nodata_value: Any | None
     transformer: pyproj.Transformer
@@ -47,5 +48,6 @@ class _AssignCentersIndexer:
             nodata_policy=self.nodata_policy,
             emit_nodata_value=self.emit_nodata_value,
             transformer=self.transformer,
+            selected_indices=self.selected_indices,
         )
         self.write_result(result, window)
