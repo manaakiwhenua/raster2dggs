@@ -911,6 +911,7 @@ def initial_index(
                         parent_res=parent_res,
                         nodata=nodata,
                         selected_labels=selected_labels,
+                        selected_indices=tuple(selected_indices),
                         nodata_policy=nodata_policy,
                         emit_nodata_value=emit_nodata_value,
                         transformer=transformer,

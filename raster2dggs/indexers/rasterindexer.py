@@ -113,6 +113,7 @@ class RasterIndexer(IRasterIndexer):
         nodata_policy: str = "omit",
         emit_nodata_value: Number | None = None,
         transformer=None,
+        selected_indices: tuple[int] = None,
     ) -> pa.Table:
         sdf: pd.DataFrame = (
             sdf.to_dataframe().drop(columns=["spatial_ref"]).reset_index()
@@ -142,9 +143,17 @@ class RasterIndexer(IRasterIndexer):
         wide = self._index_window(wide, resolution, parent_res)
         bands = sorted(sdf["band"].unique())
         if band_labels is None:
-            band_labels = tuple(str(b) for b in bands)
-        # Known bug (#88): positional pairing can mislabel bands when a window drops one.
-        wide = wide.rename(columns=dict(zip(bands, band_labels)))  # noqa: B905
+            rename_map = {b: str(b) for b in bands}
+        else:
+            # Map by band index, not position: bands present in this window
+            # can be a strict subset of selected_indices (e.g. a band
+            # that's entirely nodata within this window), so band_labels
+            # can't be zipped against `bands` directly without risking a
+            # silent off-by-one mislabeling of every band after a dropped
+            # one (#88).
+            full_mapping = dict(zip(selected_indices, band_labels, strict=True))
+            rename_map = {b: full_mapping[b] for b in bands if b in full_mapping}
+        wide = wide.rename(columns=rename_map)
         return pa.Table.from_pandas(wide, preserve_index=False)
 
     def cells_to_lonlat_arrays(self, cells: pd.Series) -> tuple[np.ndarray, np.ndarray]:
