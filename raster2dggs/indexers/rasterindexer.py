@@ -39,6 +39,17 @@ def _mask_is_nodata(series: pd.Series, nodata) -> pd.Series:
         return series.isna() | (series == nodata)
 
 
+def _mask_is_nodata_array(values: np.ndarray, nodata) -> np.ndarray:
+    """Array form of _mask_is_nodata, for the wide-form block path."""
+    if nodata is None:
+        return np.zeros(values.shape, dtype=bool)
+    isna = np.isnan(values)
+    if _is_nan(nodata):
+        return isna
+    # Sentinel nodata: also treat unexpected NaNs as nodata
+    return isna | (values == nodata)
+
+
 class RasterIndexer(IRasterIndexer):
     """
     Provides a partial implementation for raster indexers integrating a
@@ -116,37 +127,69 @@ class RasterIndexer(IRasterIndexer):
         transformer=None,
         selected_indices: tuple[int] = None,
     ) -> pa.Table:
+        if nodata_policy.lower() not in ("omit", "emit"):
+            raise ValueError(f"Unknown nodata policy: {nodata_policy}")
+
         with PROFILER.phase("stage1.read_block"):
-            sdf: pd.DataFrame = (
-                sdf.to_dataframe().drop(columns=["spatial_ref"]).reset_index()
-            )
+            values = sdf.values  # (bands, h, w); forces the dask/GDAL read
+            xs = sdf["x"].values  # (w,) pixel-centre coordinates
+            ys = sdf["y"].values  # (h,)
+            band_ids = list(sdf["band"].values)
+
+        n_bands, height, width = values.shape
+        # Integer bands become float so that a nodata cell can hold NaN.
+        if not np.issubdtype(values.dtype, np.floating):
+            values = values.astype(np.float64)
+        flat = values.reshape(n_bands, height * width)
+
+        # Row-major ravel order is (y0x0, y0x1, ... y1x0, ...).
+        grid_x = np.tile(xs, height)
+        grid_y = np.repeat(ys, width)
+
         if transformer is not None:
             with PROFILER.phase("stage1.reproject"):
-                lons, lats = transformer.transform(sdf["x"].values, sdf["y"].values)
-                sdf["x"] = lons
-                sdf["y"] = lats
-        nodata_mask = _mask_is_nodata(sdf[const.DEFAULT_NAME], nodata)
-        if nodata_policy.lower() == "omit":
-            sdf = sdf[~nodata_mask].copy()
-        elif nodata_policy.lower() == "emit":
-            sdf = sdf.copy()
-            fill_value = emit_nodata_value if emit_nodata_value is not None else nodata
-            if pd.isna(fill_value):
-                if pd.api.types.is_integer_dtype(sdf[const.DEFAULT_NAME]):
-                    sdf[const.DEFAULT_NAME] = sdf[const.DEFAULT_NAME].astype(float)
-                sdf.loc[nodata_mask, const.DEFAULT_NAME] = np.nan
-            else:
-                dtype = sdf[const.DEFAULT_NAME].dtype
-                sdf.loc[nodata_mask, const.DEFAULT_NAME] = dtype.type(fill_value)
-        else:
-            raise ValueError(f"Unknown nodata policy: {nodata_policy}")
+                grid_x, grid_y = transformer.transform(grid_x, grid_y)
+
         with PROFILER.phase("stage1.reshape"):
-            wide = pd.pivot_table(
-                sdf, values=const.DEFAULT_NAME, index=["x", "y"], columns=["band"]
-            ).reset_index()
+            emit_mode = nodata_policy.lower() == "emit"
+            fill_value = emit_nodata_value if emit_nodata_value is not None else nodata
+            emit_fill = (
+                float(fill_value) if emit_mode and not pd.isna(fill_value) else None
+            )
+
+            cols = {}
+            for band_id, col in zip(band_ids, flat, strict=True):
+                mask = _mask_is_nodata_array(col, nodata)
+                if mask.any():
+                    col = col.copy()
+                    col[mask] = np.nan if emit_fill is None else emit_fill
+                cols[band_id] = col
+
+            # 'omit' excludes a pixel that is nodata in every band, so this is
+            # computed across all bands before any are dropped below -- a
+            # window that is entirely nodata yields no rows at all.
+            keep_rows = None
+            if not emit_mode:
+                keep_rows = np.zeros(height * width, dtype=bool)
+                for col in cols.values():
+                    keep_rows |= ~np.isnan(col)
+
+            data = {"x": grid_x, "y": grid_y}
+            for band_id, col in cols.items():
+                # A band that is entirely nodata in this window is dropped, so
+                # the band labels below are mapped by band index rather than by
+                # position (#88).
+                if np.isnan(col).all():
+                    continue
+                data[band_id] = col
+            wide = pd.DataFrame(data, copy=False)
+
+            if keep_rows is not None and not keep_rows.all():
+                wide = wide[keep_rows]
+
         with PROFILER.phase("stage1.dggs_index"):
             wide = self._index_window(wide, resolution, parent_res)
-        bands = sorted(sdf["band"].unique())
+        bands = sorted(c for c in wide.columns if c in set(band_ids))
         if band_labels is None:
             rename_map = {b: str(b) for b in bands}
         else:
