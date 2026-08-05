@@ -48,6 +48,45 @@ DENSE = "tests/data/input/sample.tif"  # 3-band uint16, no nodata, striped
 # (label, raster, [cli args]). Kept small on purpose: this should be cheap
 # enough to re-run after every change.
 CASES: list[tuple[str, str, list[str], bool]] = [
+    # One case per distinct indexer implementation, at resolutions giving
+    # comparable cell counts. Benchmarking only H3 hides that the per-pixel
+    # cost spans more than an order of magnitude between backends.
+    (
+        "geohash --point value (small, 3-band)",
+        SMALL,
+        ["-r", "7", "--point", "value", "--threads", "1"],
+        False,
+    ),
+    (
+        "maidenhead --point value (small, 3-band)",
+        SMALL,
+        ["-r", "4", "--point", "value", "--threads", "1"],
+        False,
+    ),
+    (
+        "s2 --point value (small, 3-band)",
+        SMALL,
+        ["-r", "12", "--point", "value", "--threads", "1"],
+        False,
+    ),
+    (
+        "a5 --point value (small, 3-band)",
+        SMALL,
+        ["-r", "12", "--point", "value", "--threads", "1"],
+        False,
+    ),
+    (
+        "rhp --point value (small, 3-band)",
+        SMALL,
+        ["-r", "8", "--point", "value", "--threads", "1"],
+        False,
+    ),
+    (
+        "isea4r --point value (small, 3-band)",
+        SMALL,
+        ["-r", "10", "--point", "value", "--threads", "1"],
+        False,
+    ),
     (
         "H3 --point value (small, 3-band)",
         SMALL,
