@@ -33,6 +33,7 @@ import raster2dggs.constants as const
 import raster2dggs.histogram as histogram
 import raster2dggs.indexerfactory as idxfactory
 from raster2dggs.interfaces import IRasterIndexer
+from raster2dggs.profiling import PROFILER
 from raster2dggs.transfers.assign_centers import _AssignCentersIndexer
 from raster2dggs.transfers.interpolation import _SampleIndexer
 from raster2dggs.transfers.overlay import _OverlayIndexer
@@ -636,7 +637,7 @@ def address_boundary_issues(
         interp=kwargs.get("interp", const.Interp.NN),
     )
 
-    with TqdmCallback(desc=tqdm_label):
+    with PROFILER.phase("stage2.total"), TqdmCallback(desc=tqdm_label):
         if transfer == const.Transfer.SAMPLE or transfer in const.OVERLAY_TRANSFER_KEYS:
             mp_func = indexer.parent_groupby_nn
             mp_args = (resolution, parent_res, decimals)
@@ -833,6 +834,17 @@ def initial_index(
                     len(windows),
                 )
 
+                # Context for --profile: timings are only interpretable
+                # against the shape of the work they measure.
+                PROFILER.note("windows", len(windows))
+                PROFILER.note("bands", len(selected_indices))
+                PROFILER.note("raster_size", f"{src.width}x{src.height}")
+                PROFILER.note(
+                    "block_shape", f"{src.block_shapes[0][1]}x{src.block_shapes[0][0]}"
+                )
+                PROFILER.note("internally_tiled", bool(src.profile.get("tiled", False)))
+                PROFILER.note("threads", kwargs["threads"])
+
                 selected_labels = tuple([labels_by_index[i] for i in selected_indices])
                 kwargs["source_pixel_dtypes"] = {
                     label: np.dtype(src.dtypes[idx - 1])
@@ -849,18 +861,19 @@ def initial_index(
                     ):
                         return
                     partition_col = indexer.partition_col(parent_res)
-                    pq.write_to_dataset(
-                        result,
-                        root_path=tmpdir,
-                        partition_cols=[partition_col],
-                        basename_template=str(window.col_off)
-                        + "."
-                        + str(window.row_off)
-                        + ".{i}.parquet",
-                        use_threads=False,  # Already threading indexing and reading
-                        existing_data_behavior="overwrite_or_ignore",  # Overwrite files with the same name; other existing files are ignored. Allows for an append workflow
-                        compression=compression,
-                    )
+                    with PROFILER.phase("stage1.parquet_write"):
+                        pq.write_to_dataset(
+                            result,
+                            root_path=tmpdir,
+                            partition_cols=[partition_col],
+                            basename_template=str(window.col_off)
+                            + "."
+                            + str(window.row_off)
+                            + ".{i}.parquet",
+                            use_threads=False,  # Already threading indexing and reading
+                            existing_data_behavior="overwrite_or_ignore",  # Overwrite files with the same name; other existing files are ignored. Allows for an append workflow
+                            compression=compression,
+                        )
 
                 if kwargs["transfer"] == const.Transfer.SAMPLE:
                     ctx = _SampleIndexer(
@@ -918,8 +931,23 @@ def initial_index(
                         write_result=_write_result,
                     )
                     stage1_func = ctx.process_window
+
+                if PROFILER.enabled:
+                    # Wrap once here rather than inside each transfer's
+                    # process_* method: this covers --point, --overlay and
+                    # --sample uniformly, and the finer per-phase timings
+                    # (read_block, dggs_index, ...) nest inside it.
+                    # The wrapper holds ctx via the wrapped bound method, so it
+                    # must be released alongside ctx in the finally block below,
+                    # or the GDAL/PROJ teardown described there is defeated.
+                    def _profiled(window, _inner=stage1_func):
+                        with PROFILER.phase("stage1.window_total"):
+                            return _inner(window)
+
+                    stage1_func = _profiled
+
                 try:
-                    with ThreadPoolExecutor(
+                    with PROFILER.phase("stage1.wall"), ThreadPoolExecutor(
                         max_workers=kwargs["threads"]
                     ) as executor, tqdm(
                         total=len(windows), desc="Raster windows"
@@ -936,6 +964,8 @@ def initial_index(
                     # interpreter shutdown (which causes a silent "Error in
                     # sys.excepthook" crash for non-WGS84 rasters).
                     del da, transformer, ctx, stage1_func
+                    if PROFILER.enabled:
+                        del _profiled
                     gc.collect()
             LOGGER.debug("Stage 1 (primary indexing) complete")
             return address_boundary_issues(

@@ -9,6 +9,7 @@ import xarray as xr
 from .. import constants as const
 from ..histogram import HistogramSpec, build_histogram
 from ..interfaces import IRasterIndexer
+from ..profiling import PROFILER
 
 
 def _is_nan(v) -> bool:
@@ -115,13 +116,15 @@ class RasterIndexer(IRasterIndexer):
         transformer=None,
         selected_indices: tuple[int] = None,
     ) -> pa.Table:
-        sdf: pd.DataFrame = (
-            sdf.to_dataframe().drop(columns=["spatial_ref"]).reset_index()
-        )
+        with PROFILER.phase("stage1.read_block"):
+            sdf: pd.DataFrame = (
+                sdf.to_dataframe().drop(columns=["spatial_ref"]).reset_index()
+            )
         if transformer is not None:
-            lons, lats = transformer.transform(sdf["x"].values, sdf["y"].values)
-            sdf["x"] = lons
-            sdf["y"] = lats
+            with PROFILER.phase("stage1.reproject"):
+                lons, lats = transformer.transform(sdf["x"].values, sdf["y"].values)
+                sdf["x"] = lons
+                sdf["y"] = lats
         nodata_mask = _mask_is_nodata(sdf[const.DEFAULT_NAME], nodata)
         if nodata_policy.lower() == "omit":
             sdf = sdf[~nodata_mask].copy()
@@ -137,10 +140,12 @@ class RasterIndexer(IRasterIndexer):
                 sdf.loc[nodata_mask, const.DEFAULT_NAME] = dtype.type(fill_value)
         else:
             raise ValueError(f"Unknown nodata policy: {nodata_policy}")
-        wide = pd.pivot_table(
-            sdf, values=const.DEFAULT_NAME, index=["x", "y"], columns=["band"]
-        ).reset_index()
-        wide = self._index_window(wide, resolution, parent_res)
+        with PROFILER.phase("stage1.reshape"):
+            wide = pd.pivot_table(
+                sdf, values=const.DEFAULT_NAME, index=["x", "y"], columns=["band"]
+            ).reset_index()
+        with PROFILER.phase("stage1.dggs_index"):
+            wide = self._index_window(wide, resolution, parent_res)
         bands = sorted(sdf["band"].unique())
         if band_labels is None:
             rename_map = {b: str(b) for b in bands}
@@ -154,7 +159,8 @@ class RasterIndexer(IRasterIndexer):
             full_mapping = dict(zip(selected_indices, band_labels, strict=True))
             rename_map = {b: full_mapping[b] for b in bands if b in full_mapping}
         wide = wide.rename(columns=rename_map)
-        return pa.Table.from_pandas(wide, preserve_index=False)
+        with PROFILER.phase("stage1.arrow_build"):
+            return pa.Table.from_pandas(wide, preserve_index=False)
 
     def cells_to_lonlat_arrays(self, cells: pd.Series) -> tuple[np.ndarray, np.ndarray]:
         """

@@ -8,6 +8,7 @@ import click_log
 import raster2dggs.common as common
 import raster2dggs.constants as const
 from raster2dggs import __version__
+from raster2dggs.profiling import PROFILER
 
 
 class AggFuncListParamType(click.ParamType):
@@ -193,6 +194,7 @@ def run_index(
     hist_origin: float = 0.0,
     hist_weight: str = "count",
     hist_normalize: str = "none",
+    profile: bool = False,
 ):
     tempfile.tempdir = tempdir if tempdir is not None else tempfile.tempdir
 
@@ -219,17 +221,25 @@ def run_index(
         hist_normalize,
     )
 
-    common.initial_index(
-        dggs,
-        raster_input,
-        output_directory,
-        resolution,
-        parent_res,
-        band,
-        nodata_policy,
-        emit_nodata_value,
-        **kwargs,
-    )
+    PROFILER.reset(enabled=profile)
+    try:
+        common.initial_index(
+            dggs,
+            raster_input,
+            output_directory,
+            resolution,
+            parent_res,
+            band,
+            nodata_policy,
+            emit_nodata_value,
+            **kwargs,
+        )
+    finally:
+        # Report even on failure: a run that died partway through is exactly
+        # when the timings are most worth seeing.
+        PROFILER.stop()
+        if profile:
+            click.echo(PROFILER.report(), err=True)
 
 
 def make_command(spec: DGGS_Spec):
@@ -479,6 +489,15 @@ def make_command(spec: DGGS_Spec):
         type=click.Path(),
         help="Temporary data is created during the execution of this program. This parameter allows you to control where this data will be written.",
     )
+    @click.option(
+        "--profile",
+        is_flag=True,
+        help=(
+            "Print a phase-by-phase timing breakdown to stderr on completion, "
+            "with per-call costs and enough context about the input (window "
+            "count, bands, block shape) to interpret them."
+        ),
+    )
     @click.version_option(version=__version__)
     def cmd(
         raster_input,
@@ -505,6 +524,7 @@ def make_command(spec: DGGS_Spec):
         hist_origin,
         hist_weight,
         hist_normalize,
+        profile,
     ):
         if isinstance(resolution, str):
             raster_path = common.resolve_input_path(raster_input)
@@ -586,6 +606,7 @@ def make_command(spec: DGGS_Spec):
             hist_origin,
             hist_weight,
             hist_normalize,
+            profile,
         )
 
     return cmd
