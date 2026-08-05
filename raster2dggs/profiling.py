@@ -35,8 +35,9 @@ _PHASE_ORDER: tuple[tuple[str, int], ...] = (
     ("stage1.wall", 0),
     ("stage1.window_total", 1),
     ("stage1.read_block", 2),
-    ("stage1.reproject", 2),
     ("stage1.reshape", 2),
+    ("stage1.reproject", 2),
+    ("stage1.build_frame", 2),
     ("stage1.dggs_index", 2),
     ("stage1.cells_in_bbox", 2),
     ("stage1.cells_to_lonlat", 2),
@@ -67,6 +68,7 @@ class Profiler:
         self._totals: dict[str, float] = defaultdict(float)
         self._counts: dict[str, int] = defaultdict(int)
         self._context: dict[str, object] = {}
+        self._counters: dict[str, int] = {}
         self._wall_start: float | None = None
         self._wall_total: float | None = None
 
@@ -81,6 +83,7 @@ class Profiler:
             self._totals = defaultdict(float)
             self._counts = defaultdict(int)
             self._context = {}
+            self._counters = {}
             self._wall_start = time.perf_counter() if enabled else None
             self._wall_total = None
 
@@ -114,24 +117,38 @@ class Profiler:
         with self._lock:
             self._context[key] = value
 
+    def add(self, key: str, amount: int) -> None:
+        """Accumulate a running total across windows and threads."""
+        if not self.enabled:
+            return
+        with self._lock:
+            self._counters[key] = self._counters.get(key, 0) + amount
+
     def report(self) -> str:
         """Render the collected measurements as a plain-text table."""
         with self._lock:
             totals = dict(self._totals)
             counts = dict(self._counts)
             context = dict(self._context)
+            counters = dict(self._counters)
             wall = self._wall_total
 
-        if not totals and not context:
+        if not totals and not context and not counters:
             return "Profile: nothing recorded."
 
         def sort_key(phase: str) -> tuple[int, str]:
             return (_PHASE_INDEX.get(phase, len(_PHASE_ORDER)), phase)
 
         lines = ["", "Profile"]
-        if context:
+        if context or counters:
             for key in sorted(context):
                 lines.append(f"  {key}: {context[key]}")
+            for key in sorted(counters):
+                lines.append(f"  {key}: {counters[key]:,}")
+            read = counters.get("pixels_read")
+            kept = counters.get("rows_indexed")
+            if read and kept is not None:
+                lines.append(f"  valid pixels: {100 * kept / read:.1f}% of those read")
             lines.append("")
 
         header = (

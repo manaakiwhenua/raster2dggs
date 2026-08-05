@@ -38,6 +38,12 @@ OUT = REPO / "bench" / "BASELINE.md"
 
 SMALL = "tests/data/se-island.tiff"
 LARGE = "tests/data/input/TestDEM_tiled.tif"
+# Deliberately different in the ways that move the numbers: band count, dtype,
+# how much of the raster is nodata, and whether it is tiled or strip-encoded.
+# A change measured only against the sparse single-band DEM can look far better
+# than it is.
+MULTIBAND = "tests/data/input/Sen2_Test.tif"  # 10-band int16, ~89% valid, tiled
+DENSE = "tests/data/input/sample.tif"  # 3-band uint16, no nodata, striped
 
 # (label, raster, [cli args]). Kept small on purpose: this should be cheap
 # enough to re-run after every change.
@@ -86,6 +92,24 @@ CASES: list[tuple[str, str, list[str], bool]] = [
         "H3 --sample bilinear (full DEM, 1-band, default threads)",
         LARGE,
         ["-r", "8", "--sample", "bilinear"],
+        True,
+    ),
+    (
+        "H3 --point value (10-band int16, ~89% valid, single-threaded)",
+        MULTIBAND,
+        ["-r", "11", "--point", "value", "--threads", "1"],
+        True,
+    ),
+    (
+        "H3 --point value (10-band int16, ~89% valid, default threads)",
+        MULTIBAND,
+        ["-r", "11", "--point", "value"],
+        True,
+    ),
+    (
+        "H3 --point value (3-band uint16, no nodata, striped, single-threaded)",
+        DENSE,
+        ["-r", "13", "--point", "value", "--threads", "1"],
         True,
     ),
 ]

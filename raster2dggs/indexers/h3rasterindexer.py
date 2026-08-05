@@ -1,4 +1,5 @@
 import h3 as h3py
+import h3.api.numpy_int as h3int
 import numpy as np
 import pandas as pd
 import shapely
@@ -14,13 +15,28 @@ class H3RasterIndexer(RasterIndexer):
     def _index_window(self, wide, resolution: int, parent_res: int):
         index_col = self.index_col(resolution)
         partition_col = self.partition_col(parent_res)
-        cells = [
-            h3py.latlng_to_cell(lat, lon, resolution)
-            for lat, lon in zip(wide["y"], wide["x"], strict=True)
-        ]
+        # Index to integer cells, then resolve each distinct cell's parent and
+        # hex string once. Many pixels fall in the same cell, so those two
+        # steps run on far fewer values than there are pixels.
+        cell_ints = np.array(
+            [
+                h3int.latlng_to_cell(lat, lon, resolution)
+                for lat, lon in zip(wide["y"], wide["x"], strict=True)
+            ],
+            dtype=np.uint64,
+        )
+        uniq, inverse = np.unique(cell_ints, return_inverse=True)
+        uniq_hex = np.array([h3py.int_to_str(int(u)) for u in uniq], dtype=object)
+        uniq_parent = np.array(
+            [
+                h3py.int_to_str(int(h3int.cell_to_parent(int(u), parent_res)))
+                for u in uniq
+            ],
+            dtype=object,
+        )
         wide = wide.drop(columns=["x", "y"])
-        wide[index_col] = cells
-        wide[partition_col] = [h3py.cell_to_parent(c, parent_res) for c in cells]
+        wide[index_col] = uniq_hex[inverse]
+        wide[partition_col] = uniq_parent[inverse]
         return wide.reset_index(drop=True)
 
     @staticmethod

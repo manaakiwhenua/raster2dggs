@@ -142,14 +142,6 @@ class RasterIndexer(IRasterIndexer):
             values = values.astype(np.float64)
         flat = values.reshape(n_bands, height * width)
 
-        # Row-major ravel order is (y0x0, y0x1, ... y1x0, ...).
-        grid_x = np.tile(xs, height)
-        grid_y = np.repeat(ys, width)
-
-        if transformer is not None:
-            with PROFILER.phase("stage1.reproject"):
-                grid_x, grid_y = transformer.transform(grid_x, grid_y)
-
         with PROFILER.phase("stage1.reshape"):
             emit_mode = nodata_policy.lower() == "emit"
             fill_value = emit_nodata_value if emit_nodata_value is not None else nodata
@@ -173,7 +165,33 @@ class RasterIndexer(IRasterIndexer):
                 keep_rows = np.zeros(height * width, dtype=bool)
                 for col in cols.values():
                     keep_rows |= ~np.isnan(col)
+                if keep_rows.all():
+                    keep_rows = None
 
+            # Reported by --profile: how much of the raster is actually
+            # carried through, which is what makes the phase costs comparable
+            # between a dense raster and a mostly-nodata one.
+            PROFILER.add("pixels_read", height * width)
+            PROFILER.add(
+                "rows_indexed",
+                height * width if keep_rows is None else int(keep_rows.sum()),
+            )
+
+            # Row-major ravel order is (y0x0, y0x1, ... y1x0, ...).
+            grid_x = np.tile(xs, height)
+            grid_y = np.repeat(ys, width)
+            if keep_rows is not None:
+                # Discard nodata pixels before reprojecting and indexing them:
+                # on a sparse raster most of the window can be dropped here.
+                grid_x = grid_x[keep_rows]
+                grid_y = grid_y[keep_rows]
+                cols = {b: c[keep_rows] for b, c in cols.items()}
+
+        if transformer is not None:
+            with PROFILER.phase("stage1.reproject"):
+                grid_x, grid_y = transformer.transform(grid_x, grid_y)
+
+        with PROFILER.phase("stage1.build_frame"):
             data = {"x": grid_x, "y": grid_y}
             for band_id, col in cols.items():
                 # A band that is entirely nodata in this window is dropped, so
@@ -183,9 +201,6 @@ class RasterIndexer(IRasterIndexer):
                     continue
                 data[band_id] = col
             wide = pd.DataFrame(data, copy=False)
-
-            if keep_rows is not None and not keep_rows.all():
-                wide = wide[keep_rows]
 
         with PROFILER.phase("stage1.dggs_index"):
             wide = self._index_window(wide, resolution, parent_res)
