@@ -146,6 +146,16 @@ CASES: list[tuple[str, str, str, list[str], bool]] = [
         ["-r", "8", "--sample", "bilinear"],
         True,
     ),
+    # Multiple aggregations put the weight somewhere else entirely: each one is
+    # a separate groupby, and the results are combined into a struct per band,
+    # so Stage 2 goes from a rounding error to a substantial share of the run.
+    (
+        "H3 --point value, 3 aggregations (full DEM, 1-band, default threads)",
+        "h3",
+        LARGE,
+        ["-r", "11", "--point", "value", "-a", "mean,max,min"],
+        True,
+    ),
     (
         "H3 --point value (10-band int16, ~89% valid, single-threaded)",
         "h3",

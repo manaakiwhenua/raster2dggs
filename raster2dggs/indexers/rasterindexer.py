@@ -310,10 +310,16 @@ class RasterIndexer(IRasterIndexer):
                 {partition_col: base[partition_col]}, index=base.index
             )
             result.index.name = index_col
+            agg_names = list(per_agg)
             for col in self.band_cols(base):
+                # Align each aggregation's column to the shared cell index once,
+                # then zip them positionally. Looking each value up by cell label
+                # instead costs one hash lookup per cell per aggregation, which
+                # dominates the whole aggregation at realistic cell counts.
+                aligned = [per_agg[name][col].reindex(base.index) for name in agg_names]
                 result[col] = [
-                    {agg_name: per_agg[agg_name].at[idx, col] for agg_name in per_agg}
-                    for idx in result.index
+                    dict(zip(agg_names, values, strict=True))
+                    for values in zip(*aligned, strict=True)
                 ]
             return result
 
