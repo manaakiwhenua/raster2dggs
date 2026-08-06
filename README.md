@@ -467,28 +467,37 @@ Profile
   threads: 7
   windows: 2
 
-  phase                          seconds   % wall   calls   ms/call
-  -----------------------------------------------------------------
-  stage1.wall                      0.409    73.2%       1  409.461
-    window_total                   0.573   102.4%       2  286.420
-      read_block                   0.181    32.4%       2   90.662
-      reproject                    0.101    18.0%       2   50.352
-      reshape                      0.079    14.1%       2   39.392
-      dggs_index                   0.169    30.3%       2   84.663
-      arrow_build                  0.004     0.8%       2    2.180
-      parquet_write                0.022     4.0%       2   11.088
-  stage2.total                     0.038     6.9%       1   38.320
-  -----------------------------------------------------------------
-  wall clock                       0.559   100.0%
-  Stage 1 concurrency: 1.40x (0.573s of work in 0.409s wall)
+  pixels_read: 74,888
+  rows_indexed: 74,888
+  valid pixels: 100.0% of those read
+
+  phase                          seconds       cpu   % wall    calls     ms/call
+  ------------------------------------------------------------------------------
+  stage1.wall                      0.204     0.002    60.7%        1     203.643
+    window_total                   0.268     0.197    79.8%        2     133.845
+      read_block                   0.013     0.003     3.9%        2       6.525
+      reshape                      0.016     0.001     4.8%        2       8.000
+      reproject                    0.086     0.057    25.5%        2      42.818
+      build_frame                  0.001     0.001     0.2%        2       0.366
+      dggs_index                   0.122     0.121    36.3%        2      60.790
+      arrow_build                  0.003     0.002     1.0%        2       1.739
+      parquet_write                0.022     0.006     6.6%        2      11.077
+  stage2.total                     0.028     0.005     8.5%        1      28.475
+  ------------------------------------------------------------------------------
+  wall clock                       0.335             100.0%
+  Stage 1 parallelism: 0.97x (0.197s worker CPU in 0.204s wall)
+  Stage 1 thread stall: 26.5% (0.071s of 0.268s thread-time blocked)
+  ^ 7 threads are not paying for themselves here; compare against --threads 1
 ```
 
 Reading it:
 
 - **Indentation is nesting, not addition.** `read_block`, `dggs_index` and friends are measured *inside* `window_total`, which is itself measured inside `stage1.wall` — so those rows are a decomposition of their parent, not terms to be summed. Percentages are all of total wall clock.
-- **`stage1.wall` vs `window_total`** is the parallelism check. `window_total` sums across all worker threads, so it exceeds `stage1.wall` whenever threads genuinely overlapped; the **concurrency** figure at the bottom states the ratio directly. A value near `1.0x` with `--threads` > 1 means the threads achieved nothing — usually because that code path is holding the GIL or is serialised behind a lock.
+- **`seconds` is elapsed time; `cpu` is time actually spent computing.** Both are summed across whichever threads ran the phase. A phase where `cpu` is far below `seconds` was mostly *waiting* — for the GDAL read lock, or for the GIL. The two dispatcher rows are the exception: `stage1.wall` and `stage2.total` are measured in the main thread while the work happens in others, so their own `cpu` is near zero by construction.
+- **`Stage 1 parallelism`** is worker CPU per second of Stage 1 wall clock, i.e. how many cores' worth of work the thread pool actually achieved. It is deliberately *not* derived from summed worker elapsed time, because a blocked thread accumulates elapsed time just as a busy one does — that ratio rises towards the thread count exactly when the threads are achieving nothing. `Stage 1 thread stall` is the share of worker thread-time spent blocked rather than computing.
+- **Threading does not always pay.** If parallelism is well below 1.5x, the report says so. On paths that are GIL-bound (`--point`, whose DGGS indexing is a Python loop) or serialised behind the GDAL read lock, `--threads 1` can genuinely be *faster* than the default — worth measuring both ways on your own data rather than assuming more threads help.
 - **`ms/call` with `windows`** is what makes an unexpectedly slow run legible. A large window count with a small per-window cost points at the *input's* block layout rather than at the indexing work — check `block_shape` (a block height of 1 means the GeoTIFF is strip-encoded, giving one window per raster row) and see the [overlay performance note](#performance-note) for how to re-tile.
-- Profiling is off by default and the instrumentation is a single branch when disabled, so there is no reason to avoid it in normal use.
+- Profiling is off by default and the instrumentation is a single branch when disabled, so there is no reason to avoid it in normal use. The `cpu` column needs a per-thread CPU clock (Linux, Windows); where the platform has none, it and the two figures derived from it are omitted.
 
 ## Visualising output
 
