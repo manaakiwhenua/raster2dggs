@@ -45,74 +45,85 @@ LARGE = "tests/data/input/TestDEM_tiled.tif"
 MULTIBAND = "tests/data/input/Sen2_Test.tif"  # 10-band int16, ~89% valid, tiled
 DENSE = "tests/data/input/sample.tif"  # 3-band uint16, no nodata, striped
 
-# (label, raster, [cli args]). Kept small on purpose: this should be cheap
-# enough to re-run after every change.
-CASES: list[tuple[str, str, list[str], bool]] = [
+# (label, dggs, raster, [cli args], slow). Kept small on purpose: this
+# should be cheap enough to re-run after every change.
+CASES: list[tuple[str, str, str, list[str], bool]] = [
     # One case per distinct indexer implementation, at resolutions giving
     # comparable cell counts. Benchmarking only H3 hides that the per-pixel
     # cost spans more than an order of magnitude between backends.
     (
         "geohash --point value (small, 3-band)",
+        "geohash",
         SMALL,
         ["-r", "7", "--point", "value", "--threads", "1"],
         False,
     ),
     (
         "maidenhead --point value (small, 3-band)",
+        "maidenhead",
         SMALL,
         ["-r", "4", "--point", "value", "--threads", "1"],
         False,
     ),
     (
         "s2 --point value (small, 3-band)",
+        "s2",
         SMALL,
         ["-r", "12", "--point", "value", "--threads", "1"],
         False,
     ),
     (
         "a5 --point value (small, 3-band)",
+        "a5",
         SMALL,
         ["-r", "12", "--point", "value", "--threads", "1"],
         False,
     ),
     (
         "rhp --point value (small, 3-band)",
+        "rhp",
         SMALL,
         ["-r", "8", "--point", "value", "--threads", "1"],
         False,
     ),
     (
         "isea4r --point value (small, 3-band)",
+        "isea4r",
         SMALL,
         ["-r", "10", "--point", "value", "--threads", "1"],
         False,
     ),
     (
         "H3 --point value (small, 3-band)",
+        "h3",
         SMALL,
         ["-r", "12", "--point", "value", "--threads", "1"],
         False,
     ),
     (
         "H3 --overlay weighted (small, 3-band)",
+        "h3",
         SMALL,
         ["-r", "10", "--overlay", "weighted", "--threads", "1"],
         False,
     ),
     (
         "H3 --sample bilinear (small, 3-band)",
+        "h3",
         SMALL,
         ["-r", "12", "--sample", "bilinear", "--threads", "1"],
         False,
     ),
     (
         "H3 --point value (full DEM, 1-band, single-threaded)",
+        "h3",
         LARGE,
         ["-r", "11", "--point", "value", "--threads", "1"],
         True,
     ),
     (
         "H3 --point value (full DEM, 1-band, default threads)",
+        "h3",
         LARGE,
         ["-r", "11", "--point", "value"],
         True,
@@ -123,30 +134,35 @@ CASES: list[tuple[str, str, list[str], bool]] = [
     # --point cases because both scale with cell count, not pixel count.
     (
         "H3 --overlay weighted (full DEM, 1-band, default threads)",
+        "h3",
         LARGE,
         ["-r", "8", "--overlay", "weighted"],
         True,
     ),
     (
         "H3 --sample bilinear (full DEM, 1-band, default threads)",
+        "h3",
         LARGE,
         ["-r", "8", "--sample", "bilinear"],
         True,
     ),
     (
         "H3 --point value (10-band int16, ~89% valid, single-threaded)",
+        "h3",
         MULTIBAND,
         ["-r", "11", "--point", "value", "--threads", "1"],
         True,
     ),
     (
         "H3 --point value (10-band int16, ~89% valid, default threads)",
+        "h3",
         MULTIBAND,
         ["-r", "11", "--point", "value"],
         True,
     ),
     (
         "H3 --point value (3-band uint16, no nodata, striped, single-threaded)",
+        "h3",
         DENSE,
         ["-r", "13", "--point", "value", "--threads", "1"],
         True,
@@ -154,14 +170,14 @@ CASES: list[tuple[str, str, list[str], bool]] = [
 ]
 
 
-def run_case(label: str, raster: str, args: list[str]) -> str:
+def run_case(dggs: str, raster: str, args: list[str]) -> str:
     tmp = Path(tempfile.mkdtemp(prefix="r2d-bench-"))
     try:
         cmd = [
             sys.executable,
             "-c",
             "from raster2dggs.cli import main; main()",
-            "h3",
+            dggs,
             raster,
             str(tmp / "out"),
             *args,
@@ -218,11 +234,11 @@ def main() -> None:
     ]
 
     body = []
-    for label, raster, args, slow in CASES:
+    for label, dggs, raster, args, slow in CASES:
         if slow and ns.quick:
             continue
         print(f"running: {label} ...", file=sys.stderr, flush=True)
-        report = run_case(label, raster, args)
+        report = run_case(dggs, raster, args)
         body += [f"## {label}", "", "```", report, "```", ""]
 
     OUT.write_text("\n".join(header + body))

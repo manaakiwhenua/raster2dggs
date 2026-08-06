@@ -36,19 +36,19 @@ Profile
 
   phase                          seconds   % wall    calls     ms/call
   --------------------------------------------------------------------
-  stage1.wall                      0.172    56.8%        1     171.697
-    window_total                   0.169    56.0%        2      84.735
-      read_block                   0.008     2.5%        2       3.765
-      reshape                      0.001     0.2%        2       0.351
-      reproject                    0.035    11.5%        2      17.326
-      build_frame                  0.001     0.3%        2       0.396
-      dggs_index                   0.098    32.3%        2      48.848
-      arrow_build                  0.003     1.1%        2       1.720
-      parquet_write                0.019     6.2%        2       9.451
-  stage2.total                     0.029     9.7%        1      29.233
+  stage1.wall                      0.134    50.9%        1     133.505
+    window_total                   0.132    50.2%        2      65.755
+      read_block                   0.008     3.0%        2       3.980
+      reshape                      0.001     0.3%        2       0.332
+      reproject                    0.032    12.3%        2      16.167
+      build_frame                  0.001     0.2%        2       0.287
+      dggs_index                   0.062    23.7%        2      31.029
+      arrow_build                  0.003     1.1%        2       1.484
+      parquet_write                0.018     7.0%        2       9.193
+  stage2.total                     0.027    10.3%        1      27.089
   --------------------------------------------------------------------
-  wall clock                       0.302   100.0%
-  Stage 1 concurrency: 0.99x (0.169s of work in 0.172s wall)
+  wall clock                       0.262   100.0%
+  Stage 1 concurrency: 0.99x (0.132s of work in 0.134s wall)
 ```
 
 ## maidenhead --point value (small, 3-band)
@@ -67,19 +67,19 @@ Profile
 
   phase                          seconds   % wall    calls     ms/call
   --------------------------------------------------------------------
-  stage1.wall                      0.152    53.9%        1     151.655
-    window_total                   0.149    53.1%        2      74.743
-      read_block                   0.007     2.6%        2       3.659
-      reshape                      0.001     0.2%        2       0.336
-      reproject                    0.035    12.4%        2      17.384
-      build_frame                  0.001     0.2%        2       0.265
-      dggs_index                   0.079    28.2%        2      39.653
-      arrow_build                  0.004     1.3%        2       1.856
-      parquet_write                0.017     6.2%        2       8.724
-  stage2.total                     0.026     9.3%        1      26.290
+  stage1.wall                      0.517    79.3%        1     516.805
+    window_total                   0.515    79.0%        2     257.262
+      read_block                   0.008     1.2%        2       3.917
+      reshape                      0.001     0.1%        2       0.339
+      reproject                    0.038     5.8%        2      18.907
+      build_frame                  0.001     0.1%        2       0.347
+      dggs_index                   0.439    67.3%        2     219.286
+      arrow_build                  0.003     0.5%        2       1.601
+      parquet_write                0.019     2.9%        2       9.469
+  stage2.total                     0.028     4.4%        1      28.424
   --------------------------------------------------------------------
-  wall clock                       0.281   100.0%
-  Stage 1 concurrency: 0.99x (0.149s of work in 0.152s wall)
+  wall clock                       0.652   100.0%
+  Stage 1 concurrency: 1.00x (0.515s of work in 0.517s wall)
 ```
 
 ## s2 --point value (small, 3-band)
@@ -98,19 +98,19 @@ Profile
 
   phase                          seconds   % wall    calls     ms/call
   --------------------------------------------------------------------
-  stage1.wall                      0.199    59.4%        1     199.336
-    window_total                   0.197    58.8%        2      98.598
-      read_block                   0.007     2.1%        2       3.595
-      reshape                      0.001     0.2%        2       0.313
-      reproject                    0.032     9.6%        2      16.165
-      build_frame                  0.001     0.2%        2       0.258
-      dggs_index                   0.128    38.1%        2      63.824
-      arrow_build                  0.004     1.1%        2       1.767
-      parquet_write                0.020     6.0%        2      10.026
-  stage2.total                     0.038    11.2%        1      37.561
+  stage1.wall                      0.935    88.2%        1     935.122
+    window_total                   0.933    88.0%        2     466.468
+      read_block                   0.007     0.7%        2       3.631
+      reshape                      0.001     0.1%        2       0.351
+      reproject                    0.034     3.2%        2      17.074
+      build_frame                  0.001     0.1%        2       0.271
+      dggs_index                   0.863    81.4%        2     431.649
+      arrow_build                  0.003     0.3%        2       1.462
+      parquet_write                0.018     1.7%        2       9.179
+  stage2.total                     0.028     2.6%        1      27.506
   --------------------------------------------------------------------
-  wall clock                       0.335   100.0%
-  Stage 1 concurrency: 0.99x (0.197s of work in 0.199s wall)
+  wall clock                       1.060   100.0%
+  Stage 1 concurrency: 1.00x (0.933s of work in 0.935s wall)
 ```
 
 ## a5 --point value (small, 3-band)
@@ -129,19 +129,19 @@ Profile
 
   phase                          seconds   % wall    calls     ms/call
   --------------------------------------------------------------------
-  stage1.wall                      0.225    61.4%        1     224.748
-    window_total                   0.223    60.9%        2     111.328
-      read_block                   0.007     1.9%        2       3.524
-      reshape                      0.001     0.2%        2       0.328
-      reproject                    0.034     9.4%        2      17.156
-      build_frame                  0.001     0.1%        2       0.266
-      dggs_index                   0.147    40.3%        2      73.665
-      arrow_build                  0.003     1.0%        2       1.738
-      parquet_write                0.024     6.4%        2      11.754
-  stage2.total                     0.040    10.8%        1      39.527
+  stage1.wall                      1.729    91.7%        1    1728.678
+    window_total                   1.726    91.6%        2     863.074
+      read_block                   0.009     0.5%        2       4.311
+      reshape                      0.001     0.0%        2       0.432
+      reproject                    0.034     1.8%        2      17.175
+      build_frame                  0.001     0.0%        2       0.311
+      dggs_index                   1.651    87.5%        2     825.251
+      arrow_build                  0.004     0.2%        2       1.857
+      parquet_write                0.020     1.1%        2      10.182
+  stage2.total                     0.033     1.8%        1      33.282
   --------------------------------------------------------------------
-  wall clock                       0.366   100.0%
-  Stage 1 concurrency: 0.99x (0.223s of work in 0.225s wall)
+  wall clock                       1.885   100.0%
+  Stage 1 concurrency: 1.00x (1.726s of work in 1.729s wall)
 ```
 
 ## rhp --point value (small, 3-band)
@@ -160,19 +160,19 @@ Profile
 
   phase                          seconds   % wall    calls     ms/call
   --------------------------------------------------------------------
-  stage1.wall                      0.169    55.7%        1     169.037
-    window_total                   0.167    55.0%        2      83.451
-      read_block                   0.008     2.5%        2       3.757
-      reshape                      0.001     0.2%        2       0.321
-      reproject                    0.032    10.4%        2      15.850
-      build_frame                  0.001     0.2%        2       0.256
-      dggs_index                   0.100    32.9%        2      49.942
-      arrow_build                  0.003     1.0%        2       1.563
-      parquet_write                0.018     6.0%        2       9.052
-  stage2.total                     0.031    10.3%        1      31.410
+  stage1.wall                      3.955    93.6%        1    3955.323
+    window_total                   3.953    93.6%        2    1976.506
+      read_block                   0.008     0.2%        2       3.940
+      reshape                      0.001     0.0%        2       0.455
+      reproject                    0.036     0.8%        2      17.942
+      build_frame                  0.001     0.0%        2       0.309
+      dggs_index                   3.880    91.8%        2    1940.000
+      arrow_build                  0.003     0.1%        2       1.616
+      parquet_write                0.019     0.5%        2       9.527
+  stage2.total                     0.026     0.6%        1      25.634
   --------------------------------------------------------------------
-  wall clock                       0.304   100.0%
-  Stage 1 concurrency: 0.99x (0.167s of work in 0.169s wall)
+  wall clock                       4.225   100.0%
+  Stage 1 concurrency: 1.00x (3.953s of work in 3.955s wall)
 ```
 
 ## isea4r --point value (small, 3-band)
@@ -191,19 +191,19 @@ Profile
 
   phase                          seconds   % wall    calls     ms/call
   --------------------------------------------------------------------
-  stage1.wall                      0.175    57.4%        1     175.291
-    window_total                   0.173    56.7%        2      86.540
-      read_block                   0.007     2.3%        2       3.510
-      reshape                      0.001     0.2%        2       0.339
-      reproject                    0.031    10.3%        2      15.742
-      build_frame                  0.001     0.2%        2       0.261
-      dggs_index                   0.103    33.9%        2      51.654
-      arrow_build                  0.004     1.2%        2       1.765
-      parquet_write                0.021     6.9%        2      10.511
-  stage2.total                     0.029     9.4%        1      28.724
+  stage1.wall                      0.634    81.0%        1     633.591
+    window_total                   0.631    80.7%        2     315.610
+      read_block                   0.008     1.0%        2       4.002
+      reshape                      0.001     0.1%        2       0.480
+      reproject                    0.033     4.2%        2      16.620
+      build_frame                  0.001     0.1%        2       0.311
+      dggs_index                   0.561    71.6%        2     280.351
+      arrow_build                  0.003     0.4%        2       1.703
+      parquet_write                0.019     2.4%        2       9.382
+  stage2.total                     0.027     3.4%        1      26.791
   --------------------------------------------------------------------
-  wall clock                       0.305   100.0%
-  Stage 1 concurrency: 0.99x (0.173s of work in 0.175s wall)
+  wall clock                       0.783   100.0%
+  Stage 1 concurrency: 1.00x (0.631s of work in 0.634s wall)
 ```
 
 ## H3 --point value (small, 3-band)
@@ -222,19 +222,19 @@ Profile
 
   phase                          seconds   % wall    calls     ms/call
   --------------------------------------------------------------------
-  stage1.wall                      0.211    59.6%        1     211.184
-    window_total                   0.209    59.0%        2     104.568
-      read_block                   0.008     2.3%        2       4.000
-      reshape                      0.001     0.2%        2       0.330
-      reproject                    0.033     9.4%        2      16.571
-      build_frame                  0.001     0.2%        2       0.302
-      dggs_index                   0.137    38.7%        2      68.545
-      arrow_build                  0.003     0.9%        2       1.647
-      parquet_write                0.021     5.8%        2      10.258
-  stage2.total                     0.039    11.0%        1      38.938
+  stage1.wall                      0.239    60.5%        1     239.145
+    window_total                   0.237    59.9%        2     118.425
+      read_block                   0.008     2.1%        2       4.118
+      reshape                      0.001     0.2%        2       0.423
+      reproject                    0.036     9.1%        2      18.070
+      build_frame                  0.001     0.2%        2       0.334
+      dggs_index                   0.152    38.3%        2      75.788
+      arrow_build                  0.004     1.1%        2       2.147
+      parquet_write                0.029     7.3%        2      14.524
+  stage2.total                     0.045    11.3%        1      44.511
   --------------------------------------------------------------------
-  wall clock                       0.354   100.0%
-  Stage 1 concurrency: 0.99x (0.209s of work in 0.211s wall)
+  wall clock                       0.395   100.0%
+  Stage 1 concurrency: 0.99x (0.237s of work in 0.239s wall)
 ```
 
 ## H3 --overlay weighted (small, 3-band)
@@ -250,17 +250,17 @@ Profile
 
   phase                          seconds   % wall    calls     ms/call
   --------------------------------------------------------------------
-  stage1.wall                      0.238    63.6%        1     237.895
-    window_total                   0.236    63.0%        2     117.882
-      (not broken down)            0.046    12.2%        -           -
-      cells_in_bbox                0.001     0.4%        2       0.746
-      cell_polygons                0.017     4.4%        2       8.308
-      exactextract                 0.169    45.1%        2      84.429
-      parquet_write                0.003     0.8%        2       1.547
-  stage2.total                     0.020     5.3%        1      19.804
+  stage1.wall                      0.236    65.6%        1     236.207
+    window_total                   0.234    65.0%        2     117.006
+      (not broken down)            0.046    12.7%        -           -
+      cells_in_bbox                0.002     0.5%        2       0.847
+      cell_polygons                0.016     4.5%        2       8.149
+      exactextract                 0.168    46.7%        2      83.985
+      parquet_write                0.002     0.7%        2       1.193
+  stage2.total                     0.018     4.9%        1      17.569
   --------------------------------------------------------------------
-  wall clock                       0.374   100.0%
-  Stage 1 concurrency: 0.99x (0.236s of work in 0.238s wall)
+  wall clock                       0.360   100.0%
+  Stage 1 concurrency: 0.99x (0.234s of work in 0.236s wall)
 ```
 
 ## H3 --sample bilinear (small, 3-band)
@@ -276,17 +276,17 @@ Profile
 
   phase                          seconds   % wall    calls     ms/call
   --------------------------------------------------------------------
-  stage1.wall                      0.151    51.3%        1     151.155
-    window_total                   0.149    50.6%        2      74.555
-      (not broken down)            0.064    21.9%        -           -
-      read_block                   0.012     4.0%        2       5.882
-      cells_in_bbox                0.026     9.0%        2      13.246
-      cells_to_lonlat              0.035    11.9%        2      17.487
-      parquet_write                0.011     3.9%        2       5.706
-  stage2.total                     0.030    10.3%        1      30.238
+  stage1.wall                      0.157    51.3%        1     157.162
+    window_total                   0.155    50.6%        2      77.520
+      (not broken down)            0.061    20.1%        -           -
+      read_block                   0.012     3.8%        2       5.889
+      cells_in_bbox                0.030     9.8%        2      15.020
+      cells_to_lonlat              0.038    12.5%        2      19.110
+      parquet_write                0.014     4.4%        2       6.770
+  stage2.total                     0.029     9.5%        1      29.137
   --------------------------------------------------------------------
-  wall clock                       0.295   100.0%
-  Stage 1 concurrency: 0.99x (0.149s of work in 0.151s wall)
+  wall clock                       0.306   100.0%
+  Stage 1 concurrency: 0.99x (0.155s of work in 0.157s wall)
 ```
 
 ## H3 --point value (full DEM, 1-band, single-threaded)
@@ -305,20 +305,20 @@ Profile
 
   phase                          seconds   % wall    calls     ms/call
   --------------------------------------------------------------------
-  stage1.wall                     22.617    91.3%        1   22616.637
-    window_total                  22.598    91.3%      760      29.734
-      (not broken down)            1.817     7.3%        -           -
-      read_block                   1.807     7.3%      760       2.377
-      reshape                      0.222     0.9%      760       0.292
-      reproject                    1.820     7.4%      760       2.395
-      build_frame                  0.172     0.7%      760       0.226
-      dggs_index                  14.857    60.0%      760      19.548
-      arrow_build                  0.420     1.7%      760       0.553
-      parquet_write                1.483     6.0%      227       6.534
-  stage2.total                     1.974     8.0%        1    1973.929
+  stage1.wall                     23.306    91.9%        1   23305.771
+    window_total                  23.286    91.9%      760      30.640
+      (not broken down)            1.844     7.3%        -           -
+      read_block                   1.854     7.3%      760       2.440
+      reshape                      0.241     1.0%      760       0.317
+      reproject                    1.897     7.5%      760       2.496
+      build_frame                  0.180     0.7%      760       0.237
+      dggs_index                  15.309    60.4%      760      20.143
+      arrow_build                  0.424     1.7%      760       0.558
+      parquet_write                1.536     6.1%      227       6.765
+  stage2.total                     1.855     7.3%        1    1855.179
   --------------------------------------------------------------------
-  wall clock                      24.763   100.0%
-  Stage 1 concurrency: 1.00x (22.598s of work in 22.617s wall)
+  wall clock                      25.348   100.0%
+  Stage 1 concurrency: 1.00x (23.286s of work in 23.306s wall)
 ```
 
 ## H3 --point value (full DEM, 1-band, default threads)
@@ -337,20 +337,20 @@ Profile
 
   phase                          seconds   % wall    calls     ms/call
   --------------------------------------------------------------------
-  stage1.wall                     21.853    91.7%        1   21852.694
-    window_total                 152.795   641.1%      760     201.047
-      (not broken down)           10.074    42.3%        -           -
-      read_block                  29.004   121.7%      760      38.164
-      reshape                     19.209    80.6%      760      25.275
-      reproject                    7.421    31.1%      760       9.764
-      build_frame                  1.493     6.3%      760       1.965
-      dggs_index                  65.589   275.2%      760      86.301
-      arrow_build                 13.575    57.0%      760      17.862
-      parquet_write                6.431    27.0%      227      28.330
-  stage2.total                     1.801     7.6%        1    1801.174
+  stage1.wall                     22.401    91.8%        1   22401.029
+    window_total                 156.605   641.4%      760     206.060
+      (not broken down)           10.600    43.4%        -           -
+      read_block                  33.854   138.7%      760      44.545
+      reshape                     20.700    84.8%      760      27.237
+      reproject                    6.286    25.7%      760       8.271
+      build_frame                  1.442     5.9%      760       1.898
+      dggs_index                  63.495   260.1%      760      83.546
+      arrow_build                 13.086    53.6%      760      17.218
+      parquet_write                7.142    29.3%      227      31.461
+  stage2.total                     1.824     7.5%        1    1823.798
   --------------------------------------------------------------------
-  wall clock                      23.834   100.0%
-  Stage 1 concurrency: 6.99x (152.795s of work in 21.853s wall)
+  wall clock                      24.414   100.0%
+  Stage 1 concurrency: 6.99x (156.605s of work in 22.401s wall)
 ```
 
 ## H3 --overlay weighted (full DEM, 1-band, default threads)
@@ -366,17 +366,17 @@ Profile
 
   phase                          seconds   % wall    calls     ms/call
   --------------------------------------------------------------------
-  stage1.wall                     31.584    98.8%        1   31584.360
-    window_total                 220.569   689.8%      760     290.222
-      (not broken down)           46.830   146.5%        -           -
-      cells_in_bbox                0.209     0.7%      760       0.275
-      cell_polygons               20.849    65.2%      760      27.433
-      exactextract               149.186   466.6%      760     196.298
-      parquet_write                3.494    10.9%      291      12.007
-  stage2.total                     0.231     0.7%        1     231.190
+  stage1.wall                     32.948    98.7%        1   32947.688
+    window_total                 230.181   689.9%      760     302.870
+      (not broken down)           49.109   147.2%        -           -
+      cells_in_bbox                0.214     0.6%      760       0.281
+      cell_polygons               20.741    62.2%      760      27.291
+      exactextract               156.570   469.2%      760     206.013
+      parquet_write                3.548    10.6%      291      12.192
+  stage2.total                     0.238     0.7%        1     237.937
   --------------------------------------------------------------------
-  wall clock                      31.974   100.0%
-  Stage 1 concurrency: 6.98x (220.569s of work in 31.584s wall)
+  wall clock                      33.367   100.0%
+  Stage 1 concurrency: 6.99x (230.181s of work in 32.948s wall)
 ```
 
 ## H3 --sample bilinear (full DEM, 1-band, default threads)
@@ -392,17 +392,17 @@ Profile
 
   phase                          seconds   % wall    calls     ms/call
   --------------------------------------------------------------------
-  stage1.wall                      6.419    95.5%        1    6418.520
-    window_total                  44.271   658.7%      760      58.251
-      (not broken down)           10.546   156.9%        -           -
-      read_block                  31.238   464.8%      760      41.103
-      cells_in_bbox                0.137     2.0%      760       0.180
-      cells_to_lonlat              0.287     4.3%      760       0.378
-      parquet_write                2.062    30.7%      207       9.959
-  stage2.total                     0.157     2.3%        1     156.571
+  stage1.wall                      6.418    95.3%        1    6418.307
+    window_total                  44.324   658.1%      760      58.322
+      (not broken down)           10.947   162.5%        -           -
+      read_block                  30.887   458.6%      760      40.641
+      cells_in_bbox                0.132     2.0%      760       0.174
+      cells_to_lonlat              0.247     3.7%      760       0.326
+      parquet_write                2.111    31.3%      207      10.198
+  stage2.total                     0.158     2.4%        1     158.278
   --------------------------------------------------------------------
-  wall clock                       6.721   100.0%
-  Stage 1 concurrency: 6.90x (44.271s of work in 6.419s wall)
+  wall clock                       6.735   100.0%
+  Stage 1 concurrency: 6.91x (44.324s of work in 6.418s wall)
 ```
 
 ## H3 --point value (10-band int16, ~89% valid, single-threaded)
@@ -421,20 +421,20 @@ Profile
 
   phase                          seconds   % wall    calls     ms/call
   --------------------------------------------------------------------
-  stage1.wall                     17.879    86.5%        1   17879.494
-    window_total                  17.865    86.4%      420      42.535
-      (not broken down)            1.238     6.0%        -           -
-      read_block                   1.459     7.1%      420       3.474
-      reshape                      0.209     1.0%      420       0.498
-      reproject                    1.249     6.0%      420       2.974
-      build_frame                  0.144     0.7%      420       0.343
-      dggs_index                   9.853    47.6%      420      23.460
-      arrow_build                  1.184     5.7%      420       2.819
-      parquet_write                2.528    12.2%      398       6.351
-  stage2.total                     2.335    11.3%        1    2334.830
+  stage1.wall                     18.517    86.2%        1   18517.264
+    window_total                  18.502    86.1%      420      44.052
+      (not broken down)            1.272     5.9%        -           -
+      read_block                   1.500     7.0%      420       3.571
+      reshape                      0.192     0.9%      420       0.456
+      reproject                    1.306     6.1%      420       3.109
+      build_frame                  0.150     0.7%      420       0.357
+      dggs_index                  10.317    48.0%      420      24.565
+      arrow_build                  1.164     5.4%      420       2.771
+      parquet_write                2.602    12.1%      398       6.537
+  stage2.total                     2.499    11.6%        1    2499.308
   --------------------------------------------------------------------
-  wall clock                      20.681   100.0%
-  Stage 1 concurrency: 1.00x (17.865s of work in 17.879s wall)
+  wall clock                      21.491   100.0%
+  Stage 1 concurrency: 1.00x (18.502s of work in 18.517s wall)
 ```
 
 ## H3 --point value (10-band int16, ~89% valid, default threads)
@@ -453,20 +453,20 @@ Profile
 
   phase                          seconds   % wall    calls     ms/call
   --------------------------------------------------------------------
-  stage1.wall                     15.900    85.1%        1   15900.436
-    window_total                 111.075   594.4%      420     264.465
-      (not broken down)            7.362    39.4%        -           -
-      read_block                  15.921    85.2%      420      37.907
-      reshape                     16.699    89.4%      420      39.759
-      reproject                    4.506    24.1%      420      10.730
-      build_frame                 10.202    54.6%      420      24.291
-      dggs_index                  26.933   144.1%      420      64.126
-      arrow_build                 19.742   105.6%      420      47.006
-      parquet_write                9.709    52.0%      398      24.395
-  stage2.total                     2.319    12.4%        1    2319.002
+  stage1.wall                     17.390    86.0%        1   17390.487
+    window_total                 121.432   600.7%      420     289.125
+      (not broken down)            8.060    39.9%        -           -
+      read_block                  16.992    84.1%      420      40.457
+      reshape                     17.014    84.2%      420      40.510
+      reproject                    4.715    23.3%      420      11.225
+      build_frame                 11.788    58.3%      420      28.066
+      dggs_index                  32.000   158.3%      420      76.190
+      arrow_build                 21.019   104.0%      420      50.046
+      parquet_write                9.845    48.7%      398      24.737
+  stage2.total                     2.389    11.8%        1    2389.404
   --------------------------------------------------------------------
-  wall clock                      18.687   100.0%
-  Stage 1 concurrency: 6.99x (111.075s of work in 15.900s wall)
+  wall clock                      20.216   100.0%
+  Stage 1 concurrency: 6.98x (121.432s of work in 17.390s wall)
 ```
 
 ## H3 --point value (3-band uint16, no nodata, striped, single-threaded)
@@ -485,18 +485,18 @@ Profile
 
   phase                          seconds   % wall    calls     ms/call
   --------------------------------------------------------------------
-  stage1.wall                     13.317    61.8%        1   13316.889
-    window_total                  13.294    61.7%     1001      13.280
-      (not broken down)            2.528    11.7%        -           -
-      read_block                   2.225    10.3%     1001       2.222
-      reshape                      0.062     0.3%     1001       0.062
-      reproject                    0.229     1.1%     1001       0.228
-      build_frame                  0.184     0.9%     1001       0.183
-      dggs_index                   4.275    19.8%     1001       4.270
-      arrow_build                  1.874     8.7%     1001       1.872
-      parquet_write                1.917     8.9%     1001       1.915
-  stage2.total                     6.855    31.8%        1    6854.737
+  stage1.wall                     15.492    55.5%        1   15492.097
+    window_total                  15.465    55.4%     1001      15.449
+      (not broken down)            2.863    10.3%        -           -
+      read_block                   2.505     9.0%     1001       2.503
+      reshape                      0.069     0.2%     1001       0.069
+      reproject                    0.254     0.9%     1001       0.253
+      build_frame                  0.203     0.7%     1001       0.203
+      dggs_index                   5.067    18.2%     1001       5.062
+      arrow_build                  2.105     7.5%     1001       2.103
+      parquet_write                2.398     8.6%     1001       2.396
+  stage2.total                    10.762    38.5%        1   10762.126
   --------------------------------------------------------------------
-  wall clock                      21.541   100.0%
-  Stage 1 concurrency: 1.00x (13.294s of work in 13.317s wall)
+  wall clock                      27.919   100.0%
+  Stage 1 concurrency: 1.00x (15.465s of work in 15.492s wall)
 ```
