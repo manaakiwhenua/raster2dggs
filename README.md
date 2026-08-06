@@ -40,6 +40,7 @@ Contributions (particularly for additional DGGSs), suggestions, bug reports and 
 - [Installation (detailed)](#installation-detailed)
   - [For development](#for-development)
   - [Tests](#tests)
+  - [Benchmarks](#benchmarks)
   - [Generating synthetic sample rasters](#generating-synthetic-sample-rasters)
   - [Experimenting](#experimenting)
 - [Example commands](#example-commands)
@@ -733,6 +734,26 @@ pytest "tests/classes/test_cli_integration.py::TestAllDGGS::test_command[h3-poly
 ```
 
 Test data are included at `tests/data/`.
+
+#### Benchmarks
+
+`bench/` holds performance benchmarks, which a plain `pytest` run does not
+collect. Run them with:
+
+```bash
+pytest bench/
+```
+
+These use [pytest-benchmark](https://pytest-benchmark.readthedocs.io/) to time
+individual pipeline functions over many rounds, reporting min/median/mean and
+standard deviation so that a few percent can be distinguished from noise. Save
+and compare runs with `--benchmark-autosave` and `--benchmark-compare`; fail on
+a regression with `--benchmark-compare-fail=median:10%`.
+
+For whole-run phase attribution rather than per-function timing, use
+[`--profile`](#profiling-a-run----profile), or `python bench/run_baseline.py` to
+regenerate the committed `bench/BASELINE.md` across a fixed matrix of
+configurations. See [`bench/README.md`](bench/README.md).
 
 #### Generating synthetic sample rasters
 
