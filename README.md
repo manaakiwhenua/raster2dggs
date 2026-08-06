@@ -32,6 +32,7 @@ Contributions (particularly for additional DGGSs), suggestions, bug reports and 
   - [Overlay (area-based)](#overlay-area-based---overlay)
   - [Numeric (binned) histograms](#numeric-binned-histograms---hist-bins---hist-width)
   - [Windowed resampling](#windowed-resampling---sample)
+- [Profiling a run](#profiling-a-run----profile)
 - [Visualising output](#visualising-output)
   - [DuckDB](#duckdb)
   - [GDAL](#gdal)
@@ -39,6 +40,7 @@ Contributions (particularly for additional DGGSs), suggestions, bug reports and 
 - [Installation (detailed)](#installation-detailed)
   - [For development](#for-development)
   - [Tests](#tests)
+  - [Benchmarks](#benchmarks)
   - [Generating synthetic sample rasters](#generating-synthetic-sample-rasters)
   - [Experimenting](#experimenting)
 - [Example commands](#example-commands)
@@ -238,6 +240,11 @@ Options:
                                   execution of this program. This parameter
                                   allows you to control where this data will
                                   be written.
+  --profile                       Print a phase-by-phase timing breakdown to
+                                  stderr on completion, with per-call costs
+                                  and enough context about the input (window
+                                  count, bands, block shape) to interpret
+                                  them.
   --version                       Show the version and exit.
   --help                          Show this message and exit.
 ```
@@ -442,6 +449,46 @@ raster2dggs h3 landcover.tif output/ -r 9 --sample -d 0
 ```
 
 `--agg` is ignored for `--sample`. Supports `--compact`.
+
+## Profiling a run — `--profile`
+
+`--profile` prints a phase-by-phase timing breakdown to stderr when the run finishes, for any DGGS and any sampling strategy:
+
+```bash
+raster2dggs h3 input.tif output/ -r 11 --point value --profile
+```
+
+```
+Profile
+  bands: 3
+  block_shape: 256x256
+  internally_tiled: True
+  raster_size: 253x296
+  threads: 7
+  windows: 2
+
+  phase                          seconds   % wall   calls   ms/call
+  -----------------------------------------------------------------
+  stage1.wall                      0.409    73.2%       1  409.461
+    window_total                   0.573   102.4%       2  286.420
+      read_block                   0.181    32.4%       2   90.662
+      reproject                    0.101    18.0%       2   50.352
+      reshape                      0.079    14.1%       2   39.392
+      dggs_index                   0.169    30.3%       2   84.663
+      arrow_build                  0.004     0.8%       2    2.180
+      parquet_write                0.022     4.0%       2   11.088
+  stage2.total                     0.038     6.9%       1   38.320
+  -----------------------------------------------------------------
+  wall clock                       0.559   100.0%
+  Stage 1 concurrency: 1.40x (0.573s of work in 0.409s wall)
+```
+
+Reading it:
+
+- **Indentation is nesting, not addition.** `read_block`, `dggs_index` and friends are measured *inside* `window_total`, which is itself measured inside `stage1.wall` — so those rows are a decomposition of their parent, not terms to be summed. Percentages are all of total wall clock.
+- **`stage1.wall` vs `window_total`** is the parallelism check. `window_total` sums across all worker threads, so it exceeds `stage1.wall` whenever threads genuinely overlapped; the **concurrency** figure at the bottom states the ratio directly. A value near `1.0x` with `--threads` > 1 means the threads achieved nothing — usually because that code path is holding the GIL or is serialised behind a lock.
+- **`ms/call` with `windows`** is what makes an unexpectedly slow run legible. A large window count with a small per-window cost points at the *input's* block layout rather than at the indexing work — check `block_shape` (a block height of 1 means the GeoTIFF is strip-encoded, giving one window per raster row) and see the [overlay performance note](#performance-note) for how to re-tile.
+- Profiling is off by default and the instrumentation is a single branch when disabled, so there is no reason to avoid it in normal use.
 
 ## Visualising output
 
@@ -687,6 +734,25 @@ pytest "tests/classes/test_cli_integration.py::TestAllDGGS::test_command[h3-poly
 ```
 
 Test data are included at `tests/data/`.
+
+#### Benchmarks
+
+`bench/` holds performance benchmarks, which a plain `pytest` run does not
+collect. Run them with:
+
+```bash
+pytest bench/
+```
+
+These use [pytest-benchmark](https://pytest-benchmark.readthedocs.io/) to time
+individual pipeline functions over many rounds, reporting min/median/mean and
+standard deviation so that a few percent can be distinguished from noise. Save
+and compare runs with `--benchmark-autosave` and `--benchmark-compare`; fail on
+a regression with `--benchmark-compare-fail=median:10%`.
+
+A benchmark times one function on synthetic input, so it cannot say which phase
+dominates a real run. For that, use [`--profile`](#profiling-a-run----profile)
+on the raster and flags you care about. See [`bench/README.md`](bench/README.md).
 
 #### Generating synthetic sample rasters
 

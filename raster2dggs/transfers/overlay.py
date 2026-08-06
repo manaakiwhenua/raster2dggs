@@ -36,6 +36,7 @@ from shapely.geometry import Polygon, shape
 import raster2dggs.constants as const
 from raster2dggs.histogram import HistogramSpec, build_histogram, histogram_struct_type
 from raster2dggs.interfaces import IRasterIndexer
+from raster2dggs.profiling import PROFILER
 
 LOGGER = logging.getLogger(__name__)
 
@@ -358,15 +359,19 @@ class _OverlayIndexer:
         min_lat = max(-90.0, min_lat - lat_pad)
         max_lat = min(90.0, max_lat + lat_pad)
 
-        cells = list(
-            self.indexer.cells_in_bbox(
-                min_lon, min_lat, max_lon, max_lat, self.resolution
+        with PROFILER.phase("stage1.cells_in_bbox"):
+            cells = list(
+                self.indexer.cells_in_bbox(
+                    min_lon, min_lat, max_lon, max_lat, self.resolution
+                )
             )
-        )
         if not cells:
             return None
 
-        polygons = [_fix_antimeridian(self.indexer.cell_to_polygon(c)) for c in cells]
+        with PROFILER.phase("stage1.cell_polygons"):
+            polygons = [
+                _fix_antimeridian(self.indexer.cell_to_polygon(c)) for c in cells
+            ]
         # WGS84 GDF for VCT shapely area computation (raster_fracs).
         gdf_wgs84 = gpd.GeoDataFrame(
             {"_cell_id": cells}, geometry=polygons, crs="EPSG:4326"
@@ -399,23 +404,24 @@ class _OverlayIndexer:
             main_ops = [weighted_agg]
         else:
             main_ops = [str(self.op)]
-        if is_geodesic:
-            result_df = exact_extract(
-                self.raster_input,
-                gdf,
-                main_ops,
-                weights=self._geodesic_weights_path,
-                include_cols="_cell_id",
-                output="pandas",
-            )
-        else:
-            result_df = exact_extract(
-                self.raster_input,
-                gdf,
-                main_ops,
-                include_cols="_cell_id",
-                output="pandas",
-            )
+        with PROFILER.phase("stage1.exactextract"):
+            if is_geodesic:
+                result_df = exact_extract(
+                    self.raster_input,
+                    gdf,
+                    main_ops,
+                    weights=self._geodesic_weights_path,
+                    include_cols="_cell_id",
+                    output="pandas",
+                )
+            else:
+                result_df = exact_extract(
+                    self.raster_input,
+                    gdf,
+                    main_ops,
+                    include_cols="_cell_id",
+                    output="pandas",
+                )
 
         valid_frac_by_band = {}
         if is_frac or self._apply_coverage_threshold:
@@ -425,13 +431,14 @@ class _OverlayIndexer:
             # of the total cell area, not fraction of valid pixels (which would always
             # sum to 1.0 regardless of how much of the cell is nodata or outside raster).
             # For threshold: used to null cells below min_valid_coverage.
-            cov_df = exact_extract(
-                self._coverage_mask_path,
-                gdf,
-                ["mean"],
-                include_cols="_cell_id",
-                output="pandas",
-            ).set_index("_cell_id")
+            with PROFILER.phase("stage1.exactextract"):
+                cov_df = exact_extract(
+                    self._coverage_mask_path,
+                    gdf,
+                    ["mean"],
+                    include_cols="_cell_id",
+                    output="pandas",
+                ).set_index("_cell_id")
 
             raster_fracs = pd.Series(
                 [

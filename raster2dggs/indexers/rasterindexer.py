@@ -9,6 +9,7 @@ import xarray as xr
 from .. import constants as const
 from ..histogram import HistogramSpec, build_histogram
 from ..interfaces import IRasterIndexer
+from ..profiling import PROFILER
 
 
 def _is_nan(v) -> bool:
@@ -36,6 +37,17 @@ def _mask_is_nodata(series: pd.Series, nodata) -> pd.Series:
     else:
         # Sentinel nodata: also treat unexpected NaNs as nodata
         return series.isna() | (series == nodata)
+
+
+def _mask_is_nodata_array(values: np.ndarray, nodata) -> np.ndarray:
+    """Array form of _mask_is_nodata, for the wide-form block path."""
+    if nodata is None:
+        return np.zeros(values.shape, dtype=bool)
+    isna = np.isnan(values)
+    if _is_nan(nodata):
+        return isna
+    # Sentinel nodata: also treat unexpected NaNs as nodata
+    return isna | (values == nodata)
 
 
 class RasterIndexer(IRasterIndexer):
@@ -115,33 +127,84 @@ class RasterIndexer(IRasterIndexer):
         transformer=None,
         selected_indices: tuple[int] = None,
     ) -> pa.Table:
-        sdf: pd.DataFrame = (
-            sdf.to_dataframe().drop(columns=["spatial_ref"]).reset_index()
-        )
-        if transformer is not None:
-            lons, lats = transformer.transform(sdf["x"].values, sdf["y"].values)
-            sdf["x"] = lons
-            sdf["y"] = lats
-        nodata_mask = _mask_is_nodata(sdf[const.DEFAULT_NAME], nodata)
-        if nodata_policy.lower() == "omit":
-            sdf = sdf[~nodata_mask].copy()
-        elif nodata_policy.lower() == "emit":
-            sdf = sdf.copy()
-            fill_value = emit_nodata_value if emit_nodata_value is not None else nodata
-            if pd.isna(fill_value):
-                if pd.api.types.is_integer_dtype(sdf[const.DEFAULT_NAME]):
-                    sdf[const.DEFAULT_NAME] = sdf[const.DEFAULT_NAME].astype(float)
-                sdf.loc[nodata_mask, const.DEFAULT_NAME] = np.nan
-            else:
-                dtype = sdf[const.DEFAULT_NAME].dtype
-                sdf.loc[nodata_mask, const.DEFAULT_NAME] = dtype.type(fill_value)
-        else:
+        if nodata_policy.lower() not in ("omit", "emit"):
             raise ValueError(f"Unknown nodata policy: {nodata_policy}")
-        wide = pd.pivot_table(
-            sdf, values=const.DEFAULT_NAME, index=["x", "y"], columns=["band"]
-        ).reset_index()
-        wide = self._index_window(wide, resolution, parent_res)
-        bands = sorted(sdf["band"].unique())
+
+        with PROFILER.phase("stage1.read_block"):
+            values = sdf.values  # (bands, h, w); forces the dask/GDAL read
+            xs = sdf["x"].values  # (w,) pixel-centre coordinates
+            ys = sdf["y"].values  # (h,)
+            band_ids = list(sdf["band"].values)
+
+        n_bands, height, width = values.shape
+        # Integer bands become float so that a nodata cell can hold NaN.
+        if not np.issubdtype(values.dtype, np.floating):
+            values = values.astype(np.float64)
+        flat = values.reshape(n_bands, height * width)
+
+        with PROFILER.phase("stage1.reshape"):
+            emit_mode = nodata_policy.lower() == "emit"
+            fill_value = emit_nodata_value if emit_nodata_value is not None else nodata
+            emit_fill = (
+                float(fill_value) if emit_mode and not pd.isna(fill_value) else None
+            )
+
+            cols = {}
+            for band_id, col in zip(band_ids, flat, strict=True):
+                mask = _mask_is_nodata_array(col, nodata)
+                if mask.any():
+                    col = col.copy()
+                    col[mask] = np.nan if emit_fill is None else emit_fill
+                cols[band_id] = col
+
+            # 'omit' excludes a pixel that is nodata in every band, so this is
+            # computed across all bands before any are dropped below -- a
+            # window that is entirely nodata yields no rows at all.
+            keep_rows = None
+            if not emit_mode:
+                keep_rows = np.zeros(height * width, dtype=bool)
+                for col in cols.values():
+                    keep_rows |= ~np.isnan(col)
+                if keep_rows.all():
+                    keep_rows = None
+
+            # Reported by --profile: how much of the raster is actually
+            # carried through, which is what makes the phase costs comparable
+            # between a dense raster and a mostly-nodata one.
+            PROFILER.add("pixels_read", height * width)
+            PROFILER.add(
+                "rows_indexed",
+                height * width if keep_rows is None else int(keep_rows.sum()),
+            )
+
+            # Row-major ravel order is (y0x0, y0x1, ... y1x0, ...).
+            grid_x = np.tile(xs, height)
+            grid_y = np.repeat(ys, width)
+            if keep_rows is not None:
+                # Discard nodata pixels before reprojecting and indexing them:
+                # on a sparse raster most of the window can be dropped here.
+                grid_x = grid_x[keep_rows]
+                grid_y = grid_y[keep_rows]
+                cols = {b: c[keep_rows] for b, c in cols.items()}
+
+        if transformer is not None:
+            with PROFILER.phase("stage1.reproject"):
+                grid_x, grid_y = transformer.transform(grid_x, grid_y)
+
+        with PROFILER.phase("stage1.build_frame"):
+            data = {"x": grid_x, "y": grid_y}
+            for band_id, col in cols.items():
+                # A band that is entirely nodata in this window is dropped, so
+                # the band labels below are mapped by band index rather than by
+                # position (#88).
+                if np.isnan(col).all():
+                    continue
+                data[band_id] = col
+            wide = pd.DataFrame(data, copy=False)
+
+        with PROFILER.phase("stage1.dggs_index"):
+            wide = self._index_window(wide, resolution, parent_res)
+        bands = sorted(c for c in wide.columns if c in set(band_ids))
         if band_labels is None:
             rename_map = {b: str(b) for b in bands}
         else:
@@ -154,7 +217,8 @@ class RasterIndexer(IRasterIndexer):
             full_mapping = dict(zip(selected_indices, band_labels, strict=True))
             rename_map = {b: full_mapping[b] for b in bands if b in full_mapping}
         wide = wide.rename(columns=rename_map)
-        return pa.Table.from_pandas(wide, preserve_index=False)
+        with PROFILER.phase("stage1.arrow_build"):
+            return pa.Table.from_pandas(wide, preserve_index=False)
 
     def cells_to_lonlat_arrays(self, cells: pd.Series) -> tuple[np.ndarray, np.ndarray]:
         """
@@ -246,10 +310,16 @@ class RasterIndexer(IRasterIndexer):
                 {partition_col: base[partition_col]}, index=base.index
             )
             result.index.name = index_col
+            agg_names = list(per_agg)
             for col in self.band_cols(base):
+                # Align each aggregation's column to the shared cell index once,
+                # then zip them positionally. Looking each value up by cell label
+                # instead costs one hash lookup per cell per aggregation, which
+                # dominates the whole aggregation at realistic cell counts.
+                aligned = [per_agg[name][col].reindex(base.index) for name in agg_names]
                 result[col] = [
-                    {agg_name: per_agg[agg_name].at[idx, col] for agg_name in per_agg}
-                    for idx in result.index
+                    dict(zip(agg_names, values, strict=True))
+                    for values in zip(*aligned, strict=True)
                 ]
             return result
 

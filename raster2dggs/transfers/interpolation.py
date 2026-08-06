@@ -28,6 +28,7 @@ from rasterio.warp import transform_bounds
 
 from raster2dggs.indexers.rasterindexer import _is_nan
 from raster2dggs.interfaces import IRasterIndexer
+from raster2dggs.profiling import PROFILER
 
 _BICUBIC_OFFSETS = np.array([-1, 0, 1, 2], dtype=float)
 _BICUBIC_OFFSETS_INT = np.array([-1, 0, 1, 2], dtype=int)
@@ -119,15 +120,17 @@ class _SampleIndexer:
         min_lon, min_lat, max_lon, max_lat = transform_bounds(
             self.src.crs, "EPSG:4326", win_left, win_bottom, win_right, win_top
         )
-        cells = list(
-            self.indexer.cells_in_bbox(
-                min_lon, min_lat, max_lon, max_lat, self.resolution
+        with PROFILER.phase("stage1.cells_in_bbox"):
+            cells = list(
+                self.indexer.cells_in_bbox(
+                    min_lon, min_lat, max_lon, max_lat, self.resolution
+                )
             )
-        )
         if not cells:
             return None, None, None
 
-        cell_lons, cell_lats = self.indexer.cells_to_lonlat_arrays(pd.Series(cells))
+        with PROFILER.phase("stage1.cells_to_lonlat"):
+            cell_lons, cell_lats = self.indexer.cells_to_lonlat_arrays(pd.Series(cells))
         # Pass as Python lists to avoid pyproj trying float(array) on
         # 1-element numpy arrays, triggering a NumPy DeprecationWarning.
         _xs, _ys = self.inverse_transformer.transform(
@@ -215,7 +218,8 @@ class _SampleIndexer:
         local_rows = local_rows[in_win]
         local_cols = local_cols[in_win]
 
-        win_data = self.da.rio.isel_window(window).values  # (bands, H, W)
+        with PROFILER.phase("stage1.read_block"):
+            win_data = self.da.rio.isel_window(window).values  # (bands, H, W)
         samples = win_data[:, local_rows, local_cols].T.astype(float)
         if self.nodata is not None and not _is_nan(self.nodata):
             samples[samples == self.nodata] = np.nan
@@ -270,7 +274,8 @@ class _SampleIndexer:
         # available, even when the floor pixel is in the adjacent window
         # (cells with frac ∈ [nn−0.5, nn) have floor = nn−1).
         exp = self._expand_window(window, margin=1)
-        win_data = self.da.rio.isel_window(exp).values  # (bands, H, W)
+        with PROFILER.phase("stage1.read_block"):
+            win_data = self.da.rio.isel_window(exp).values  # (bands, H, W)
         exp_h, exp_w = win_data.shape[1], win_data.shape[2]
 
         r0_raw = floor_rows - exp.row_off
@@ -392,7 +397,8 @@ class _SampleIndexer:
         dc = frac_cols - floor_cols
 
         exp = self._expand_window(window, margin=2)
-        win_data = self.da.rio.isel_window(exp).values  # (bands, H, W)
+        with PROFILER.phase("stage1.read_block"):
+            win_data = self.da.rio.isel_window(exp).values  # (bands, H, W)
         exp_h, exp_w = win_data.shape[1], win_data.shape[2]
         n = len(cells)
         bands = win_data.shape[0]
@@ -482,7 +488,8 @@ class _SampleIndexer:
         offsets_float = self._lanczos_offsets_float
 
         exp = self._expand_window(window, margin=lobe)
-        win_data = self.da.rio.isel_window(exp).values  # (bands, H, W)
+        with PROFILER.phase("stage1.read_block"):
+            win_data = self.da.rio.isel_window(exp).values  # (bands, H, W)
         exp_h, exp_w = win_data.shape[1], win_data.shape[2]
         n = len(cells)
         bands = win_data.shape[0]
