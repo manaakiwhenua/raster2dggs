@@ -6,24 +6,42 @@ Stage 1's worker threads hit it concurrently, profiling disabled is a genuine
 no-op, and the CLI flag produces a report without altering output.
 """
 
+import re
 import threading
 import time
 
+import pytest
 from classes.base import TestRunthrough, read_output
 from classes.helpers import make_raster
 from click.testing import CliRunner
 from data.datapaths import TEST_OUTPUT_PATH
 
 from raster2dggs.cli import cli
-from raster2dggs.profiling import PROFILER, Profiler
+from raster2dggs.profiling import _THREAD_CPU, PROFILER, Profiler
 
 _BOUNDS = (174.0, -41.1, 174.1, -41.0)
 _SIZE = 10
 _RES = 8
 
+needs_thread_cpu = pytest.mark.skipif(
+    _THREAD_CPU is None, reason="platform has no per-thread CPU clock"
+)
+
 
 def _make_raster(path: str) -> None:
     make_raster(path, _BOUNDS, _SIZE, pixel_value=1.0)
+
+
+def _stat(report: str, label: str) -> float:
+    """Pull the number out of a 'Stage 1 <label>: <n>x/%' summary line."""
+    line = next(ln for ln in report.splitlines() if label in ln)
+    return float(re.search(r"([\d.]+)[x%]", line).group(1))
+
+
+def _burn_cpu(seconds: float) -> None:
+    end = time.perf_counter() + seconds
+    while time.perf_counter() < end:
+        pass
 
 
 class TestProfilerUnit:
@@ -145,6 +163,97 @@ class TestProfilerUnit:
         assert (len(inner) - len(inner.lstrip())) > (len(wall) - len(wall.lstrip()))
 
 
+class TestParallelismIsCPUBased:
+    """The parallelism figure must measure work, not elapsed time in a thread.
+
+    Deriving it from summed worker *wall* time makes it tend towards the thread
+    count whenever threads block, so it reads ~7x on runs that are slower than
+    --threads 1.
+
+    test_blocked_threads_are_not_reported_as_parallelism is the one that catches
+    that directly: substituting worker wall time back into the formula fails it
+    and nothing else. The rest guard the opposite error -- real work must not be
+    reported as stalled, and a single thread must not trigger the warning.
+    """
+
+    @staticmethod
+    def _threaded(work, n_threads: int) -> str:
+        p = Profiler()
+        p.reset(enabled=True)
+
+        def worker():
+            with p.phase("stage1.window_total"):
+                work()
+
+        with p.phase("stage1.wall"):
+            threads = [threading.Thread(target=worker) for _ in range(n_threads)]
+            for t in threads:
+                t.start()
+            for t in threads:
+                t.join()
+        p.stop()
+        return p.report()
+
+    @needs_thread_cpu
+    def test_sleeping_costs_wall_time_but_not_cpu_time(self):
+        p = Profiler()
+        p.reset(enabled=True)
+        with p.phase("stage1.window_total"):
+            time.sleep(0.05)
+        p.stop()
+
+        row = next(
+            ln
+            for ln in p.report().splitlines()
+            if ln.strip().startswith("window_total")
+        )
+        wall_s, cpu_s = row.split()[1], row.split()[2]
+        assert float(wall_s) >= 0.04
+        assert float(cpu_s) < 0.02
+
+    @needs_thread_cpu
+    def test_blocked_threads_are_not_reported_as_parallelism(self):
+        """Four threads that only sleep have achieved nothing, however much
+        thread-time they accumulate."""
+        report = self._threaded(lambda: time.sleep(0.1), n_threads=4)
+
+        assert _stat(report, "parallelism") < 0.5
+        assert _stat(report, "thread stall") > 90.0
+
+    @needs_thread_cpu
+    def test_a_single_busy_thread_reads_as_fully_occupied(self):
+        """The converse, and independent of how many cores are available: one
+        thread doing real work must not be reported as stalled."""
+        report = self._threaded(lambda: _burn_cpu(0.1), n_threads=1)
+
+        assert _stat(report, "parallelism") > 0.8
+        assert _stat(report, "thread stall") < 20.0
+
+    @needs_thread_cpu
+    def test_poor_parallelism_is_called_out_when_threads_were_requested(self):
+        p = Profiler()
+        p.reset(enabled=True)
+        p.note("threads", 7)
+        with p.phase("stage1.wall"):
+            with p.phase("stage1.window_total"):
+                time.sleep(0.05)
+        p.stop()
+
+        assert "not paying for themselves" in p.report()
+
+    @needs_thread_cpu
+    def test_no_warning_when_a_single_thread_was_requested(self):
+        p = Profiler()
+        p.reset(enabled=True)
+        p.note("threads", 1)
+        with p.phase("stage1.wall"):
+            with p.phase("stage1.window_total"):
+                time.sleep(0.05)
+        p.stop()
+
+        assert "not paying for themselves" not in p.report()
+
+
 class TestProfileCLI(TestRunthrough):
     def setUp(self):
         super().setUp()
@@ -177,6 +286,10 @@ class TestProfileCLI(TestRunthrough):
         # Context that makes the timings interpretable
         self.assertIn("windows", result.output)
         self.assertIn("bands", result.output)
+        if _THREAD_CPU is not None:
+            self.assertIn("cpu", result.output)
+            self.assertIn("Stage 1 parallelism", result.output)
+            self.assertIn("Stage 1 thread stall", result.output)
 
     def test_without_flag_no_report_and_profiler_disabled(self):
         result = self._invoke()
