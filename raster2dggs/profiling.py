@@ -15,12 +15,9 @@ Usage:
 Disabled (the default), ``phase()`` returns a shared no-op context manager, so
 the cost on the normal path is one attribute check.
 
-Each phase records elapsed wall time *and* the CPU time of the thread that ran
-it. Both are needed: a thread blocked on the GDAL read lock or waiting for the
-GIL keeps accumulating wall time, so summed worker wall time approaches the
-thread count whenever threads are contending -- which is exactly when
-parallelism is absent. CPU time excludes blocked time, so it is the figure that
-can tell work apart from waiting.
+Each phase records elapsed wall time and the CPU time of the thread that ran
+it. The gap between the two is time that thread spent blocked -- on the GDAL
+read lock, or waiting for the GIL.
 """
 
 from __future__ import annotations
@@ -34,9 +31,8 @@ from contextlib import contextmanager, nullcontext
 # nothing, so there is no per-use state to race on.
 _NULL_CONTEXT = nullcontext()
 
-# Per-thread CPU time. Documented as available on Linux and Windows, so treat
-# it as optional: without it the report simply omits the CPU column and the
-# figures derived from it.
+# Per-thread CPU time, available on Linux and Windows. Where it is absent the
+# report omits the CPU column and the two figures derived from it.
 try:
     time.thread_time()
 except (AttributeError, OSError):  # pragma: no cover - platform dependent
@@ -75,10 +71,9 @@ class Profiler:
     the ``report()`` snapshot are taken under a lock, which is what keeps the
     accumulator correct on free-threaded builds where the GIL does not.
 
-    Summed phase wall time exceeds the elapsed wall clock when worker threads
-    overlap -- but also when they merely block, so ``report()`` derives its
-    parallelism figure from CPU time and reports the gap between the two as
-    stall.
+    Summed phase wall time can exceed the elapsed wall clock, since worker
+    threads accumulate it both in parallel and while blocked. ``report()``
+    derives parallelism from CPU time and reports the wall/CPU gap as stall.
     """
 
     def __init__(self) -> None:
@@ -237,13 +232,11 @@ class Profiler:
     def _thread_lines(
         totals: dict[str, float], cpu: dict[str, float], context: dict[str, object]
     ) -> list[str]:
-        """Report what Stage 1's worker threads actually achieved.
+        """Summarise what Stage 1's worker threads achieved.
 
-        Parallelism is CPU seconds per second of elapsed Stage 1 time. It must
-        not be derived from summed worker *wall* time: a thread blocked on the
-        GDAL read lock or waiting for the GIL keeps accumulating wall time, so
-        that ratio tends towards the thread count precisely when the threads are
-        achieving nothing.
+        Parallelism is worker CPU seconds per second of elapsed Stage 1 time:
+        how many cores' worth of work the pool sustained. Stall is the share of
+        worker thread-time spent blocked rather than computing.
         """
         stage1_wall = totals.get("stage1.wall")
         worker_wall = totals.get("stage1.window_total")
