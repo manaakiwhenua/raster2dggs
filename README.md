@@ -750,10 +750,9 @@ standard deviation so that a few percent can be distinguished from noise. Save
 and compare runs with `--benchmark-autosave` and `--benchmark-compare`; fail on
 a regression with `--benchmark-compare-fail=median:10%`.
 
-For whole-run phase attribution rather than per-function timing, use
-[`--profile`](#profiling-a-run----profile), or `python bench/run_baseline.py` to
-regenerate the committed `bench/BASELINE.md` across a fixed matrix of
-configurations. See [`bench/README.md`](bench/README.md).
+A benchmark times one function on synthetic input, so it cannot say which phase
+dominates a real run. For that, use [`--profile`](#profiling-a-run----profile)
+on the raster and flags you care about. See [`bench/README.md`](bench/README.md).
 
 #### Generating synthetic sample rasters
 

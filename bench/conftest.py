@@ -2,8 +2,8 @@
 Shared fixtures for the pytest-benchmark suite.
 
 Inputs are synthetic and in-memory so that a benchmark measures the pipeline
-phase it names, not GDAL read throughput or filesystem state. Whole-run
-timings, including IO, are the job of ``run_baseline.py`` instead.
+phase it names, not GDAL read throughput or filesystem state. Whole-run timings,
+including IO, come from running the CLI with ``--profile`` instead.
 """
 
 from __future__ import annotations

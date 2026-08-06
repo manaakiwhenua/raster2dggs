@@ -1,9 +1,5 @@
 # Benchmarks
 
-Two tools, answering two different questions.
-
-## `pytest bench/` — component benchmarks with statistics
-
 [pytest-benchmark](https://pytest-benchmark.readthedocs.io/) times individual
 pipeline functions over many rounds and reports min, median, mean and standard
 deviation, so a change of a few percent can be told apart from noise. Use it to
@@ -48,21 +44,14 @@ to be tolerable.
 Useful flags: `--benchmark-columns=min,median,stddev,rounds` to trim the table,
 `-k` to select a group, `--benchmark-histogram` to write SVG plots.
 
-## `python run_baseline.py` — whole-run phase attribution
+## What this does not cover
 
-pytest-benchmark cannot usefully repeat a 25-second CLI invocation, and a
-component benchmark cannot tell you which phase dominates a real run. That is
-what `--profile` is for. `run_baseline.py` invokes the CLI with `--profile`
-across a fixed matrix of DGGS, sampling strategies and rasters, and writes the
-reports to `BASELINE.md`.
+A benchmark here times one function on synthetic input. It cannot tell you
+which phase dominates a real run, because it has no GDAL read, no thread pool
+and no Parquet write. For that, run the CLI itself with `--profile`, which
+reports a phase breakdown plus the window count, band count, source tiling and
+achieved Stage 1 concurrency for whatever raster and flags you actually used.
 
-```bash
-python bench/run_baseline.py            # regenerate BASELINE.md
-python bench/run_baseline.py --quick    # skip the slow full-raster cases
-```
-
-`BASELINE.md` is committed, so `git diff` after a change shows the delta
-without anyone having to remember the old numbers. It is a single run per case
-with no variance measure, so read it for order-of-magnitude changes and phase
-attribution; use `pytest bench/` when the question is whether a small
-difference is real.
+The two are complementary: `--profile` says where the time goes on one run of
+real data, `pytest bench/` says whether a change to a specific function was an
+improvement.
