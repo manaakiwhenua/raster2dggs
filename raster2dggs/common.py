@@ -885,6 +885,7 @@ def initial_index(
                         resolution=resolution,
                         parent_res=parent_res,
                         selected_labels=selected_labels,
+                        selected_indices=tuple(selected_indices),
                         nodata_policy=nodata_policy,
                         emit_nodata_value=emit_nodata_value,
                         write_result=_write_result,

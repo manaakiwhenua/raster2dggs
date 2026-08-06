@@ -15,6 +15,7 @@ common.py focused on orchestration.
 from __future__ import annotations
 
 import dataclasses
+import threading
 from collections.abc import Callable
 from typing import Any
 
@@ -89,6 +90,7 @@ class _SampleIndexer:
     resolution: int
     parent_res: int
     selected_labels: tuple
+    selected_indices: tuple
     nodata_policy: str
     emit_nodata_value: Any | None
     write_result: Callable
@@ -98,6 +100,7 @@ class _SampleIndexer:
     lanczos_lobes: int = dataclasses.field(default=3)
 
     def __post_init__(self):
+        self._read_lock = threading.Lock()
         lobe = self.lanczos_lobes
         self._lanczos_ns: int = 2 * lobe
         self._lanczos_offsets_int: np.ndarray = np.arange(
@@ -147,6 +150,15 @@ class _SampleIndexer:
         frac_rows = inv.d * cell_xs + inv.e * cell_ys + inv.f - 0.5
 
         return cells, frac_rows, frac_cols
+
+    def _read_window(self, window) -> np.ndarray:
+        """Read the selected bands of a window as a (bands, H, W) array.
+
+        Reads are serialised: ``src`` is one GDAL dataset shared by every worker
+        thread, and GDAL datasets are not safe for concurrent access.
+        """
+        with PROFILER.phase("stage1.read_block"), self._read_lock:
+            return self.src.read(indexes=list(self.selected_indices), window=window)
 
     def _expand_window(self, window, margin: int):
         """Expand window by margin pixels, clamped to raster bounds."""
@@ -218,8 +230,7 @@ class _SampleIndexer:
         local_rows = local_rows[in_win]
         local_cols = local_cols[in_win]
 
-        with PROFILER.phase("stage1.read_block"):
-            win_data = self.da.rio.isel_window(window).values  # (bands, H, W)
+        win_data = self._read_window(window)
         samples = win_data[:, local_rows, local_cols].T.astype(float)
         if self.nodata is not None and not _is_nan(self.nodata):
             samples[samples == self.nodata] = np.nan
@@ -274,8 +285,7 @@ class _SampleIndexer:
         # available, even when the floor pixel is in the adjacent window
         # (cells with frac ∈ [nn−0.5, nn) have floor = nn−1).
         exp = self._expand_window(window, margin=1)
-        with PROFILER.phase("stage1.read_block"):
-            win_data = self.da.rio.isel_window(exp).values  # (bands, H, W)
+        win_data = self._read_window(exp)
         exp_h, exp_w = win_data.shape[1], win_data.shape[2]
 
         r0_raw = floor_rows - exp.row_off
@@ -397,8 +407,7 @@ class _SampleIndexer:
         dc = frac_cols - floor_cols
 
         exp = self._expand_window(window, margin=2)
-        with PROFILER.phase("stage1.read_block"):
-            win_data = self.da.rio.isel_window(exp).values  # (bands, H, W)
+        win_data = self._read_window(exp)
         exp_h, exp_w = win_data.shape[1], win_data.shape[2]
         n = len(cells)
         bands = win_data.shape[0]
@@ -488,8 +497,7 @@ class _SampleIndexer:
         offsets_float = self._lanczos_offsets_float
 
         exp = self._expand_window(window, margin=lobe)
-        with PROFILER.phase("stage1.read_block"):
-            win_data = self.da.rio.isel_window(exp).values  # (bands, H, W)
+        win_data = self._read_window(exp)
         exp_h, exp_w = win_data.shape[1], win_data.shape[2]
         n = len(cells)
         bands = win_data.shape[0]
