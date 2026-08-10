@@ -54,8 +54,11 @@ _PHASE_ORDER: tuple[tuple[str, int], ...] = (
     ("stage1.dggs_index", 2),
     ("stage1.cells_in_bbox", 2),
     ("stage1.cells_to_lonlat", 2),
+    ("stage1.cells_to_pixel", 2),
+    ("stage1.kernel", 2),
     ("stage1.cell_polygons", 2),
     ("stage1.exactextract", 2),
+    ("stage1.parent_cells", 2),
     ("stage1.arrow_build", 2),
     ("stage1.parquet_write", 2),
     ("stage2.total", 0),
@@ -137,11 +140,41 @@ class Profiler:
             self._context[key] = value
 
     def add(self, key: str, amount: int) -> None:
-        """Accumulate a running total across windows and threads."""
+        """Accumulate a running total across windows and workers."""
         if not self.enabled:
             return
         with self._lock:
             self._counters[key] = self._counters.get(key, 0) + amount
+
+    def snapshot(self) -> dict:
+        """Return the accumulated measurements as plain picklable dicts.
+
+        Stage 1's workers are separate processes, each with its own copy of this
+        module, so a worker's measurements have to travel back to the parent to
+        appear in the report. Totals only ever grow within a process, so one
+        snapshot taken at any point is that worker's running total.
+        """
+        with self._lock:
+            return {
+                "totals": dict(self._totals),
+                "cpu": dict(self._cpu),
+                "counts": dict(self._counts),
+                "counters": dict(self._counters),
+            }
+
+    def merge(self, snapshot: dict) -> None:
+        """Add another accumulator's snapshot into this one."""
+        if not self.enabled or not snapshot:
+            return
+        with self._lock:
+            for name, value in snapshot.get("totals", {}).items():
+                self._totals[name] += value
+            for name, value in snapshot.get("cpu", {}).items():
+                self._cpu[name] += value
+            for name, value in snapshot.get("counts", {}).items():
+                self._counts[name] += value
+            for key, value in snapshot.get("counters", {}).items():
+                self._counters[key] = self._counters.get(key, 0) + value
 
     def report(self) -> str:
         """Render the collected measurements as a plain-text table."""
@@ -224,19 +257,19 @@ class Profiler:
             pad = 10 if _THREAD_CPU else 0
             lines.append(f"  {'wall clock':<28}{wall:>10.3f}{'':>{pad}}{'  100.0%':>9}")
 
-        lines.extend(self._thread_lines(totals, cpu, context))
+        lines.extend(self._worker_lines(totals, cpu, context))
         lines.append("")
         return "\n".join(lines)
 
     @staticmethod
-    def _thread_lines(
+    def _worker_lines(
         totals: dict[str, float], cpu: dict[str, float], context: dict[str, object]
     ) -> list[str]:
-        """Summarise what Stage 1's worker threads achieved.
+        """Summarise what Stage 1's workers achieved.
 
         Parallelism is worker CPU seconds per second of elapsed Stage 1 time:
         how many cores' worth of work the pool sustained. Stall is the share of
-        worker thread-time spent blocked rather than computing.
+        worker time spent blocked rather than computing.
         """
         stage1_wall = totals.get("stage1.wall")
         worker_wall = totals.get("stage1.window_total")
@@ -246,7 +279,7 @@ class Profiler:
         lines = []
         if not _THREAD_CPU:  # pragma: no cover - platform dependent
             lines.append(
-                f"  Stage 1 worker thread-time: {worker_wall:.3f}s in "
+                f"  Stage 1 worker time: {worker_wall:.3f}s in "
                 f"{stage1_wall:.3f}s wall (includes time blocked, so it is not "
                 f"a parallelism figure)"
             )
@@ -260,14 +293,14 @@ class Profiler:
         )
         if worker_wall > 0:
             lines.append(
-                f"  Stage 1 thread stall: {100 * stalled / worker_wall:.1f}% "
-                f"({stalled:.3f}s of {worker_wall:.3f}s thread-time blocked)"
+                f"  Stage 1 worker stall: {100 * stalled / worker_wall:.1f}% "
+                f"({stalled:.3f}s of {worker_wall:.3f}s worker time blocked)"
             )
-        threads = context.get("threads")
-        if isinstance(threads, int) and threads > 1 and worker_cpu / stage1_wall < 1.5:
+        workers = context.get("processes")
+        if isinstance(workers, int) and workers > 1 and worker_cpu / stage1_wall < 1.5:
             lines.append(
-                f"  ^ {threads} threads are not paying for themselves here; "
-                f"compare against --threads 1"
+                f"  ^ {workers} workers are not paying for themselves here; "
+                f"compare against --processes 1"
             )
         return lines
 

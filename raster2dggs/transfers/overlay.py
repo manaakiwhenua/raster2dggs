@@ -144,6 +144,13 @@ class _OverlayIndexer:
     min_valid_coverage: float = 0.0
     decimals: int | None = None
     hist_spec: HistogramSpec | None = None
+    # Paths to temp rasters built elsewhere. Supplying them makes this context
+    # attach to existing files rather than build its own, which is how worker
+    # processes avoid each rebuilding a raster-sized weights or mask file. Files
+    # arriving this way belong to whoever created them and are not cleaned up
+    # here.
+    shared_weights_path: str | None = None
+    shared_coverage_mask_path: str | None = None
 
     def __post_init__(self):
         # mass_preserve (sum) must not filter by coverage — partial sums are correct
@@ -159,6 +166,8 @@ class _OverlayIndexer:
             )
 
         self._geodesic_weights_path = None
+        # Temp files created by this instance, and therefore deleted by it.
+        self._own_temp_paths: list[str] = []
         with rio.open(self.raster_input, sharing=False) as src:
             self._src_crs = src.crs
             self._src_transform = src.transform
@@ -179,45 +188,53 @@ class _OverlayIndexer:
                 # or as the per-pixel area weight for --hist-weight area.
                 # For geographic CRS: geodesic area varies by row (latitude); use pyproj.
                 # For projected CRS (wsum only): pixel area is constant from the transform.
-                T = src.transform
-                if src.crs.is_geographic:
-                    geod = pyproj.CRS(src.crs.to_wkt()).get_geod()
-                    areas = np.empty((src.height, src.width), dtype=np.float64)
-                    lon_left, lon_right = T.c, T.c + T.a
-                    for r in range(src.height):
-                        lat_top = T.f + r * T.e
-                        lat_bot = T.f + (r + 1) * T.e
-                        area, _ = geod.polygon_area_perimeter(
-                            [lon_left, lon_right, lon_right, lon_left],
-                            [lat_top, lat_top, lat_bot, lat_bot],
-                        )
-                        areas[r, :] = abs(area)
+                if self.shared_weights_path is not None:
+                    self._geodesic_weights_path = self.shared_weights_path
                 else:
-                    areas = np.full(
-                        (src.height, src.width),
-                        abs(T.a * T.e),
-                        dtype=np.float64,
+                    T = src.transform
+                    if src.crs.is_geographic:
+                        geod = pyproj.CRS(src.crs.to_wkt()).get_geod()
+                        areas = np.empty((src.height, src.width), dtype=np.float64)
+                        lon_left, lon_right = T.c, T.c + T.a
+                        for r in range(src.height):
+                            lat_top = T.f + r * T.e
+                            lat_bot = T.f + (r + 1) * T.e
+                            area, _ = geod.polygon_area_perimeter(
+                                [lon_left, lon_right, lon_right, lon_left],
+                                [lat_top, lat_top, lat_bot, lat_bot],
+                            )
+                            areas[r, :] = abs(area)
+                    else:
+                        areas = np.full(
+                            (src.height, src.width),
+                            abs(T.a * T.e),
+                            dtype=np.float64,
+                        )
+                    wgt_profile = {
+                        "driver": "GTiff",
+                        "height": src.height,
+                        "width": src.width,
+                        "count": 1,
+                        "dtype": "float64",
+                        "crs": src.crs,
+                        "transform": src.transform,
+                        "nodata": None,
+                    }
+                    with tempfile.NamedTemporaryFile(
+                        suffix=".tif", delete=False
+                    ) as tmp:
+                        self._geodesic_weights_path = tmp.name
+                    self._own_temp_paths.append(self._geodesic_weights_path)
+                    with rio.open(
+                        self._geodesic_weights_path, "w", **wgt_profile
+                    ) as dst:
+                        dst.write(areas[np.newaxis])
+                    LOGGER.debug(
+                        "Pixel area weights computed for %s (%.0f–%.0f units²/pixel)",
+                        src.crs.to_string(),
+                        areas.min(),
+                        areas.max(),
                     )
-                wgt_profile = {
-                    "driver": "GTiff",
-                    "height": src.height,
-                    "width": src.width,
-                    "count": 1,
-                    "dtype": "float64",
-                    "crs": src.crs,
-                    "transform": src.transform,
-                    "nodata": None,
-                }
-                with tempfile.NamedTemporaryFile(suffix=".tif", delete=False) as tmp:
-                    self._geodesic_weights_path = tmp.name
-                with rio.open(self._geodesic_weights_path, "w", **wgt_profile) as dst:
-                    dst.write(areas[np.newaxis])
-                LOGGER.debug(
-                    "Pixel area weights computed for %s (%.0f–%.0f units²/pixel)",
-                    src.crs.to_string(),
-                    areas.min(),
-                    areas.max(),
-                )
 
             if self._apply_coverage_threshold or self.op == const.Op.FRAC:
                 # Densified boundary polygon of the raster footprint in WGS84.
@@ -261,16 +278,24 @@ class _OverlayIndexer:
                 # The mask has no nodata value so 0.0 values are treated as real data.
                 # A real file (not /vsimem/) avoids spurious GDAL "ERROR 4: No such file
                 # or directory" messages from PAM auxiliary-file lookups on vsimem paths.
-                data = src.read(masked=True)
-                mask_profile = src.profile.copy()
-                mask_profile.update(dtype="float32", nodata=None)
-                with tempfile.NamedTemporaryFile(suffix=".tif", delete=False) as tmp:
-                    self._coverage_mask_path = tmp.name
-                # data.mask is scalar False when the source has no nodata value;
-                # broadcast to full (bands, height, width) shape before writing.
-                validity = (~np.broadcast_to(data.mask, data.shape)).astype(np.float32)
-                with rio.open(self._coverage_mask_path, "w", **mask_profile) as dst:
-                    dst.write(validity)
+                if self.shared_coverage_mask_path is not None:
+                    self._coverage_mask_path = self.shared_coverage_mask_path
+                else:
+                    data = src.read(masked=True)
+                    mask_profile = src.profile.copy()
+                    mask_profile.update(dtype="float32", nodata=None)
+                    with tempfile.NamedTemporaryFile(
+                        suffix=".tif", delete=False
+                    ) as tmp:
+                        self._coverage_mask_path = tmp.name
+                    self._own_temp_paths.append(self._coverage_mask_path)
+                    # data.mask is scalar False when the source has no nodata value;
+                    # broadcast to full (bands, height, width) shape before writing.
+                    validity = (~np.broadcast_to(data.mask, data.shape)).astype(
+                        np.float32
+                    )
+                    with rio.open(self._coverage_mask_path, "w", **mask_profile) as dst:
+                        dst.write(validity)
             else:
                 self._raster_footprint_wgs84 = None
                 self._coverage_mask_path = None
@@ -307,16 +332,32 @@ class _OverlayIndexer:
                 )
             }
 
+    def shared_temp_paths(self) -> dict:
+        """The temp rasters this context built, as constructor keywords.
+
+        Passing these to another context makes it reuse the files instead of
+        rebuilding them, which for a raster-sized weights or mask file is the
+        difference between building it once and once per worker.
+        """
+        return {
+            "shared_weights_path": self._geodesic_weights_path,
+            "shared_coverage_mask_path": self._coverage_mask_path,
+        }
+
     def _cleanup_temp_files(self):
+        # Only files this instance created: a context that attached to paths
+        # built elsewhere must leave them alone, or the first such context to be
+        # collected deletes rasters the others are still reading.
         for path_attr in ("_coverage_mask_path", "_geodesic_weights_path"):
             path = getattr(self, path_attr, None)
             if path is not None:
-                try:
-                    os.unlink(path)
-                except OSError:
-                    pass  # already deleted or interpreter shutting down — nothing to do
-                finally:
-                    setattr(self, path_attr, None)
+                if path in getattr(self, "_own_temp_paths", []):
+                    try:
+                        os.unlink(path)
+                    except OSError:
+                        pass  # already gone, or interpreter shutting down
+                    self._own_temp_paths.remove(path)
+                setattr(self, path_attr, None)
 
     def close(self):
         self._cleanup_temp_files()
@@ -625,9 +666,10 @@ class _OverlayIndexer:
         partition_col = self.indexer.partition_col(self.parent_res)
         result_cells = result_df["_cell_id"].tolist()
         result_df[index_col] = result_cells
-        result_df[partition_col] = list(
-            self.indexer.single_parent_cells(result_cells, self.parent_res)
-        )
+        with PROFILER.phase("stage1.parent_cells"):
+            result_df[partition_col] = list(
+                self.indexer.single_parent_cells(result_cells, self.parent_res)
+            )
         result_df = result_df.drop(columns=["_cell_id"])
 
         if is_frac:

@@ -88,6 +88,11 @@ class TestAllDGGS:
                 str(TEST_OUTPUT_PATH),
                 "-r",
                 str(res),
+                # Inline: the test raster is a few windows, so starting a worker
+                # pool would cost more than the indexing, once per parametrised
+                # case.
+                "--processes",
+                "1",
             ]
             if geo:
                 args += ["-g", geo]
