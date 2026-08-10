@@ -32,6 +32,7 @@ Contributions (particularly for additional DGGSs), suggestions, bug reports and 
   - [Overlay (area-based)](#overlay-area-based---overlay)
   - [Numeric (binned) histograms](#numeric-binned-histograms---hist-bins---hist-width)
   - [Windowed resampling](#windowed-resampling---sample)
+- [Parallelism](#parallelism---processes)
 - [Profiling a run](#profiling-a-run----profile)
 - [Visualising output](#visualising-output)
   - [DuckDB](#duckdb)
@@ -147,10 +148,13 @@ Options:
                                   'gzip', 'brotli', 'lz4', 'zstd', etc. Use
                                   'none' for no compression.  [default:
                                   snappy]
-  -t, --threads INTEGER           Number of threads to use when running in
-                                  parallel. The default is determined
+  -p, -t, --processes, --threads INTEGER
+                                  Number of worker processes to use for
+                                  indexing. The default is determined
                                   dynamically as the total number of available
-                                  cores, minus one.
+                                  cores, minus one. 1 runs inline, without a
+                                  worker pool. --threads is accepted as a
+                                  deprecated alias.  [default: 7]
   --point OUTPUT                  [Mutually exclusive with --overlay and
                                   --sample] Assign each pixel to the DGGS
                                   cell containing its centre (default).
@@ -450,6 +454,16 @@ raster2dggs h3 landcover.tif output/ -r 9 --sample -d 0
 
 `--agg` is ignored for `--sample`. Supports `--compact`.
 
+## Parallelism — `--processes`
+
+Each raster window is indexed in a separate worker process, `cpu_count - 1` of them by default:
+
+```bash
+raster2dggs h3 input.tif output/ -r 11 --processes 4
+```
+
+Memory scales with the worker count (each opens its own copy of the raster), so **lower `--processes` if a run is memory-constrained**. `--processes 1` runs inline without a pool, which is faster for a raster of only a few windows and is the mode to use when debugging. `-t`/`--threads` is accepted as a deprecated alias.
+
 ## Profiling a run — `--profile`
 
 `--profile` prints a phase-by-phase timing breakdown to stderr when the run finishes, for any DGGS and any sampling strategy:
@@ -460,44 +474,43 @@ raster2dggs h3 input.tif output/ -r 11 --point value --profile
 
 ```
 Profile
-  bands: 3
+  bands: 1
   block_shape: 256x256
   internally_tiled: True
-  raster_size: 253x296
-  threads: 7
-  windows: 2
-
-  pixels_read: 74,888
-  rows_indexed: 74,888
-  valid pixels: 100.0% of those read
+  processes: 7
+  raster_size: 4977x9661
+  windows: 760
+  pixels_read: 49,806,197
+  rows_indexed: 9,107,964
+  valid pixels: 18.3% of those read
 
   phase                          seconds       cpu   % wall    calls     ms/call
   ------------------------------------------------------------------------------
-  stage1.wall                      0.204     0.002    60.7%        1     203.643
-    window_total                   0.268     0.197    79.8%        2     133.845
-      read_block                   0.013     0.003     3.9%        2       6.525
-      reshape                      0.016     0.001     4.8%        2       8.000
-      reproject                    0.086     0.057    25.5%        2      42.818
-      build_frame                  0.001     0.001     0.2%        2       0.366
-      dggs_index                   0.122     0.121    36.3%        2      60.790
-      arrow_build                  0.003     0.002     1.0%        2       1.739
-      parquet_write                0.022     0.006     6.6%        2      11.077
-  stage2.total                     0.028     0.005     8.5%        1      28.475
+  stage1.wall                     10.658     0.010    80.1%        1   10658.463
+    window_total                  54.777    35.505   411.9%      760      72.075
+      (not broken down)            3.522     2.681    26.5%        -           -
+      read_block                   4.303     1.588    32.4%      760       5.662
+      reshape                      0.396     0.323     3.0%      760       0.521
+      reproject                    3.823     2.665    28.7%      760       5.030
+      build_frame                  0.317     0.243     2.4%      760       0.418
+      dggs_index                  35.650    26.444   268.0%      760      46.908
+      arrow_build                  3.132     0.449    23.5%      760       4.121
+      parquet_write                3.634     1.112    27.3%      227      16.009
+  stage2.total                     2.447     0.009    18.4%        1    2447.129
   ------------------------------------------------------------------------------
-  wall clock                       0.335             100.0%
-  Stage 1 parallelism: 0.97x (0.197s worker CPU in 0.204s wall)
-  Stage 1 thread stall: 26.5% (0.071s of 0.268s thread-time blocked)
-  ^ 7 threads are not paying for themselves here; compare against --threads 1
+  wall clock                      13.300             100.0%
+  Stage 1 parallelism: 3.33x (35.505s worker CPU in 10.658s wall)
+  Stage 1 worker stall: 35.2% (19.272s of 54.777s worker time blocked)
 ```
 
 Reading it:
 
 - **Indentation is nesting, not addition.** `read_block`, `dggs_index` and friends are measured *inside* `window_total`, which is itself measured inside `stage1.wall` — so those rows are a decomposition of their parent, not terms to be summed. Percentages are all of total wall clock.
-- **`seconds` is elapsed time; `cpu` is time actually spent computing.** Both are summed across whichever threads ran the phase. A phase where `cpu` is far below `seconds` was mostly *waiting* — for the GDAL read lock, or for the GIL. The two dispatcher rows are the exception: `stage1.wall` and `stage2.total` are measured in the main thread while the work happens in others, so their own `cpu` is near zero by construction.
-- **`Stage 1 parallelism`** is worker CPU per second of Stage 1 wall clock, i.e. how many cores' worth of work the thread pool actually achieved. It is deliberately *not* derived from summed worker elapsed time, because a blocked thread accumulates elapsed time just as a busy one does — that ratio rises towards the thread count exactly when the threads are achieving nothing. `Stage 1 thread stall` is the share of worker thread-time spent blocked rather than computing.
-- **Threading does not always pay.** If parallelism is well below 1.5x, the report says so. On paths that are GIL-bound (`--point`, whose DGGS indexing is a Python loop) or serialised behind the GDAL read lock, `--threads 1` can genuinely be *faster* than the default — worth measuring both ways on your own data rather than assuming more threads help.
+- **`seconds` is elapsed time; `cpu` is time actually spent computing.** Both are summed across every worker that ran the phase, so with `--processes 7` they can exceed the wall clock several times over. A phase where `cpu` is far below `seconds` was mostly *waiting* — on IO, or on a lock. The two dispatcher rows are the exception: `stage1.wall` and `stage2.total` are measured in the parent while the work happens elsewhere, so their own `cpu` is near zero by construction.
+- **`Stage 1 parallelism`** is worker CPU per second of Stage 1 wall clock, i.e. how many cores' worth of work the pool actually achieved. It is deliberately *not* derived from summed worker elapsed time, because a blocked worker accumulates elapsed time just as a busy one does — that ratio rises towards the worker count exactly when the workers are achieving nothing. `Stage 1 worker stall` is the share of worker time spent blocked rather than computing.
+- **More workers do not always pay.** If parallelism is well below 1.5x, the report says so. Starting a worker pool costs about a second, so on a raster of only a few windows `--processes 1` is genuinely faster — worth measuring both ways on your own data.
 - **`ms/call` with `windows`** is what makes an unexpectedly slow run legible. A large window count with a small per-window cost points at the *input's* block layout rather than at the indexing work — check `block_shape` (a block height of 1 means the GeoTIFF is strip-encoded, giving one window per raster row) and see the [overlay performance note](#performance-note) for how to re-tile.
-- Profiling is off by default and the instrumentation is a single branch when disabled, so there is no reason to avoid it in normal use. The `cpu` column needs a per-thread CPU clock (Linux, Windows); where the platform has none, it and the two figures derived from it are omitted.
+- Profiling is off by default and the instrumentation is a single branch when disabled, so there is no reason to avoid it in normal use. Worker processes send their measurements back to be summed into the report. The `cpu` column needs a per-thread CPU clock (Linux, Windows); where the platform has none, it and the two figures derived from it are omitted.
 
 ## Visualising output
 

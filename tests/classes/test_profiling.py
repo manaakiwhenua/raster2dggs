@@ -164,16 +164,16 @@ class TestProfilerUnit:
 
 
 class TestParallelismIsCPUBased:
-    """The parallelism figure must measure work, not elapsed time in a thread.
+    """The parallelism figure must measure work, not elapsed time in a worker.
 
-    Deriving it from summed worker *wall* time makes it tend towards the thread
-    count whenever threads block, so it reads ~7x on runs that are slower than
-    --threads 1.
+    Deriving it from summed worker *wall* time makes it tend towards the worker
+    count whenever workers block, so it reads ~7x on runs that are slower than
+    --processes 1.
 
-    test_blocked_threads_are_not_reported_as_parallelism is the one that catches
+    test_blocked_workers_are_not_reported_as_parallelism is the one that catches
     that directly: substituting worker wall time back into the formula fails it
     and nothing else. The rest guard the opposite error -- real work must not be
-    reported as stalled, and a single thread must not trigger the warning.
+    reported as stalled, and a single worker must not trigger the warning.
     """
 
     @staticmethod
@@ -212,28 +212,28 @@ class TestParallelismIsCPUBased:
         assert float(cpu_s) < 0.02
 
     @needs_thread_cpu
-    def test_blocked_threads_are_not_reported_as_parallelism(self):
-        """Four threads that only sleep have achieved nothing, however much
-        thread-time they accumulate."""
+    def test_blocked_workers_are_not_reported_as_parallelism(self):
+        """Four workers that only sleep have achieved nothing, however much
+        wall time they accumulate."""
         report = self._threaded(lambda: time.sleep(0.1), n_threads=4)
 
         assert _stat(report, "parallelism") < 0.5
-        assert _stat(report, "thread stall") > 90.0
+        assert _stat(report, "worker stall") > 90.0
 
     @needs_thread_cpu
-    def test_a_single_busy_thread_reads_as_fully_occupied(self):
+    def test_a_single_busy_worker_reads_as_fully_occupied(self):
         """The converse, and independent of how many cores are available: one
-        thread doing real work must not be reported as stalled."""
+        worker doing real work must not be reported as stalled."""
         report = self._threaded(lambda: _burn_cpu(0.1), n_threads=1)
 
         assert _stat(report, "parallelism") > 0.8
-        assert _stat(report, "thread stall") < 20.0
+        assert _stat(report, "worker stall") < 20.0
 
     @needs_thread_cpu
-    def test_poor_parallelism_is_called_out_when_threads_were_requested(self):
+    def test_poor_parallelism_is_called_out_when_workers_were_requested(self):
         p = Profiler()
         p.reset(enabled=True)
-        p.note("threads", 7)
+        p.note("processes", 7)
         with p.phase("stage1.wall"):
             with p.phase("stage1.window_total"):
                 time.sleep(0.05)
@@ -242,10 +242,10 @@ class TestParallelismIsCPUBased:
         assert "not paying for themselves" in p.report()
 
     @needs_thread_cpu
-    def test_no_warning_when_a_single_thread_was_requested(self):
+    def test_no_warning_when_a_single_worker_was_requested(self):
         p = Profiler()
         p.reset(enabled=True)
-        p.note("threads", 1)
+        p.note("processes", 1)
         with p.phase("stage1.wall"):
             with p.phase("stage1.window_total"):
                 time.sleep(0.05)
@@ -289,7 +289,7 @@ class TestProfileCLI(TestRunthrough):
         if _THREAD_CPU is not None:
             self.assertIn("cpu", result.output)
             self.assertIn("Stage 1 parallelism", result.output)
-            self.assertIn("Stage 1 thread stall", result.output)
+            self.assertIn("Stage 1 worker stall", result.output)
 
     def test_without_flag_no_report_and_profiler_disabled(self):
         result = self._invoke()

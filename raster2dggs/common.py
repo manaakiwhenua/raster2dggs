@@ -1,12 +1,16 @@
+import atexit
+import dataclasses
 import errno
 import gc
 import json
 import logging
+import multiprocessing
 import os
 import shutil
+import sys
 import tempfile
 from collections.abc import Callable, Sequence
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ProcessPoolExecutor
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
@@ -24,7 +28,6 @@ import pyproj
 import rasterio as rio
 import rioxarray
 import shapely
-import xarray as xr
 from rasterio.warp import transform_bounds
 from tqdm import tqdm
 from tqdm.dask import TqdmCallback
@@ -290,7 +293,7 @@ def validate_config(
 
 def assemble_kwargs(
     compression: str,
-    threads: int,
+    processes: int,
     aggfuncs: list[tuple[str, str | Callable]],
     decimals: int,
     overwrite: bool,
@@ -308,7 +311,7 @@ def assemble_kwargs(
 ) -> dict:
     return {
         "compression": compression,
-        "threads": threads,
+        "processes": processes,
         "aggfuncs": aggfuncs,
         "decimals": decimals,
         "overwrite": overwrite,
@@ -702,6 +705,199 @@ def address_boundary_issues(
     return output
 
 
+# Stage 1 runs each window in a worker process. Everything below exists to make
+# that possible: a worker receives configuration, not objects, and looks its
+# callables up by name.
+
+# "fork" is unsafe here -- this process has already imported GDAL, PROJ and BLAS,
+# and forking a process holding their locks can deadlock the child. Pinned rather
+# than left to the platform default, which differs between Python versions.
+_START_METHOD = "spawn" if sys.platform == "win32" else "forkserver"
+
+# Floor for the per-worker GDAL block cache. GDAL's own default is a percentage
+# of total RAM, applied per process, so N workers would each claim a full share.
+_MIN_GDAL_CACHE_MB = 64
+
+
+def _gdal_cache_budget_mb() -> int:
+    """Total block cache to share between workers: GDAL's own default for one
+    process, which is a percentage of physical RAM."""
+    try:
+        from osgeo import gdal
+
+        return max(_MIN_GDAL_CACHE_MB, int(gdal.GetCacheMax() / (1024 * 1024)))
+    except Exception:  # pragma: no cover - GDAL always present in practice
+        return _MIN_GDAL_CACHE_MB
+
+
+# Per-process Stage 1 state, populated once per worker. Worker callables must be
+# importable by name, so they cannot close over this; a module global is the
+# hand-off between the initialiser and the per-window function.
+_WORKER: dict = {}
+
+
+@dataclasses.dataclass(frozen=True)
+class _ParquetWriter:
+    """Write one window's result into the Stage 1 store.
+
+    Stands in for a closure: a function defined inside ``initial_index`` has no
+    importable name, so it cannot be sent to a worker process.
+    """
+
+    tmpdir: str
+    partition_col: str
+    compression: str
+
+    def __call__(self, result, window) -> None:
+        if result is None or (hasattr(result, "num_rows") and result.num_rows == 0):
+            return
+        with PROFILER.phase("stage1.parquet_write"):
+            pq.write_to_dataset(
+                result,
+                root_path=self.tmpdir,
+                partition_cols=[self.partition_col],
+                basename_template=f"{window.col_off}.{window.row_off}." + "{i}.parquet",
+                use_threads=False,  # one window per worker already
+                # Overwrite files of the same name; ignore other existing files,
+                # which allows an append workflow.
+                existing_data_behavior="overwrite_or_ignore",
+                compression=self.compression,
+            )
+
+
+def _setup_stage1_worker(cfg: dict) -> None:
+    """Build this process's transfer context from picklable configuration.
+
+    Called once per worker, and directly in-process when running inline, so both
+    paths construct the context identically.
+    """
+    if cfg["gdal_cachemax_mb"]:
+        os.environ["GDAL_CACHEMAX"] = str(cfg["gdal_cachemax_mb"])
+
+    env = rio.Env()
+    env.__enter__()
+    src = rio.open(cfg["raster_input"], mode="r", sharing=False)
+    indexer = idxfactory.indexer_instance(cfg["dggs"])
+    write_result = _ParquetWriter(
+        tmpdir=cfg["tmpdir"],
+        partition_col=indexer.partition_col(cfg["parent_res"]),
+        compression=cfg["compression"],
+    )
+    shared = dict(
+        indexer=indexer,
+        resolution=cfg["resolution"],
+        parent_res=cfg["parent_res"],
+        selected_labels=cfg["selected_labels"],
+        selected_indices=cfg["selected_indices"],
+        nodata_policy=cfg["nodata_policy"],
+        emit_nodata_value=cfg["emit_nodata_value"],
+        write_result=write_result,
+    )
+
+    da = None
+    if cfg["transfer"] in const.OVERLAY_TRANSFER_KEYS:
+        ctx = _OverlayIndexer(
+            raster_input=cfg["raster_input"],
+            op=cfg["op"],
+            out=cfg["out"],
+            min_valid_coverage=cfg["min_valid_coverage"],
+            decimals=cfg["decimals"],
+            hist_spec=cfg["hist_spec"],
+            **cfg["overlay_shared_paths"],
+            **shared,
+        )
+        func = ctx.process_window
+        transformer = None
+    else:
+        da = rioxarray.open_rasterio(
+            src,
+            lock=dask.utils.SerializableLock(),
+            masked=False,
+            default_name=const.DEFAULT_NAME,
+        ).chunk(**{"y": "auto", "x": "auto"})
+        if "band" in da.dims and len(cfg["selected_indices"]) != src.count:
+            if "band" in da.coords:
+                da = da.sel(band=list(cfg["selected_indices"]))
+            else:
+                da = da.isel(band=[i - 1 for i in cfg["selected_indices"]])
+
+        if cfg["transfer"] == const.Transfer.SAMPLE:
+            transformer = pyproj.Transformer.from_crs(
+                "EPSG:4326", src.crs, always_xy=True
+            )
+            ctx = _SampleIndexer(
+                src=src,
+                da=da,
+                inverse_transformer=transformer,
+                nodata=src.nodata,
+                **shared,
+            )
+            func = {
+                const.Interp.BILINEAR: ctx.process_bilinear,
+                const.Interp.BICUBIC: ctx.process_bicubic,
+                const.Interp.LANCZOS: ctx.process_lanczos,
+            }.get(cfg["interp"], ctx.process_nn)
+        else:
+            transformer = pyproj.Transformer.from_crs(
+                src.crs, "EPSG:4326", always_xy=True
+            )
+            ctx = _AssignCentersIndexer(
+                da=da, nodata=src.nodata, transformer=transformer, **shared
+            )
+            func = ctx.process_window
+
+    _WORKER.update(env=env, src=src, da=da, transformer=transformer, ctx=ctx, func=func)
+
+
+def _init_stage1_worker(cfg: dict) -> None:
+    """``ProcessPoolExecutor`` initialiser: one call per worker process."""
+    PROFILER.reset(enabled=cfg["profile"])
+    _setup_stage1_worker(cfg)
+    # A pool worker is never told when the run ends, and tearing GDAL/PROJ
+    # objects down at interpreter shutdown is what caused the silent crash
+    # described in _close_stage1_worker. atexit runs early enough to avoid it.
+    atexit.register(_close_stage1_worker)
+
+
+def _run_stage1_window(window: tuple):
+    """Index one window. Returns this worker's profile totals when profiling."""
+    with PROFILER.phase("stage1.window_total"):
+        _WORKER["func"](rio.windows.Window(*window))
+    if PROFILER.enabled:
+        return os.getpid(), PROFILER.snapshot()
+    return None
+
+
+def _close_stage1_worker() -> None:
+    """Release this process's GDAL/PROJ objects.
+
+    ``da`` and the transformer are held by ``ctx`` as dataclass fields and are
+    not freed by reference counting alone if they are in a dask task-graph cycle.
+    Dropping them explicitly while the dataset is still open tears the GDAL/PROJ
+    objects down during normal execution rather than at interpreter shutdown,
+    which causes a silent "Error in sys.excepthook" crash for non-WGS84 rasters.
+    """
+    if not _WORKER:
+        return
+    ctx = _WORKER.pop("ctx", None)
+    da = _WORKER.pop("da", None)
+    _WORKER.pop("transformer", None)
+    _WORKER.pop("func", None)
+    if da is not None:
+        da.close()
+    if hasattr(ctx, "close"):
+        ctx.close()
+    del ctx, da
+    gc.collect()
+    src = _WORKER.pop("src", None)
+    if src is not None:
+        src.close()
+    env = _WORKER.pop("env", None)
+    if env is not None:
+        env.__exit__(None, None, None)
+    _WORKER.clear()
+
+
 def initial_index(
     dggs: str,
     raster_input: Path | str,
@@ -800,34 +996,6 @@ def initial_index(
                         i for i in selected_indices if not (i in seen or seen.add(i))
                     ]
 
-                transformer = pyproj.Transformer.from_crs(
-                    src.crs, "EPSG:4326", always_xy=True
-                )
-                LOGGER.debug("Coordinate transformer: %s → EPSG:4326", src.crs)
-                if kwargs["transfer"] == const.Transfer.SAMPLE:
-                    inverse_transformer = pyproj.Transformer.from_crs(
-                        "EPSG:4326", src.crs, always_xy=True
-                    )
-                    LOGGER.debug("Inverse transformer: EPSG:4326 → %s", src.crs)
-                else:
-                    inverse_transformer = None
-
-                da: xr.Dataset = rioxarray.open_rasterio(
-                    src,
-                    lock=dask.utils.SerializableLock(),
-                    masked=False,
-                    default_name=const.DEFAULT_NAME,
-                ).chunk(**{"y": "auto", "x": "auto"})
-
-                # Band selection
-                if "band" in da.dims and (len(selected_indices) != count):
-                    if (
-                        "band" in da.coords
-                    ):  # rioxarray commonly exposes 1..N as band coords
-                        da = da.sel(band=selected_indices)
-                    else:
-                        da = da.isel(band=[i - 1 for i in selected_indices])
-
                 windows = [window for _, window in src.block_windows()]
                 LOGGER.debug(
                     "%d windows",
@@ -843,7 +1011,7 @@ def initial_index(
                     "block_shape", f"{src.block_shapes[0][1]}x{src.block_shapes[0][0]}"
                 )
                 PROFILER.note("internally_tiled", bool(src.profile.get("tiled", False)))
-                PROFILER.note("threads", kwargs["threads"])
+                PROFILER.note("processes", kwargs["processes"])
 
                 selected_labels = tuple([labels_by_index[i] for i in selected_indices])
                 kwargs["source_pixel_dtypes"] = {
@@ -852,121 +1020,101 @@ def initial_index(
                         selected_indices, selected_labels, strict=True
                     )
                 }
-                compression = kwargs["compression"]
-                nodata = src.nodata
+                processes = max(1, int(kwargs["processes"]))
+                cfg = {
+                    "raster_input": str(raster_input),
+                    "dggs": dggs,
+                    "resolution": resolution,
+                    "parent_res": parent_res,
+                    "selected_indices": tuple(selected_indices),
+                    "selected_labels": selected_labels,
+                    "nodata_policy": nodata_policy,
+                    "emit_nodata_value": emit_nodata_value,
+                    "transfer": kwargs["transfer"],
+                    "interp": kwargs.get("interp", const.Interp.NN),
+                    "op": kwargs.get("op"),
+                    "out": kwargs.get("out"),
+                    "min_valid_coverage": kwargs.get("valid_coverage_threshold", 0.0),
+                    "decimals": kwargs.get("decimals"),
+                    "hist_spec": kwargs.get("hist_spec"),
+                    "compression": kwargs["compression"],
+                    "tmpdir": tmpdir,
+                    "profile": PROFILER.enabled,
+                    # GDAL sizes its block cache as a share of total RAM per
+                    # process, so N workers would each claim a full share.
+                    "gdal_cachemax_mb": max(
+                        _MIN_GDAL_CACHE_MB, _gdal_cache_budget_mb() // processes
+                    ),
+                    "overlay_shared_paths": {},
+                }
 
-                def _write_result(result, window):
-                    if result is None or (
-                        hasattr(result, "num_rows") and result.num_rows == 0
-                    ):
-                        return
-                    partition_col = indexer.partition_col(parent_res)
-                    with PROFILER.phase("stage1.parquet_write"):
-                        pq.write_to_dataset(
-                            result,
-                            root_path=tmpdir,
-                            partition_cols=[partition_col],
-                            basename_template=str(window.col_off)
-                            + "."
-                            + str(window.row_off)
-                            + ".{i}.parquet",
-                            use_threads=False,  # Already threading indexing and reading
-                            existing_data_behavior="overwrite_or_ignore",  # Overwrite files with the same name; other existing files are ignored. Allows for an append workflow
-                            compression=compression,
-                        )
-
-                if kwargs["transfer"] == const.Transfer.SAMPLE:
-                    ctx = _SampleIndexer(
-                        src=src,
-                        da=da,
-                        inverse_transformer=inverse_transformer,
-                        nodata=nodata,
+                # --overlay may need raster-sized weights and validity rasters.
+                # Build them once here and let every worker attach to them; each
+                # worker building its own would mean N full-raster reads, writes
+                # and (for a geographic CRS) N passes of a per-row Python loop.
+                shared_overlay = None
+                if kwargs["transfer"] in const.OVERLAY_TRANSFER_KEYS:
+                    shared_overlay = _OverlayIndexer(
+                        raster_input=cfg["raster_input"],
                         indexer=indexer,
                         resolution=resolution,
                         parent_res=parent_res,
                         selected_labels=selected_labels,
-                        selected_indices=tuple(selected_indices),
+                        selected_indices=cfg["selected_indices"],
                         nodata_policy=nodata_policy,
                         emit_nodata_value=emit_nodata_value,
-                        write_result=_write_result,
-                    )
-                    interp = kwargs.get("interp", const.Interp.NN)
-                    if interp == const.Interp.BILINEAR:
-                        stage1_func = ctx.process_bilinear
-                    elif interp == const.Interp.BICUBIC:
-                        stage1_func = ctx.process_bicubic
-                    elif interp == const.Interp.LANCZOS:
-                        stage1_func = ctx.process_lanczos
-                    else:
-                        stage1_func = ctx.process_nn
-                elif kwargs["transfer"] in const.OVERLAY_TRANSFER_KEYS:
-                    ctx = _OverlayIndexer(
-                        raster_input=str(raster_input),
-                        indexer=indexer,
-                        resolution=resolution,
-                        parent_res=parent_res,
-                        selected_labels=selected_labels,
-                        selected_indices=tuple(selected_indices),
-                        nodata_policy=nodata_policy,
-                        emit_nodata_value=emit_nodata_value,
-                        write_result=_write_result,
+                        write_result=None,
                         op=kwargs["op"],
                         out=kwargs["out"],
-                        min_valid_coverage=kwargs.get("valid_coverage_threshold", 0.0),
-                        decimals=kwargs.get("decimals"),
-                        hist_spec=kwargs.get("hist_spec"),
+                        min_valid_coverage=cfg["min_valid_coverage"],
+                        decimals=cfg["decimals"],
+                        hist_spec=cfg["hist_spec"],
                     )
-                    stage1_func = ctx.process_window
-                else:
-                    ctx = _AssignCentersIndexer(
-                        da=da,
-                        indexer=indexer,
-                        resolution=resolution,
-                        parent_res=parent_res,
-                        nodata=nodata,
-                        selected_labels=selected_labels,
-                        selected_indices=tuple(selected_indices),
-                        nodata_policy=nodata_policy,
-                        emit_nodata_value=emit_nodata_value,
-                        transformer=transformer,
-                        write_result=_write_result,
-                    )
-                    stage1_func = ctx.process_window
+                    cfg["overlay_shared_paths"] = shared_overlay.shared_temp_paths()
 
-                if PROFILER.enabled:
-                    # Wrap once here rather than inside each transfer's
-                    # process_* method: this covers --point, --overlay and
-                    # --sample uniformly, and the finer per-phase timings
-                    # (read_block, dggs_index, ...) nest inside it.
-                    # The wrapper holds ctx via the wrapped bound method, so it
-                    # must be released alongside ctx in the finally block below,
-                    # or the GDAL/PROJ teardown described there is defeated.
-                    def _profiled(window, _inner=stage1_func):
-                        with PROFILER.phase("stage1.window_total"):
-                            return _inner(window)
-
-                    stage1_func = _profiled
-
+                window_args = [
+                    (w.col_off, w.row_off, w.width, w.height) for w in windows
+                ]
                 try:
-                    with PROFILER.phase("stage1.wall"), ThreadPoolExecutor(
-                        max_workers=kwargs["threads"]
-                    ) as executor, tqdm(
+                    with PROFILER.phase("stage1.wall"), tqdm(
                         total=len(windows), desc="Raster windows"
                     ) as pbar:
-                        for _ in executor.map(stage1_func, windows, chunksize=1):
-                            pbar.update(1)
+                        if processes > 1:
+                            # One snapshot per worker: a worker's totals only
+                            # grow, so the last one it sends is its total.
+                            latest: dict[int, dict] = {}
+                            with ProcessPoolExecutor(
+                                max_workers=processes,
+                                initializer=_init_stage1_worker,
+                                initargs=(cfg,),
+                                mp_context=multiprocessing.get_context(_START_METHOD),
+                            ) as executor:
+                                for result in executor.map(
+                                    _run_stage1_window,
+                                    window_args,
+                                    chunksize=max(
+                                        1, len(window_args) // (processes * 4)
+                                    ),
+                                ):
+                                    if result is not None:
+                                        latest[result[0]] = result[1]
+                                    pbar.update(1)
+                            for snapshot in latest.values():
+                                PROFILER.merge(snapshot)
+                        else:
+                            # Inline: a pool of one would pay for machinery it
+                            # cannot use.
+                            _setup_stage1_worker(cfg)
+                            try:
+                                for window_arg in window_args:
+                                    _run_stage1_window(window_arg)
+                                    pbar.update(1)
+                            finally:
+                                _close_stage1_worker()
                 finally:
-                    da.close()
-                    # da and transformer are held by ctx as dataclass fields and
-                    # won't be freed by reference counting alone if they're in a
-                    # dask task-graph cycle.  Explicitly delete the locals and ctx
-                    # now, while still inside rio.open(), so the GDAL/PROJ objects
-                    # they hold are torn down during normal execution rather than at
-                    # interpreter shutdown (which causes a silent "Error in
-                    # sys.excepthook" crash for non-WGS84 rasters).
-                    del da, transformer, ctx, stage1_func
-                    if PROFILER.enabled:
-                        del _profiled
+                    if shared_overlay is not None:
+                        shared_overlay.close()
+                    del shared_overlay
                     gc.collect()
             LOGGER.debug("Stage 1 (primary indexing) complete")
             return address_boundary_issues(

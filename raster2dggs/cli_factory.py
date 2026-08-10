@@ -178,7 +178,7 @@ def run_index(
     nodata_policy: str,
     emit_nodata_value: float | None,
     compression: str,
-    threads: int,
+    processes: int,
     agg,
     decimals,
     overwrite: bool,
@@ -204,7 +204,7 @@ def run_index(
     agg = common.create_aggfuncs(agg, decimals)
     kwargs = common.assemble_kwargs(
         compression,
-        threads,
+        processes,
         agg,
         decimals,
         overwrite,
@@ -318,10 +318,18 @@ def make_command(spec: DGGS_Spec):
         help="Compression method to use for the output Parquet files. Options include 'snappy', 'gzip', 'brotli', 'lz4', 'zstd', etc. Use 'none' for no compression.",
     )
     @click.option(
+        "-p",
+        "--processes",
         "-t",
         "--threads",
-        default=const.DEFAULTS["threads"],
-        help="Number of threads to use when running in parallel. The default is determined dynamically as the total number of available cores, minus one.",
+        "processes",
+        default=const.DEFAULTS["processes"],
+        help=(
+            "Number of worker processes to use for indexing. The default is "
+            "determined dynamically as the total number of available cores, "
+            "minus one. 1 runs inline, without a worker pool. --threads is "
+            "accepted as a deprecated alias."
+        ),
     )
     @click.option(
         "--point",
@@ -508,7 +516,7 @@ def make_command(spec: DGGS_Spec):
         nodata_policy,
         emit_nodata_value,
         compression,
-        threads,
+        processes,
         agg,
         decimals,
         overwrite,
@@ -590,7 +598,7 @@ def make_command(spec: DGGS_Spec):
             nodata_policy,
             emit_nodata_value,
             compression,
-            threads,
+            processes,
             agg,
             decimals,
             overwrite,

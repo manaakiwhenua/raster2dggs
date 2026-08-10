@@ -49,14 +49,18 @@ class TestRunthrough(TestCase):
         return tmp.name
 
     def invoke_cli(self, dggs: str, raster, output: Path, resolution, *extra_args):
-        """Clear output dir, invoke the CLI, assert exit code 0, return the Result."""
+        """Clear output dir, invoke the CLI, assert exit code 0, return the Result.
+
+        Runs inline unless the caller asks for a worker count: the test rasters
+        are a handful of windows each, where starting a process pool costs more
+        than the indexing it would parallelise.
+        """
+        args = [dggs, str(raster), str(output), "-r", str(resolution), *extra_args]
+        if not {"-p", "--processes", "-t", "--threads"}.intersection(extra_args):
+            args += ["--processes", "1"]
         if output.exists():
             clear_folder(output)
         output.mkdir(exist_ok=True)
-        result = CliRunner().invoke(
-            cli,
-            [dggs, str(raster), str(output), "-r", str(resolution), *extra_args],
-            catch_exceptions=False,
-        )
+        result = CliRunner().invoke(cli, args, catch_exceptions=False)
         self.assertEqual(result.exit_code, 0, result.output)
         return result
