@@ -3,6 +3,7 @@ from math import ceil
 
 import numpy as np
 import pandas as pd
+import pyarrow as pa
 import s2sphere
 import shapely
 
@@ -13,19 +14,30 @@ from raster2dggs.indexers.rasterindexer import RasterIndexer
 class S2RasterIndexer(RasterIndexer):
     """
     Provides integration for Google's S2 DGGS.
+
+    Cells are handled as uint64 CellId values throughout; tokens are produced
+    only at the output boundary via cells_to_string. Note tokens are not plain
+    hex of the id -- trailing zeros are stripped -- and ids on faces 4 and 5
+    exceed int64, which is why the working type is unsigned.
     """
+
+    CELL_ARROW_TYPE: pa.DataType = pa.uint64()
+
+    def cells_to_string(self, cells) -> list:
+        return [s2sphere.CellId(int(c)).to_token() for c in cells]
 
     def _index_window(self, wide, resolution: int, parent_res: int):
         cells = [
             s2sphere.CellId.from_lat_lng(s2sphere.LatLng.from_degrees(lat, lon))
             for lat, lon in zip(wide["y"], wide["x"], strict=True)
         ]
+        n = len(cells)
         wide = wide.drop(columns=["x", "y"])
-        wide[self.index_col(resolution)] = pd.Series(
-            [c.parent(resolution).to_token() for c in cells], index=wide.index
+        wide[self.index_col(resolution)] = np.fromiter(
+            (c.parent(resolution).id() for c in cells), dtype=np.uint64, count=n
         )
-        wide[self.partition_col(parent_res)] = pd.Series(
-            [c.parent(parent_res).to_token() for c in cells], index=wide.index
+        wide[self.partition_col(parent_res)] = np.fromiter(
+            (c.parent(parent_res).id() for c in cells), dtype=np.uint64, count=n
         )
         return wide
 
@@ -46,20 +58,14 @@ class S2RasterIndexer(RasterIndexer):
         return 4 ** (desired_resolution - cell_level)
 
     @staticmethod
-    def valid_set(cells: set) -> set[str]:
+    def valid_set(cells: set) -> set:
         """
         Implementation of interface function.
         """
         return set(
-            map(
-                lambda c: c.to_token(),
-                filter(
-                    lambda c: c.is_valid(),
-                    map(
-                        lambda c: s2sphere.CellId.from_token(c),
-                        filter(lambda c: not pd.isna(c), cells),
-                    ),
-                ),
+            filter(
+                lambda c: (not pd.isna(c)) and s2sphere.CellId(int(c)).is_valid(),
+                cells,
             )
         )
 
@@ -69,19 +75,15 @@ class S2RasterIndexer(RasterIndexer):
         Implementation of interface function.
         """
         return map(
-            lambda token: s2sphere.CellId.from_token(token)
-            .parent(resolution)
-            .to_token(),
+            lambda c: s2sphere.CellId(int(c)).parent(resolution).id(),
             cells,
         )
 
-    def expected_count(self, parent: str, resolution: int):
+    def expected_count(self, parent, resolution: int):
         """
         Implementation of interface function.
         """
-        return self.cell_to_children_size(
-            s2sphere.CellId.from_token(parent), resolution
-        )
+        return self.cell_to_children_size(s2sphere.CellId(int(parent)), resolution)
 
     SUPPORTS_CELL_ENUMERATION: bool = True
 
@@ -130,7 +132,7 @@ class S2RasterIndexer(RasterIndexer):
             lat = ll.lat().degrees
             lon = ll.lng().degrees
             if min_lat <= lat <= max_lat and min_lon <= lon <= max_lon:
-                result.add(cell_id.to_token())
+                result.add(cell_id.id())
         return result
 
     def cell_area_m2(self, resolution: int, lat: float, lon: float) -> float:
@@ -146,7 +148,7 @@ class S2RasterIndexer(RasterIndexer):
             [
                 (ll.lng().degrees, ll.lat().degrees)
                 for ll in (
-                    s2sphere.LatLng.from_point(s2sphere.CellId.from_token(c).to_point())
+                    s2sphere.LatLng.from_point(s2sphere.CellId(int(c)).to_point())
                     for c in cells
                 )
             ]
@@ -154,13 +156,13 @@ class S2RasterIndexer(RasterIndexer):
         return pts[:, 0], pts[:, 1]  # lons, lats
 
     @staticmethod
-    def cell_to_point(cell: str) -> shapely.geometry.Point:
-        latLng = s2sphere.LatLng.from_point(s2sphere.CellId.from_token(cell).to_point())
+    def cell_to_point(cell) -> shapely.geometry.Point:
+        latLng = s2sphere.LatLng.from_point(s2sphere.CellId(int(cell)).to_point())
         return shapely.Point(latLng.lng().degrees, latLng.lat().degrees)
 
     @staticmethod
-    def cell_to_polygon(cell: str) -> shapely.geometry.Polygon:
-        cell_id = s2sphere.CellId.from_token(cell)
+    def cell_to_polygon(cell) -> shapely.geometry.Polygon:
+        cell_id = s2sphere.CellId(int(cell))
         cell = s2sphere.Cell(cell_id)
         vertices = []
         for i in range(4):

@@ -72,7 +72,7 @@ def _expected_cells(min_lon, min_lat, max_lon, max_lat, resolution, step=_GRID_S
         clon, clat = a5.cell_to_lonlat(cell)
         clon = (clon + 180.0) % 360.0 - 180.0
         if min_lat <= clat <= max_lat and min_lon <= clon <= max_lon:
-            expected.add(a5.u64_to_hex(cell))
+            expected.add(int(cell))
     return expected
 
 

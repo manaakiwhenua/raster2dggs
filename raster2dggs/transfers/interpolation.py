@@ -184,9 +184,9 @@ class _SampleIndexer:
             )
         index_col = self.indexer.index_col(self.resolution)
         partition_col = self.indexer.partition_col(self.parent_res)
-        wide[index_col] = cells
+        wide[index_col] = self.indexer.cell_array(cells)
         with PROFILER.phase("stage1.parent_cells"):
-            wide[partition_col] = list(
+            wide[partition_col] = self.indexer.cell_array(
                 self.indexer.single_parent_cells(cells, self.parent_res)
             )
         if self.nodata_policy.lower() == "omit":

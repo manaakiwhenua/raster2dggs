@@ -71,7 +71,7 @@ def _expected_cells(min_lon, min_lat, max_lon, max_lat, resolution, step=_GRID_S
         ll = s2sphere.LatLng.from_point(cell_id.to_point())
         clat, clon = ll.lat().degrees, ll.lng().degrees
         if min_lat <= clat <= max_lat and min_lon <= clon <= max_lon:
-            expected.add(cell_id.to_token())
+            expected.add(cell_id.id())
     return expected
 
 

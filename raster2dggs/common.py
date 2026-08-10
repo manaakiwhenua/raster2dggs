@@ -308,6 +308,7 @@ def assemble_kwargs(
     hist_origin: float = 0.0,
     hist_weight: str = "count",
     hist_normalize: str = "none",
+    cell_id: str = "string",
 ) -> dict:
     return {
         "compression": compression,
@@ -326,6 +327,7 @@ def assemble_kwargs(
         "hist_origin": hist_origin,
         "hist_weight": hist_weight,
         "hist_normalize": hist_normalize,
+        "cell_id": cell_id,
     }
 
 
@@ -336,9 +338,19 @@ def write_partition_as_geoparquet(
     partition_col_name: str,
     compression: str,
     schema: pa.Schema,
+    cells_to_string=None,
 ) -> None:
-    # Build shapely geometries for this partition
+    # Build shapely geometries for this partition. geom_func takes the working
+    # cell form, so geometry comes first and any string conversion after.
     geoms = pdf.index.map(geom_func)
+    if cells_to_string is not None:
+        pdf = pdf.copy(deep=False)
+        pdf.index = pd.Index(
+            cells_to_string(pdf.index), name=pdf.index.name, dtype="string"
+        )
+        pdf[partition_col_name] = pd.Series(
+            cells_to_string(pdf[partition_col_name]), index=pdf.index, dtype="string"
+        )
 
     # Compute GeoParquet 1.1.0 extras
     valid = [g for g in geoms if (g is not None and not g.is_empty)]
@@ -414,6 +426,7 @@ def _build_output_meta(
     index_col: str,
     compact: bool,
     interp: str,
+    cell_dtype: str = "string",
 ) -> tuple[pd.DataFrame, str]:
     if (
         transfer == const.Transfer.SAMPLE
@@ -430,7 +443,7 @@ def _build_output_meta(
     ):
         out_meta = pd.DataFrame(
             {
-                partition_col: pd.Series([], dtype="string"),
+                partition_col: pd.Series([], dtype=cell_dtype),
                 **{
                     c: pd.Series(
                         [],
@@ -458,7 +471,7 @@ def _build_output_meta(
         # list, histogram, or multi-agg value — object-typed columns
         out_meta = pd.DataFrame(
             {
-                partition_col: pd.Series([], dtype="string"),
+                partition_col: pd.Series([], dtype=cell_dtype),
                 **{c: pd.Series([], dtype="object") for c in band_cols},
             }
         )
@@ -467,7 +480,7 @@ def _build_output_meta(
             if out != const.OutputSchema.VALUE
             else f"Aggregating{'/compacting' if compact else ''}"
         )
-    out_meta.index = pd.Index([], name=index_col, dtype="string")
+    out_meta.index = pd.Index([], name=index_col, dtype=cell_dtype)
     return out_meta, tqdm_label
 
 
@@ -482,10 +495,12 @@ def _build_write_schema(
     partition_col: str,
     out_meta: pd.DataFrame,
     hist_spec: histogram.HistogramSpec | None = None,
+    cell_type: pa.DataType | None = None,
 ) -> pa.Schema:
+    cell_type = cell_type if cell_type is not None else pa.string()
     common_fields = [
-        pa.field(index_col, pa.string()),
-        pa.field(partition_col, pa.string()),
+        pa.field(index_col, cell_type),
+        pa.field(partition_col, cell_type),
     ]
     if out == const.OutputSchema.FRACTIONS:
         frac_struct = pa.struct(
@@ -530,7 +545,15 @@ def _build_write_schema(
                 for c in band_cols
             ]
         )
-    return pa.Schema.from_pandas(out_meta, preserve_index=True)
+    # The meta carries the working cell form; the written form follows
+    # cell_type. Coercing a copy of the meta and letting from_pandas derive the
+    # fields keeps the schema identical to one built from text cells directly.
+    schema_meta = out_meta
+    if cell_type == pa.string() and str(out_meta.index.dtype) != "string":
+        schema_meta = out_meta.copy()
+        schema_meta.index = out_meta.index.astype("string")
+        schema_meta[partition_col] = schema_meta[partition_col].astype("string")
+    return pa.Schema.from_pandas(schema_meta, preserve_index=True)
 
 
 def _write_output(
@@ -543,6 +566,7 @@ def _write_output(
     overwrite: bool,
     write_schema: pa.Schema,
     indexer: IRasterIndexer,
+    cells_to_string=None,
 ) -> None:
     if geo:
         delayed_parts = ddf.to_delayed()
@@ -557,6 +581,7 @@ def _write_output(
                 partition_col,
                 compression,
                 write_schema,
+                cells_to_string,
             )
             for part in delayed_parts
         ]
@@ -575,22 +600,32 @@ def _write_output(
         )
 
 
-def _stage1_partitioning(partition_col: str) -> ds.Partitioning:
-    """Hive partitioning for the Stage 1 store. The partition column is declared
-    a string because some cell IDs, geohash levels among them, otherwise read as
-    integers."""
-    return ds.partitioning(pa.schema([(partition_col, pa.string())]), flavor="hive")
+def _stage1_partitioning(partition_col: str, cell_type: pa.DataType) -> ds.Partitioning:
+    """Hive partitioning for the Stage 1 store. The partition column type is
+    declared rather than inferred: string cell IDs otherwise read as integers
+    for some backends (geohash levels among them)."""
+    return ds.partitioning(pa.schema([(partition_col, cell_type)]), flavor="hive")
 
 
-def _read_stage1_parent(pq_input: str, partition_col: str, parent: str) -> pd.DataFrame:
+def _read_stage1_parent(
+    pq_input: str, partition_col: str, cell_type: pa.DataType, parent
+) -> pd.DataFrame:
     """Read every Stage 1 row belonging to one parent cell."""
     dataset = ds.dataset(
-        pq_input, format="parquet", partitioning=_stage1_partitioning(partition_col)
+        pq_input,
+        format="parquet",
+        partitioning=_stage1_partitioning(partition_col, cell_type),
     )
-    return dataset.to_table(filter=ds.field(partition_col) == parent).to_pandas()
+    # A typed scalar: a bare Python int past 2^63 (S2 faces 4-5) overflows the
+    # default int64 conversion.
+    return dataset.to_table(
+        filter=ds.field(partition_col) == pa.scalar(parent, type=cell_type)
+    ).to_pandas()
 
 
-def _read_stage1_by_parent(pq_input, partition_col: str) -> dd.DataFrame:
+def _read_stage1_by_parent(
+    pq_input, partition_col: str, cell_type: pa.DataType
+) -> dd.DataFrame:
     """Read the Stage 1 store as one partition per parent cell.
 
     The aggregation that follows groups rows by cell, and a cell spanning two
@@ -602,7 +637,7 @@ def _read_stage1_by_parent(pq_input, partition_col: str) -> dd.DataFrame:
     dataset = ds.dataset(
         str(pq_input),
         format="parquet",
-        partitioning=_stage1_partitioning(partition_col),
+        partitioning=_stage1_partitioning(partition_col, cell_type),
     )
     parents = sorted(
         set(
@@ -612,7 +647,9 @@ def _read_stage1_by_parent(pq_input, partition_col: str) -> dd.DataFrame:
         )
     )
     LOGGER.debug("Stage 1 store spans %d parent cells", len(parents))
-    meta = _read_stage1_parent(str(pq_input), partition_col, parents[0]).head(0)
+    meta = _read_stage1_parent(
+        str(pq_input), partition_col, cell_type, parents[0]
+    ).head(0)
     # --overlay list/histogram/fractions hold dicts and lists in their band
     # columns, which dask's string conversion would stringify. Dtypes are fixed
     # when the graph is built, so scoping it to construction is enough.
@@ -621,9 +658,24 @@ def _read_stage1_by_parent(pq_input, partition_col: str) -> dd.DataFrame:
             _read_stage1_parent,
             [str(pq_input)] * len(parents),
             [partition_col] * len(parents),
+            [cell_type] * len(parents),
             parents,
             meta=meta,
         )
+
+
+def _cells_frame_to_string(
+    pdf: pd.DataFrame, indexer: IRasterIndexer, partition_col: str
+) -> pd.DataFrame:
+    """Convert a partition's working-form cell index and parent column to strings."""
+    pdf = pdf.copy(deep=False)
+    pdf.index = pd.Index(
+        indexer.cells_to_string(pdf.index), name=pdf.index.name, dtype="string"
+    )
+    pdf[partition_col] = pd.Series(
+        indexer.cells_to_string(pdf[partition_col]), index=pdf.index, dtype="string"
+    )
+    return pdf
 
 
 def address_boundary_issues(
@@ -653,7 +705,7 @@ def address_boundary_issues(
     index_col = indexer.index_col(resolution)
     partition_col = indexer.partition_col(parent_res)
 
-    ddf = _read_stage1_by_parent(pq_input, partition_col)
+    ddf = _read_stage1_by_parent(pq_input, partition_col, indexer.CELL_ARROW_TYPE)
     band_cols = [c for c in ddf.columns if not c.startswith(f"{indexer.dggs}_")]
     # Capture source dtypes before map_partitions changes them.
     # Stage 1 output for --overlay list/histogram already holds aggregated
@@ -669,6 +721,17 @@ def address_boundary_issues(
     transfer = kwargs.get("transfer", const.Transfer.ASSIGN_CENTERS)
     decimals = kwargs.get("decimals")
     aggfuncs = kwargs.get("aggfuncs", [("mean", "mean")])
+    # String output needs a conversion for backends that carry integers
+    # internally; for string backends it is already the working form.
+    emit_string = (
+        kwargs.get("cell_id", const.CellId.STRING) == const.CellId.STRING
+        and indexer.CELL_ARROW_TYPE != pa.string()
+    )
+    output_cell_type = (
+        pa.string()
+        if kwargs.get("cell_id", const.CellId.STRING) == const.CellId.STRING
+        else indexer.CELL_ARROW_TYPE
+    )
 
     out_meta, tqdm_label = _build_output_meta(
         transfer=transfer,
@@ -681,6 +744,7 @@ def address_boundary_issues(
         index_col=index_col,
         compact=kwargs["compact"],
         interp=kwargs.get("interp", const.Interp.NN),
+        cell_dtype=indexer.cell_pd_dtype,
     )
 
     with PROFILER.phase("stage2.total"), TqdmCallback(desc=tqdm_label):
@@ -707,6 +771,16 @@ def address_boundary_issues(
                 indexer.compaction, resolution, parent_res, meta=out_meta
             )
 
+        if emit_string and not kwargs["geo"]:
+            # The GeoParquet path converts inside its writer instead, after
+            # geometries have been built from the working form.
+            string_meta = out_meta.copy()
+            string_meta.index = out_meta.index.astype("string")
+            string_meta[partition_col] = string_meta[partition_col].astype("string")
+            ddf = ddf.map_partitions(
+                _cells_frame_to_string, indexer, partition_col, meta=string_meta
+            )
+
         hist_spec = kwargs.get("hist_spec")
         write_schema = _build_write_schema(
             out=out,
@@ -718,6 +792,7 @@ def address_boundary_issues(
             partition_col=partition_col,
             out_meta=out_meta,
             hist_spec=hist_spec,
+            cell_type=output_cell_type,
         )
         if out == const.OutputSchema.HISTOGRAM and hist_spec is not None:
             hist_meta = {
@@ -745,6 +820,7 @@ def address_boundary_issues(
             overwrite=kwargs["overwrite"],
             write_schema=write_schema,
             indexer=indexer,
+            cells_to_string=indexer.cells_to_string if emit_string else None,
         )
 
     LOGGER.debug("Stage 2 (aggregation) complete")
@@ -991,6 +1067,16 @@ def initial_index(
         raise click.UsageError(
             f"--transfer {kwargs['transfer']!r} requires spatial cell enumeration, "
             f"which is not supported by the {dggs!r} DGGS."
+        )
+
+    if (
+        kwargs.get("cell_id", const.CellId.STRING) == const.CellId.UINT64
+        and indexer.CELL_ARROW_TYPE == pa.string()
+    ):
+        raise click.UsageError(
+            f"--cell-id uint64: the {dggs!r} DGGS has no integer cell form "
+            f"(its cell IDs are strings such as geohashes or rHEALPix addresses), "
+            f"or integer support has not been implemented for it yet."
         )
 
     LOGGER.info(

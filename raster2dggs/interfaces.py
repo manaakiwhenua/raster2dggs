@@ -17,11 +17,44 @@ class IRasterIndexer:
         interface instead.
     """
 
+    #: Arrow type of the working cell-ID representation. Backends with a native
+    #: integer form (H3, S2, A5, DGGAL) override with pa.uint64() and carry
+    #: integers through the whole pipeline; conversion to the text form happens
+    #: once, at the output boundary, unless the user asks for --cell-id uint64.
+    CELL_ARROW_TYPE: pa.DataType = pa.string()
+
     def __init__(self, dggs: str):
         """
         Value used across all child classes
         """
         self.dggs = dggs
+
+    @property
+    def cell_pd_dtype(self) -> str:
+        """Pandas dtype of the working cell-ID representation."""
+        return "uint64" if self.CELL_ARROW_TYPE == pa.uint64() else "string"
+
+    def cells_to_string(self, cells) -> list:
+        """
+        Convert working-form cell IDs to the DGGS's string form (hex for H3/A5,
+        tokens for S2, structured IDs for DGGAL). Identity for backends whose
+        working form is already a string.
+        """
+        return list(cells)
+
+    def cell_array(self, values):
+        """Working-form cell values as a column-ready array.
+
+        Integer backends get an explicit uint64 array: pandas would otherwise
+        infer int64 from a list of Python ints, which overflows for S2 cells on
+        faces 4 and 5.
+        """
+        values = list(values)
+        if self.CELL_ARROW_TYPE == pa.uint64():
+            return np.fromiter(
+                (int(v) for v in values), dtype=np.uint64, count=len(values)
+            )
+        return values
 
     def index_col(self, resolution: int) -> str:
         """

@@ -20,6 +20,7 @@ import importlib
 
 import numpy as np
 import pandas as pd
+import pyarrow as pa
 import pytest
 
 _MIN_LON, _MIN_LAT, _MAX_LON, _MAX_LAT = 174.0, -37.0, 175.0, -36.0
@@ -70,10 +71,16 @@ class TestCellsInBbox:
         indexer, resolution = indexer_and_res
         assert len(self._cells(indexer, resolution)) > 0
 
-    def test_cell_ids_are_strings(self, indexer_and_res):
+    def test_cell_ids_match_working_form(self, indexer_and_res):
+        """Cell IDs are ints for backends with a native integer form
+        (CELL_ARROW_TYPE uint64), text for the rest."""
         indexer, resolution = indexer_and_res
+        expect_int = indexer.CELL_ARROW_TYPE == pa.uint64()
         for c in self._cells(indexer, resolution):
-            assert isinstance(c, str), f"Cell ID {c!r} should be a string"
+            if expect_int:
+                assert isinstance(c, (int, np.integer)), f"{c!r} should be an int"
+            else:
+                assert isinstance(c, str), f"Cell ID {c!r} should be a string"
 
     def test_all_centroids_inside_bbox(self, indexer_and_res):
         indexer, resolution = indexer_and_res
