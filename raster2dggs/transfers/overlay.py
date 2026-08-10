@@ -625,9 +625,10 @@ class _OverlayIndexer:
         partition_col = self.indexer.partition_col(self.parent_res)
         result_cells = result_df["_cell_id"].tolist()
         result_df[index_col] = result_cells
-        result_df[partition_col] = list(
-            self.indexer.single_parent_cells(result_cells, self.parent_res)
-        )
+        with PROFILER.phase("stage1.parent_cells"):
+            result_df[partition_col] = list(
+                self.indexer.single_parent_cells(result_cells, self.parent_res)
+            )
         result_df = result_df.drop(columns=["_cell_id"])
 
         if is_frac:

@@ -134,20 +134,22 @@ class _SampleIndexer:
 
         with PROFILER.phase("stage1.cells_to_lonlat"):
             cell_lons, cell_lats = self.indexer.cells_to_lonlat_arrays(pd.Series(cells))
-        # Pass as Python lists to avoid pyproj trying float(array) on
-        # 1-element numpy arrays, triggering a NumPy DeprecationWarning.
-        _xs, _ys = self.inverse_transformer.transform(
-            cell_lons.tolist(), cell_lats.tolist()
-        )
-        cell_xs = np.asarray(_xs)
-        cell_ys = np.asarray(_ys)
 
-        # ~transform maps (x, y) → (col_ul, row_ul) in the UL-corner pixel
-        # system; subtract 0.5 to get pixel-centre coords where (0.0, 0.0)
-        # is the centre of the top-left pixel.
-        inv = ~self.src.transform
-        frac_cols = inv.a * cell_xs + inv.b * cell_ys + inv.c - 0.5
-        frac_rows = inv.d * cell_xs + inv.e * cell_ys + inv.f - 0.5
+        with PROFILER.phase("stage1.cells_to_pixel"):
+            # Pass as Python lists to avoid pyproj trying float(array) on
+            # 1-element numpy arrays, triggering a NumPy DeprecationWarning.
+            _xs, _ys = self.inverse_transformer.transform(
+                cell_lons.tolist(), cell_lats.tolist()
+            )
+            cell_xs = np.asarray(_xs)
+            cell_ys = np.asarray(_ys)
+
+            # ~transform maps (x, y) → (col_ul, row_ul) in the UL-corner pixel
+            # system; subtract 0.5 to get pixel-centre coords where (0.0, 0.0)
+            # is the centre of the top-left pixel.
+            inv = ~self.src.transform
+            frac_cols = inv.a * cell_xs + inv.b * cell_ys + inv.c - 0.5
+            frac_rows = inv.d * cell_xs + inv.e * cell_ys + inv.f - 0.5
 
         return cells, frac_rows, frac_cols
 
@@ -176,15 +178,17 @@ class _SampleIndexer:
         samples is (n_cells, n_bands) float with NaN where nodata.
         nd_mask is a bool array of length n_cells.
         """
-        wide = pd.DataFrame(
-            {label: samples[:, i] for i, label in enumerate(self.selected_labels)}
-        )
+        with PROFILER.phase("stage1.build_frame"):
+            wide = pd.DataFrame(
+                {label: samples[:, i] for i, label in enumerate(self.selected_labels)}
+            )
         index_col = self.indexer.index_col(self.resolution)
         partition_col = self.indexer.partition_col(self.parent_res)
         wide[index_col] = cells
-        wide[partition_col] = list(
-            self.indexer.single_parent_cells(cells, self.parent_res)
-        )
+        with PROFILER.phase("stage1.parent_cells"):
+            wide[partition_col] = list(
+                self.indexer.single_parent_cells(cells, self.parent_res)
+            )
         if self.nodata_policy.lower() == "omit":
             wide = wide[~nd_mask].reset_index(drop=True)
         elif self.nodata_policy.lower() == "emit":
@@ -200,7 +204,8 @@ class _SampleIndexer:
                     wide.loc[nd_mask, label] = fill
         if wide.empty:
             return None
-        result = pa.Table.from_pandas(wide, preserve_index=False)
+        with PROFILER.phase("stage1.arrow_build"):
+            result = pa.Table.from_pandas(wide, preserve_index=False)
         self.write_result(result, window)
         return None
 
@@ -231,10 +236,11 @@ class _SampleIndexer:
         local_cols = local_cols[in_win]
 
         win_data = self._read_window(window)
-        samples = win_data[:, local_rows, local_cols].T.astype(float)
-        if self.nodata is not None and not _is_nan(self.nodata):
-            samples[samples == self.nodata] = np.nan
-        nd_mask = np.any(np.isnan(samples), axis=1)
+        with PROFILER.phase("stage1.kernel"):
+            samples = win_data[:, local_rows, local_cols].T.astype(float)
+            if self.nodata is not None and not _is_nan(self.nodata):
+                samples[samples == self.nodata] = np.nan
+            nd_mask = np.any(np.isnan(samples), axis=1)
 
         return self._build_and_write(cells, samples, nd_mask, window)
 
@@ -288,37 +294,38 @@ class _SampleIndexer:
         win_data = self._read_window(exp)
         exp_h, exp_w = win_data.shape[1], win_data.shape[2]
 
-        r0_raw = floor_rows - exp.row_off
-        c0_raw = floor_cols - exp.col_off
-        r1_raw = r0_raw + 1
-        c1_raw = c0_raw + 1
+        with PROFILER.phase("stage1.kernel"):
+            r0_raw = floor_rows - exp.row_off
+            c0_raw = floor_cols - exp.col_off
+            r1_raw = r0_raw + 1
+            c1_raw = c0_raw + 1
 
-        # Stencil extends outside the raster — emit nodata rather than
-        # inventing values by repeating the edge.
-        outside_raster = (
-            (r0_raw < 0) | (r1_raw >= exp_h) | (c0_raw < 0) | (c1_raw >= exp_w)
-        )
+            # Stencil extends outside the raster — emit nodata rather than
+            # inventing values by repeating the edge.
+            outside_raster = (
+                (r0_raw < 0) | (r1_raw >= exp_h) | (c0_raw < 0) | (c1_raw >= exp_w)
+            )
 
-        r0 = np.clip(r0_raw, 0, exp_h - 1)
-        c0 = np.clip(c0_raw, 0, exp_w - 1)
-        r1 = np.clip(r1_raw, 0, exp_h - 1)
-        c1 = np.clip(c1_raw, 0, exp_w - 1)
+            r0 = np.clip(r0_raw, 0, exp_h - 1)
+            c0 = np.clip(c0_raw, 0, exp_w - 1)
+            r1 = np.clip(r1_raw, 0, exp_h - 1)
+            c1 = np.clip(c1_raw, 0, exp_w - 1)
 
-        dr = dr[:, np.newaxis]  # (n_cells, 1) for broadcasting
-        dc = dc[:, np.newaxis]
+            dr = dr[:, np.newaxis]  # (n_cells, 1) for broadcasting
+            dc = dc[:, np.newaxis]
 
-        has_nodata = self.nodata is not None and not _is_nan(self.nodata)
+            has_nodata = self.nodata is not None and not _is_nan(self.nodata)
 
-        def _corner(rows, cols):
-            s = win_data[:, rows, cols].T.astype(float)  # (n_cells, bands)
-            if has_nodata:
-                s[s == self.nodata] = np.nan
-            return s
+            def _corner(rows, cols):
+                s = win_data[:, rows, cols].T.astype(float)  # (n_cells, bands)
+                if has_nodata:
+                    s[s == self.nodata] = np.nan
+                return s
 
-        f00 = _corner(r0, c0)
-        f01 = _corner(r0, c1)
-        f10 = _corner(r1, c0)
-        f11 = _corner(r1, c1)
+            f00 = _corner(r0, c0)
+            f01 = _corner(r0, c1)
+            f10 = _corner(r1, c0)
+            f11 = _corner(r1, c1)
 
         # Fast path: no OOB and all corners valid.
         if not np.any(outside_raster) and not (
@@ -412,28 +419,31 @@ class _SampleIndexer:
         n = len(cells)
         bands = win_data.shape[0]
 
-        # 4×4 stencil: offsets [-1, 0, 1, 2] from floor pixel
-        local_r = floor_rows[:, np.newaxis] + _BICUBIC_OFFSETS_INT - exp.row_off
-        local_c = floor_cols[:, np.newaxis] + _BICUBIC_OFFSETS_INT - exp.col_off
-        r_bcast = np.broadcast_to(local_r[:, :, np.newaxis], (n, 4, 4))
-        c_bcast = np.broadcast_to(local_c[:, np.newaxis, :], (n, 4, 4))
-        oob = (r_bcast < 0) | (r_bcast >= exp_h) | (c_bcast < 0) | (c_bcast >= exp_w)
-        r_safe = np.clip(r_bcast, 0, exp_h - 1)
-        c_safe = np.clip(c_bcast, 0, exp_w - 1)
+        with PROFILER.phase("stage1.kernel"):
+            # 4×4 stencil: offsets [-1, 0, 1, 2] from floor pixel
+            local_r = floor_rows[:, np.newaxis] + _BICUBIC_OFFSETS_INT - exp.row_off
+            local_c = floor_cols[:, np.newaxis] + _BICUBIC_OFFSETS_INT - exp.col_off
+            r_bcast = np.broadcast_to(local_r[:, :, np.newaxis], (n, 4, 4))
+            c_bcast = np.broadcast_to(local_c[:, np.newaxis, :], (n, 4, 4))
+            oob = (
+                (r_bcast < 0) | (r_bcast >= exp_h) | (c_bcast < 0) | (c_bcast >= exp_w)
+            )
+            r_safe = np.clip(r_bcast, 0, exp_h - 1)
+            c_safe = np.clip(c_bcast, 0, exp_w - 1)
 
-        gathered = win_data[:, r_safe.reshape(-1), c_safe.reshape(-1)]
-        pixel_values = (
-            gathered.reshape(bands, n, 4, 4).transpose(1, 2, 3, 0).astype(float)
-        )  # (n, 4, 4, bands)
+            gathered = win_data[:, r_safe.reshape(-1), c_safe.reshape(-1)]
+            pixel_values = (
+                gathered.reshape(bands, n, 4, 4).transpose(1, 2, 3, 0).astype(float)
+            )  # (n, 4, 4, bands)
 
-        if self.nodata is not None and not _is_nan(self.nodata):
-            pixel_values[pixel_values == self.nodata] = np.nan
+            if self.nodata is not None and not _is_nan(self.nodata):
+                pixel_values[pixel_values == self.nodata] = np.nan
 
-        row_t = np.abs(dr[:, np.newaxis] - _BICUBIC_OFFSETS)  # (n, 4)
-        col_t = np.abs(dc[:, np.newaxis] - _BICUBIC_OFFSETS)  # (n, 4)
-        row_w = _bicubic_kernel(row_t, a=self.bicubic_a)  # (n, 4)
-        col_w = _bicubic_kernel(col_t, a=self.bicubic_a)  # (n, 4)
-        weights_2d = row_w[:, :, np.newaxis] * col_w[:, np.newaxis, :]  # (n, 4, 4)
+            row_t = np.abs(dr[:, np.newaxis] - _BICUBIC_OFFSETS)  # (n, 4)
+            col_t = np.abs(dc[:, np.newaxis] - _BICUBIC_OFFSETS)  # (n, 4)
+            row_w = _bicubic_kernel(row_t, a=self.bicubic_a)  # (n, 4)
+            col_w = _bicubic_kernel(col_t, a=self.bicubic_a)  # (n, 4)
+            weights_2d = row_w[:, :, np.newaxis] * col_w[:, np.newaxis, :]  # (n, 4, 4)
 
         # Fast path: all stencil pixels in-bounds and non-nodata.
         if not np.any(oob) and not np.any(np.isnan(pixel_values)):
@@ -502,27 +512,32 @@ class _SampleIndexer:
         n = len(cells)
         bands = win_data.shape[0]
 
-        local_r = floor_rows[:, np.newaxis] + offsets_int - exp.row_off
-        local_c = floor_cols[:, np.newaxis] + offsets_int - exp.col_off
-        r_bcast = np.broadcast_to(local_r[:, :, np.newaxis], (n, ns, ns))
-        c_bcast = np.broadcast_to(local_c[:, np.newaxis, :], (n, ns, ns))
-        oob = (r_bcast < 0) | (r_bcast >= exp_h) | (c_bcast < 0) | (c_bcast >= exp_w)
-        r_safe = np.clip(r_bcast, 0, exp_h - 1)
-        c_safe = np.clip(c_bcast, 0, exp_w - 1)
+        with PROFILER.phase("stage1.kernel"):
+            local_r = floor_rows[:, np.newaxis] + offsets_int - exp.row_off
+            local_c = floor_cols[:, np.newaxis] + offsets_int - exp.col_off
+            r_bcast = np.broadcast_to(local_r[:, :, np.newaxis], (n, ns, ns))
+            c_bcast = np.broadcast_to(local_c[:, np.newaxis, :], (n, ns, ns))
+            oob = (
+                (r_bcast < 0) | (r_bcast >= exp_h) | (c_bcast < 0) | (c_bcast >= exp_w)
+            )
+            r_safe = np.clip(r_bcast, 0, exp_h - 1)
+            c_safe = np.clip(c_bcast, 0, exp_w - 1)
 
-        gathered = win_data[:, r_safe.reshape(-1), c_safe.reshape(-1)]
-        pixel_values = (
-            gathered.reshape(bands, n, ns, ns).transpose(1, 2, 3, 0).astype(float)
-        )  # (n, ns, ns, bands)
+            gathered = win_data[:, r_safe.reshape(-1), c_safe.reshape(-1)]
+            pixel_values = (
+                gathered.reshape(bands, n, ns, ns).transpose(1, 2, 3, 0).astype(float)
+            )  # (n, ns, ns, bands)
 
-        if self.nodata is not None and not _is_nan(self.nodata):
-            pixel_values[pixel_values == self.nodata] = np.nan
+            if self.nodata is not None and not _is_nan(self.nodata):
+                pixel_values[pixel_values == self.nodata] = np.nan
 
-        row_t = np.abs(dr[:, np.newaxis] - offsets_float)  # (n, ns)
-        col_t = np.abs(dc[:, np.newaxis] - offsets_float)  # (n, ns)
-        row_w = _lanczos_kernel(row_t, a=lobe)  # (n, ns)
-        col_w = _lanczos_kernel(col_t, a=lobe)  # (n, ns)
-        weights_2d = row_w[:, :, np.newaxis] * col_w[:, np.newaxis, :]  # (n, ns, ns)
+            row_t = np.abs(dr[:, np.newaxis] - offsets_float)  # (n, ns)
+            col_t = np.abs(dc[:, np.newaxis] - offsets_float)  # (n, ns)
+            row_w = _lanczos_kernel(row_t, a=lobe)  # (n, ns)
+            col_w = _lanczos_kernel(col_t, a=lobe)  # (n, ns)
+            weights_2d = (
+                row_w[:, :, np.newaxis] * col_w[:, np.newaxis, :]
+            )  # (n, ns, ns)
 
         # Fast path: all stencil pixels in-bounds and non-nodata.
         if not np.any(oob) and not np.any(np.isnan(pixel_values)):
