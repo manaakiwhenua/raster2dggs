@@ -154,7 +154,7 @@ Options:
                                   dynamically as the total number of available
                                   cores, minus one. 1 runs inline, without a
                                   worker pool. --threads is accepted as a
-                                  deprecated alias.  [default: 7]
+                                  deprecated alias.
   --point OUTPUT                  [Mutually exclusive with --overlay and
                                   --sample] Assign each pixel to the DGGS
                                   cell containing its centre (default).
