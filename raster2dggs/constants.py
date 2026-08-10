@@ -170,6 +170,11 @@ class OutputSchema(StrEnum):
     LIST = "list"
 
 
+class CellId(StrEnum):
+    STRING = "string"
+    UINT64 = "uint64"
+
+
 class HistWeight(StrEnum):
     COUNT = "count"
     AREA = "area"

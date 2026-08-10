@@ -8,6 +8,7 @@ import threading
 import a5 as a5py
 import numpy as np
 import pandas as pd
+import pyarrow as pa
 import shapely
 
 import raster2dggs.constants as const
@@ -34,7 +35,16 @@ def _locked(fn):
 class A5RasterIndexer(RasterIndexer):
     """
     Provides integration for the A5 DGGS.
+
+    pya5 cells are natively uint64; the hexadecimal form is produced only at
+    the output boundary via cells_to_string.
     """
+
+    CELL_ARROW_TYPE: pa.DataType = pa.uint64()
+
+    @_locked
+    def cells_to_string(self, cells) -> list:
+        return [a5py.u64_to_hex(int(c)) for c in cells]
 
     @_locked
     def _index_window(self, wide, resolution: int, parent_res: int):
@@ -44,13 +54,13 @@ class A5RasterIndexer(RasterIndexer):
             a5py.lonlat_to_cell((lon, lat), resolution)
             for lon, lat in zip(wide["x"], wide["y"], strict=True)
         ]
-        a5_parent = [a5py.cell_to_parent(cell, parent_res) for cell in cells]
+        n = len(cells)
         wide = wide.drop(columns=["x", "y"])
-        wide[self.index_col(resolution)] = pd.Series(
-            map(a5py.u64_to_hex, cells), index=wide.index
-        )
-        wide[self.partition_col(parent_res)] = pd.Series(
-            map(a5py.u64_to_hex, a5_parent), index=wide.index
+        wide[self.index_col(resolution)] = np.fromiter(cells, dtype=np.uint64, count=n)
+        wide[self.partition_col(parent_res)] = np.fromiter(
+            (a5py.cell_to_parent(cell, parent_res) for cell in cells),
+            dtype=np.uint64,
+            count=n,
         )
         return wide
 
@@ -62,7 +72,7 @@ class A5RasterIndexer(RasterIndexer):
 
         Implementation of interface function.
         """
-        cell_level = a5py.get_resolution(cell)
+        cell_level = a5py.get_resolution(int(cell))
         return a5py.get_num_children(cell_level, desired_resolution)
 
     @_locked
@@ -88,37 +98,25 @@ class A5RasterIndexer(RasterIndexer):
         """
         # Materialised eagerly (not a lazy map) so the a5py calls happen while
         # the lock is held, rather than later when the caller consumes it.
-        return list(
-            map(
-                a5py.u64_to_hex,
-                map(
-                    lambda x: a5py.cell_to_parent(x, resolution),
-                    map(a5py.hex_to_u64, cells),
-                ),
-            )
-        )
+        return [a5py.cell_to_parent(int(c), resolution) for c in cells]
 
     @_locked
-    def expected_count(self, parent: str, resolution: int):
+    def expected_count(self, parent, resolution: int):
         """
         Implementation of interface function.
         """
-        return self.cell_to_children_size(a5py.hex_to_u64(parent), resolution)
+        return self.cell_to_children_size(int(parent), resolution)
 
     @staticmethod
     @_locked
-    def is_valid_a5_cell(cell: str) -> bool:
+    def is_valid_a5_cell(cell) -> bool:
         """
         Returns cell validity.
 
         Not a part of the RasterIndexer interface
         """
         try:
-            return (
-                const.MIN_A5
-                <= a5py.get_resolution(a5py.hex_to_u64(cell))
-                <= const.MAX_A5
-            )
+            return const.MIN_A5 <= a5py.get_resolution(int(cell)) <= const.MAX_A5
         except Exception:
             return False
 
@@ -150,7 +148,7 @@ class A5RasterIndexer(RasterIndexer):
         ]
         compacted = a5py.polygon_to_cells(ring, resolution)
         cells = a5py.uncompact(compacted, resolution)
-        return {a5py.u64_to_hex(c) for c in cells}
+        return {int(c) for c in cells}
 
     @_locked
     def cell_area_m2(self, resolution: int, lat: float, lon: float) -> float:
@@ -164,7 +162,7 @@ class A5RasterIndexer(RasterIndexer):
     @_locked
     def cells_to_lonlat_arrays(cells: pd.Series) -> tuple[np.ndarray, np.ndarray]:
         # a5py.cell_to_lonlat returns (lon, lat) directly
-        pts = np.array([a5py.cell_to_lonlat(a5py.hex_to_u64(c)) for c in cells])
+        pts = np.array([a5py.cell_to_lonlat(int(c)) for c in cells])
         # a5py may return longitudes outside [-180, 180]; normalise to standard range.
         lons = (pts[:, 0] + 180.0) % 360.0 - 180.0
         lats = pts[:, 1]
@@ -172,14 +170,12 @@ class A5RasterIndexer(RasterIndexer):
 
     @staticmethod
     @_locked
-    def cell_to_point(cell: str) -> shapely.geometry.Point:
-        cell_u64 = a5py.hex_to_u64(cell)
-        lon, lat = a5py.cell_to_lonlat(cell_u64)
+    def cell_to_point(cell) -> shapely.geometry.Point:
+        lon, lat = a5py.cell_to_lonlat(int(cell))
         lon = (lon + 180.0) % 360.0 - 180.0  # normalise to [-180, 180]
         return shapely.Point(lon, lat)
 
     @staticmethod
     @_locked
-    def cell_to_polygon(cell: str) -> shapely.geometry.Polygon:
-        cell = a5py.hex_to_u64(cell)
-        return shapely.Polygon(tuple(a5py.cell_to_boundary(cell)))
+    def cell_to_polygon(cell) -> shapely.geometry.Polygon:
+        return shapely.Polygon(tuple(a5py.cell_to_boundary(int(cell))))

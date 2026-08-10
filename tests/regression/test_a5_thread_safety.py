@@ -96,35 +96,35 @@ def test_cell_area_m2_holds_lock(indexer, assert_locked_during):
 
 def test_valid_set_holds_lock(indexer, assert_locked_during):
     assert_locked_during("get_resolution")
-    cell = a5.u64_to_hex(a5.lonlat_to_cell((170.5, -40.5), 6))
+    cell = int(a5.lonlat_to_cell((170.5, -40.5), 6))
     indexer.valid_set({cell})
 
 
 def test_parent_cells_holds_lock(indexer, assert_locked_during):
     assert_locked_during("cell_to_parent")
-    cell = a5.u64_to_hex(a5.lonlat_to_cell((170.5, -40.5), 6))
+    cell = int(a5.lonlat_to_cell((170.5, -40.5), 6))
     list(indexer.parent_cells({cell}, 2))
 
 
 def test_expected_count_holds_lock(indexer, assert_locked_during):
-    assert_locked_during("hex_to_u64")
-    cell = a5.u64_to_hex(a5.lonlat_to_cell((170.5, -40.5), 6))
+    assert_locked_during("get_resolution")
+    cell = int(a5.lonlat_to_cell((170.5, -40.5), 6))
     indexer.expected_count(cell, 8)
 
 
 def test_cells_to_lonlat_arrays_holds_lock(indexer, assert_locked_during):
     assert_locked_during("cell_to_lonlat")
-    cell = a5.u64_to_hex(a5.lonlat_to_cell((170.5, -40.5), 6))
+    cell = int(a5.lonlat_to_cell((170.5, -40.5), 6))
     indexer.cells_to_lonlat_arrays(pd.Series([cell]))
 
 
 def test_cell_to_point_holds_lock(indexer, assert_locked_during):
     assert_locked_during("cell_to_lonlat")
-    cell = a5.u64_to_hex(a5.lonlat_to_cell((170.5, -40.5), 6))
+    cell = int(a5.lonlat_to_cell((170.5, -40.5), 6))
     indexer.cell_to_point(cell)
 
 
 def test_cell_to_polygon_holds_lock(indexer, assert_locked_during):
     assert_locked_during("cell_to_boundary")
-    cell = a5.u64_to_hex(a5.lonlat_to_cell((170.5, -40.5), 6))
+    cell = int(a5.lonlat_to_cell((170.5, -40.5), 6))
     indexer.cell_to_polygon(cell)

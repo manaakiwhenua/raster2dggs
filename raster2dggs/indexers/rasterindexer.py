@@ -496,18 +496,25 @@ class RasterIndexer(IRasterIndexer):
             for parent, group in parent_groups:
                 if isinstance(parent, tuple) and len(parent) == 1:
                     parent = parent[0]
+                if pd.api.types.is_unsigned_integer_dtype(df.index.dtype):
+                    # A Python-int label re-infers a one-row index as int64,
+                    # and int64 concatenated with uint64 promotes to float64,
+                    # rounding cell IDs.
+                    parent = np.uint64(parent)
                 if parent in compaction_map:
                     continue
                 expected_count = self.expected_count(parent, resolution)
                 if len(group) == expected_count and all(
                     _col_is_uniform(group[c]) for c in band_cols
                 ):
-                    compact_row = group.iloc[0]
-                    compact_row.name = parent  # Rename the index to the parent cell
+                    # A one-row frame, not a row Series: extracting a row mixes
+                    # the cell columns with float bands and promotes uint64 cell
+                    # IDs to float64, which rounds them.
+                    compact_row = group.iloc[[0]].rename(index={group.index[0]: parent})
                     compaction_map[parent] = compact_row
                     unprocessed_indices -= set(group.index)
-        compacted_df = pd.DataFrame(list(compaction_map.values()))
         remaining_df = df.loc[list(unprocessed_indices)]
-        result_df = pd.concat([compacted_df, remaining_df])
+        result_df = pd.concat(list(compaction_map.values()) + [remaining_df])
         result_df = result_df.rename_axis(df.index.name)
+        result_df.index = result_df.index.astype(df.index.dtype)
         return result_df

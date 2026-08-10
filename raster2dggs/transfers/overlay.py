@@ -414,9 +414,18 @@ class _OverlayIndexer:
                 _fix_antimeridian(self.indexer.cell_to_polygon(c)) for c in cells
             ]
         # WGS84 GDF for VCT shapely area computation (raster_fracs).
+        # exactextract carries a positional feature id rather than the cell ID:
+        # its pybind layer cannot cast uint64 cell values.
         gdf_wgs84 = gpd.GeoDataFrame(
-            {"_cell_id": cells}, geometry=polygons, crs="EPSG:4326"
+            {"_fid": np.arange(len(cells), dtype=np.int32)},
+            geometry=polygons,
+            crs="EPSG:4326",
         )
+
+        def _restore_cell_id(df: pd.DataFrame) -> pd.DataFrame:
+            df["_cell_id"] = self.indexer.cell_array([cells[i] for i in df["_fid"]])
+            return df.drop(columns=["_fid"])
+
         # exactextract does not reliably reproject features to the raster CRS itself;
         # reproject explicitly so intersections are computed in the correct coordinate space.
         gdf = gdf_wgs84.to_crs(self._src_crs)
@@ -452,7 +461,7 @@ class _OverlayIndexer:
                     gdf,
                     main_ops,
                     weights=self._geodesic_weights_path,
-                    include_cols="_cell_id",
+                    include_cols="_fid",
                     output="pandas",
                 )
             else:
@@ -460,9 +469,10 @@ class _OverlayIndexer:
                     self.raster_input,
                     gdf,
                     main_ops,
-                    include_cols="_cell_id",
+                    include_cols="_fid",
                     output="pandas",
                 )
+            result_df = _restore_cell_id(result_df)
 
         valid_frac_by_band = {}
         if is_frac or self._apply_coverage_threshold:
@@ -473,12 +483,14 @@ class _OverlayIndexer:
             # sum to 1.0 regardless of how much of the cell is nodata or outside raster).
             # For threshold: used to null cells below min_valid_coverage.
             with PROFILER.phase("stage1.exactextract"):
-                cov_df = exact_extract(
-                    self._coverage_mask_path,
-                    gdf,
-                    ["mean"],
-                    include_cols="_cell_id",
-                    output="pandas",
+                cov_df = _restore_cell_id(
+                    exact_extract(
+                        self._coverage_mask_path,
+                        gdf,
+                        ["mean"],
+                        include_cols="_fid",
+                        output="pandas",
+                    )
                 ).set_index("_cell_id")
 
             raster_fracs = pd.Series(
@@ -494,7 +506,7 @@ class _OverlayIndexer:
                     )
                     for poly in gdf_wgs84.geometry
                 ],
-                index=pd.Index(cells, name="_cell_id"),
+                index=pd.Index(self.indexer.cell_array(cells), name="_cell_id"),
             )
 
             result_df = result_df.set_index("_cell_id")
@@ -665,9 +677,9 @@ class _OverlayIndexer:
         index_col = self.indexer.index_col(self.resolution)
         partition_col = self.indexer.partition_col(self.parent_res)
         result_cells = result_df["_cell_id"].tolist()
-        result_df[index_col] = result_cells
+        result_df[index_col] = self.indexer.cell_array(result_cells)
         with PROFILER.phase("stage1.parent_cells"):
-            result_df[partition_col] = list(
+            result_df[partition_col] = self.indexer.cell_array(
                 self.indexer.single_parent_cells(result_cells, self.parent_res)
             )
         result_df = result_df.drop(columns=["_cell_id"])

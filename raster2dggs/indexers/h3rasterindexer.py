@@ -2,6 +2,7 @@ import h3 as h3py
 import h3.api.numpy_int as h3int
 import numpy as np
 import pandas as pd
+import pyarrow as pa
 import shapely
 
 from raster2dggs.indexers.rasterindexer import RasterIndexer
@@ -10,14 +11,19 @@ from raster2dggs.indexers.rasterindexer import RasterIndexer
 class H3RasterIndexer(RasterIndexer):
     """
     Provides integration for Uber's H3 DGGS.
+
+    Cells are handled as uint64 throughout; the hexadecimal form is produced
+    only at the output boundary via cells_to_string.
     """
 
+    CELL_ARROW_TYPE: pa.DataType = pa.uint64()
+
+    def cells_to_string(self, cells) -> list:
+        return [h3py.int_to_str(int(c)) for c in cells]
+
     def _index_window(self, wide, resolution: int, parent_res: int):
-        index_col = self.index_col(resolution)
-        partition_col = self.partition_col(parent_res)
-        # Index to integer cells, then resolve each distinct cell's parent and
-        # hex string once. Many pixels fall in the same cell, so those two
-        # steps run on far fewer values than there are pixels.
+        # Many pixels fall in the same cell, so parents are resolved once per
+        # distinct cell.
         cell_ints = np.array(
             [
                 h3int.latlng_to_cell(lat, lon, resolution)
@@ -26,17 +32,14 @@ class H3RasterIndexer(RasterIndexer):
             dtype=np.uint64,
         )
         uniq, inverse = np.unique(cell_ints, return_inverse=True)
-        uniq_hex = np.array([h3py.int_to_str(int(u)) for u in uniq], dtype=object)
-        uniq_parent = np.array(
-            [
-                h3py.int_to_str(int(h3int.cell_to_parent(int(u), parent_res)))
-                for u in uniq
-            ],
-            dtype=object,
+        uniq_parent = np.fromiter(
+            (h3int.cell_to_parent(int(u), parent_res) for u in uniq),
+            dtype=np.uint64,
+            count=len(uniq),
         )
         wide = wide.drop(columns=["x", "y"])
-        wide[index_col] = uniq_hex[inverse]
-        wide[partition_col] = uniq_parent[inverse]
+        wide[self.index_col(resolution)] = uniq[inverse]
+        wide[self.partition_col(parent_res)] = uniq_parent[inverse]
         return wide.reset_index(drop=True)
 
     @staticmethod
@@ -46,36 +49,38 @@ class H3RasterIndexer(RasterIndexer):
 
         Implementation of interface function.
         """
-        current_resolution = h3py.get_resolution(cell)
+        current_resolution = h3int.get_resolution(int(cell))
         n = desired_resolution - current_resolution
-        if h3py.is_pentagon(cell):
+        if h3int.is_pentagon(int(cell)):
             return 1 + 5 * (7**n - 1) // 6
         else:
             return 7**n
 
     @staticmethod
-    def valid_set(cells: set) -> set[str]:
+    def valid_set(cells: set) -> set:
         """
         Implementation of interface function.
         """
-        return set(filter(lambda c: (not pd.isna(c)) and h3py.is_valid_cell(c), cells))
+        return set(
+            filter(lambda c: (not pd.isna(c)) and h3int.is_valid_cell(int(c)), cells)
+        )
 
     @staticmethod
     def parent_cells(cells: set, resolution) -> map:
         """
         Implementation of interface function.
         """
-        return map(lambda x: h3py.cell_to_parent(x, resolution), cells)
+        return map(lambda x: h3int.cell_to_parent(int(x), resolution), cells)
 
-    def expected_count(self, parent: str, resolution: int):
+    def expected_count(self, parent, resolution: int):
         """
         Implementation of interface function.
         """
         return self.cell_to_children_size(parent, resolution)
 
     def cell_area_m2(self, resolution: int, lat: float, lon: float) -> float:
-        cell = h3py.latlng_to_cell(lat, lon, resolution)
-        return h3py.cell_area(cell, unit="m^2")
+        cell = h3int.latlng_to_cell(lat, lon, resolution)
+        return h3int.cell_area(cell, unit="m^2")
 
     SUPPORTS_CELL_ENUMERATION: bool = True
 
@@ -100,19 +105,19 @@ class H3RasterIndexer(RasterIndexer):
                 (min_lat, min_lon),
             ]
         )
-        return set(h3py.geo_to_cells(poly, resolution))
+        return {int(c) for c in h3int.geo_to_cells(poly, resolution)}
 
     @staticmethod
     def cells_to_lonlat_arrays(cells: pd.Series) -> tuple[np.ndarray, np.ndarray]:
-        arr = np.array([h3py.cell_to_latlng(c) for c in cells])
+        arr = np.array([h3int.cell_to_latlng(int(c)) for c in cells])
         return arr[:, 1], arr[:, 0]  # lons, lats
 
     @staticmethod
-    def cell_to_point(cell: str) -> shapely.geometry.Point:
-        return shapely.Point(h3py.cell_to_latlng(cell)[::-1])
+    def cell_to_point(cell) -> shapely.geometry.Point:
+        return shapely.Point(h3int.cell_to_latlng(int(cell))[::-1])
 
     @staticmethod
-    def cell_to_polygon(cell: str) -> shapely.geometry.Polygon:
+    def cell_to_polygon(cell) -> shapely.geometry.Polygon:
         return shapely.Polygon(
-            tuple(coord[::-1] for coord in h3py.cell_to_boundary(cell))
+            tuple(coord[::-1] for coord in h3int.cell_to_boundary(int(cell)))
         )

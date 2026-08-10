@@ -38,7 +38,12 @@ def stage1_store(tmp_path):
     store = tmp_path / "stage1"
     values: dict[str, list[float]] = {}
     for parent in range(_PARENTS):
-        cells = [f"8{parent:x}bb{i:010d}" for i in range(_CELLS_PER_PARENT)]
+        # Synthetic uint64 IDs in H3's working form; values need only be
+        # distinct and groupable.
+        cells = np.array(
+            [(0x8000 + parent) * 10**12 + i for i in range(_CELLS_PER_PARENT)],
+            dtype=np.uint64,
+        )
         for file_no in range(_FILES_PER_PARENT):
             # A distinct value per (cell, file), so a partial mean is detectable.
             vals = np.array(
@@ -46,14 +51,15 @@ def stage1_store(tmp_path):
                 dtype=np.float64,
             )
             for cell, v in zip(cells, vals, strict=True):
-                values.setdefault(cell, []).append(float(v))
+                values.setdefault(int(cell), []).append(float(v))
             pq.write_to_dataset(
                 pa.table(
                     {
                         "band_1": vals,
                         index_col: cells,
-                        partition_col: [f"8{parent:x}bbfffffffffff"]
-                        * _CELLS_PER_PARENT,
+                        partition_col: np.full(
+                            _CELLS_PER_PARENT, 0x85000 + parent, dtype=np.uint64
+                        ),
                     }
                 ),
                 root_path=str(store),
@@ -61,7 +67,7 @@ def stage1_store(tmp_path):
                 basename_template=f"{file_no}." + "{i}.parquet",
                 existing_data_behavior="overwrite_or_ignore",
             )
-    return store, {c: float(np.mean(v)) for c, v in values.items()}
+    return store, {int(c): float(np.mean(v)) for c, v in values.items()}
 
 
 def test_one_partition_per_parent(stage1_store):
@@ -69,7 +75,7 @@ def test_one_partition_per_parent(stage1_store):
     size-driven reader puts all six parents in one partition, failing this and
     the next test."""
     store, _ = stage1_store
-    ddf = common._read_stage1_by_parent(store, _partition_col())
+    ddf = common._read_stage1_by_parent(store, _partition_col(), pa.uint64())
 
     assert ddf.npartitions == _PARENTS
 
@@ -78,7 +84,7 @@ def test_no_parent_is_split_across_partitions(stage1_store):
     """The invariant itself: each partition holds exactly one whole parent."""
     store, _ = stage1_store
     partition_col = _partition_col()
-    ddf = common._read_stage1_by_parent(store, partition_col)
+    ddf = common._read_stage1_by_parent(store, partition_col, pa.uint64())
 
     per_partition = ddf.map_partitions(
         lambda df: pd.Series([tuple(sorted(set(df[partition_col])))]),
@@ -121,5 +127,7 @@ def test_each_cell_is_aggregated_once_over_all_its_files(stage1_store, tmp_path)
     got = pq.read_table(output).to_pandas()
     assert len(got) == _PARENTS * _CELLS_PER_PARENT
     assert not got.index.duplicated().any(), "a cell was aggregated more than once"
-    means = got["band_1"].to_dict()
+    # Default output is text: H3's boundary conversion renders the synthetic
+    # uint64 IDs as hex.
+    means = {int(k, 16): v for k, v in got["band_1"].to_dict().items()}
     assert means == pytest.approx(expected)

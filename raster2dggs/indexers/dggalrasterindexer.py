@@ -4,6 +4,7 @@ from functools import cache, lru_cache
 import dggal
 import numpy as np
 import pandas as pd
+import pyarrow as pa
 import pyproj
 import shapely
 
@@ -19,7 +20,16 @@ DGGAL_NULL_ZONE: int = 2**64 - 1
 class DGGALRasterIndexer(RasterIndexer):
     """
     Provides integration for DGGRSs depending on the DGGAL API.
+
+    Zones are handled as uint64 throughout; the structured text ID (e.g.
+    ``K7-FAD45``) is produced only at the output boundary via cells_to_string,
+    which needs the dggrs instance.
     """
+
+    CELL_ARROW_TYPE: pa.DataType = pa.uint64()
+
+    def cells_to_string(self, cells) -> list:
+        return [self.dggrs.getZoneTextID(int(c)) for c in cells]
 
     @property
     @abstractmethod
@@ -57,25 +67,25 @@ class DGGALRasterIndexer(RasterIndexer):
             self.dggrs.getZoneFromWGS84Centroid(resolution, dggal.GeoPoint(lon, lat))
             for lon, lat in zip(wide["y"], wide["x"], strict=True)
         ]  # Vectorised
-        dggrs_parent = [
-            self._get_ancestor(zone, resolution - parent_res) for zone in cells
-        ]
+        n = len(cells)
         wide = wide.drop(columns=["x", "y"])
-        wide[self.index_col(resolution)] = pd.Series(
-            map(self.dggrs.getZoneTextID, cells), index=wide.index
+        wide[self.index_col(resolution)] = np.fromiter(
+            (int(z) for z in cells), dtype=np.uint64, count=n
         )
-        wide[self.partition_col(parent_res)] = pd.Series(
-            map(self.dggrs.getZoneTextID, dggrs_parent), index=wide.index
+        wide[self.partition_col(parent_res)] = np.fromiter(
+            (int(self._get_ancestor(zone, resolution - parent_res)) for zone in cells),
+            dtype=np.uint64,
+            count=n,
         )
         return wide
 
-    def cell_to_children_size(self, cell: str, desired_resolution: int) -> int:
+    def cell_to_children_size(self, cell, desired_resolution: int) -> int:
         """
         Determine total number of children at some offset resolution
 
         Implementation of interface function.
         """
-        zone = self.dggrs.getZoneFromTextID(cell)
+        zone = int(cell)
         current_resolution = self.dggrs.getZoneLevel(zone)
         depth = desired_resolution - current_resolution
 
@@ -95,24 +105,19 @@ class DGGALRasterIndexer(RasterIndexer):
         """
         Implementation of interface function.
         """
-        child_resolution = self.dggrs.getZoneLevel(
-            self.dggrs.getZoneFromTextID(next(iter(cells)))
-        )
+        child_resolution = self.dggrs.getZoneLevel(int(next(iter(cells))))
         relative_depth = child_resolution - resolution
 
         if self.dggs in ("isea3h", "ivea3h", "rtea3h"):
             all_parents = []
-            for zone_text in cells:
-                zone = self.dggrs.getZoneFromTextID(zone_text)
+            for cell in cells:
                 # Get ancestors via all parent paths
-                ancestors = self._get_all_ancestors_3h(zone, relative_depth)
-                all_parents.extend(self.dggrs.getZoneTextID(a) for a in ancestors)
+                ancestors = self._get_all_ancestors_3h(int(cell), relative_depth)
+                all_parents.extend(int(a) for a in ancestors)
             return all_parents
 
         return map(
-            lambda zone: self.dggrs.getZoneTextID(
-                self._get_ancestor(self.dggrs.getZoneFromTextID(zone), relative_depth)
-            ),
+            lambda cell: int(self._get_ancestor(int(cell), relative_depth)),
             cells,
         )
 
@@ -125,14 +130,10 @@ class DGGALRasterIndexer(RasterIndexer):
         one representative parent — the centroid-parent path, which is what
         _get_ancestor already uses for all DGGAL grids.
         """
-        child_resolution = self.dggrs.getZoneLevel(
-            self.dggrs.getZoneFromTextID(next(iter(cells)))
-        )
+        child_resolution = self.dggrs.getZoneLevel(int(next(iter(cells))))
         relative_depth = child_resolution - resolution
         return map(
-            lambda zone: self.dggrs.getZoneTextID(
-                self._get_ancestor(self.dggrs.getZoneFromTextID(zone), relative_depth)
-            ),
+            lambda cell: int(self._get_ancestor(int(cell), relative_depth)),
             cells,
         )
 
@@ -194,7 +195,7 @@ class DGGALRasterIndexer(RasterIndexer):
             lat = float(centroid.lat)
             lon = float(centroid.lon)
             if min_lat <= lat <= max_lat and min_lon <= lon <= max_lon:
-                result.add(self.dggrs.getZoneTextID(zone))
+                result.add(int(zone))
         return result
 
     def cell_area_m2(self, resolution: int, lat: float, lon: float) -> float:
@@ -210,26 +211,21 @@ class DGGALRasterIndexer(RasterIndexer):
         pts = np.array(
             [
                 (gp.lon, gp.lat)
-                for gp in (
-                    self.dggrs.getZoneWGS84Centroid(self.dggrs.getZoneFromTextID(c))
-                    for c in cells
-                )
+                for gp in (self.dggrs.getZoneWGS84Centroid(int(c)) for c in cells)
             ],
             dtype=float,  # ecrt.Degrees objects need an explicit cast
         )
         return pts[:, 0], pts[:, 1]  # lons, lats
 
-    def cell_to_point(self, cell: str) -> shapely.geometry.Point:
-        geo_point: dggal.GeoPoint = self.dggrs.getZoneWGS84Centroid(
-            self.dggrs.getZoneFromTextID(cell)
-        )
+    def cell_to_point(self, cell) -> shapely.geometry.Point:
+        geo_point: dggal.GeoPoint = self.dggrs.getZoneWGS84Centroid(int(cell))
         return shapely.Point(geo_point.lon, geo_point.lat)
 
     def cell_to_polygon(
-        self, cell: str, edgeRefinement: int = 0
+        self, cell, edgeRefinement: int = 0
     ) -> shapely.geometry.Polygon:
         geo_points: list[dggal.GeoPoint] = self.dggrs.getZoneRefinedWGS84Vertices(
-            self.dggrs.getZoneFromTextID(cell), edgeRefinement
+            int(cell), edgeRefinement
         )
         return shapely.Polygon(tuple([(p.lon, p.lat) for p in geo_points]))
 
@@ -282,25 +278,20 @@ class DGGALRasterIndexer(RasterIndexer):
         partition_col = self.partition_col(parent_res)
 
         @lru_cache(maxsize=100000)
-        def get_level(cell_id: str) -> int:
-            return self.dggrs.getZoneLevel(self.dggrs.getZoneFromTextID(cell_id))
+        def get_level(cell_id) -> int:
+            return self.dggrs.getZoneLevel(int(cell_id))
 
         @lru_cache(maxsize=100000)
-        def get_parents(cell_id: str) -> tuple:
-            zone = self.dggrs.getZoneFromTextID(cell_id)
-            return tuple(
-                self.dggrs.getZoneTextID(p) for p in self.dggrs.getZoneParents(zone)
-            )
+        def get_parents(cell_id) -> tuple:
+            return tuple(int(p) for p in self.dggrs.getZoneParents(int(cell_id)))
 
         @lru_cache(maxsize=10000)
-        def get_child_count(parent_id: str) -> int:
-            zone = self.dggrs.getZoneFromTextID(parent_id)
-            return self.dggrs.countSubZones(zone, 1)
+        def get_child_count(parent_id) -> int:
+            return self.dggrs.countSubZones(int(parent_id), 1)
 
-        # Initialise cell data and active set
-        cell_data = {
-            cid: df.loc[cid, [partition_col] + band_cols].to_dict() for cid in df.index
-        }
+        # Column-wise extraction: a row Series would promote uint64 zone IDs
+        # to float64 alongside the float bands, rounding them.
+        cell_data = df[[partition_col] + band_cols].to_dict("index")
         active_cells = set(df.index)
 
         # Compact level by level from fine to coarse
@@ -369,7 +360,10 @@ class DGGALRasterIndexer(RasterIndexer):
             for cid in active_cells
         ]
 
-        return pd.DataFrame(result_data).set_index(index_col)
+        result = pd.DataFrame(result_data).set_index(index_col)
+        result.index = result.index.astype(df.index.dtype)
+        result[partition_col] = result[partition_col].astype(df[partition_col].dtype)
+        return result
 
 
 class ISEA4RRasterIndexer(DGGALRasterIndexer):

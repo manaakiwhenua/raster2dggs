@@ -32,6 +32,7 @@ Contributions (particularly for additional DGGSs), suggestions, bug reports and 
   - [Overlay (area-based)](#overlay-area-based---overlay)
   - [Numeric (binned) histograms](#numeric-binned-histograms---hist-bins---hist-width)
   - [Windowed resampling](#windowed-resampling---sample)
+- [Integer cell IDs](#integer-cell-ids---cell-id-uint64)
 - [Parallelism](#parallelism---processes)
 - [Profiling a run](#profiling-a-run----profile)
 - [Visualising output](#visualising-output)
@@ -244,6 +245,9 @@ Options:
                                   execution of this program. This parameter
                                   allows you to control where this data will
                                   be written.
+  --cell-id [string|uint64]       Cell ID output form: 'string' (default) or
+                                  'uint64' (unsigned 64-bit integers, e.g. for
+                                  DuckDB interop).  [default: string]
   --profile                       Print a phase-by-phase timing breakdown to
                                   stderr on completion, with per-call costs
                                   and enough context about the input (window
@@ -453,6 +457,16 @@ raster2dggs h3 landcover.tif output/ -r 9 --sample -d 0
 ```
 
 `--agg` is ignored for `--sample`. Supports `--compact`.
+
+## Integer cell IDs — `--cell-id uint64`
+
+DGGS with a native integer cell form (H3, S2, A5, and the DGGAL grids) can write cell and parent-cell columns as unsigned 64-bit integers instead of text:
+
+```bash
+raster2dggs h3 input.tif output/ -r 9 --cell-id uint64
+```
+
+Useful where downstream tools take integer cell IDs directly — e.g. DuckDB's `h3` extension accepts them without a conversion step. String-only DGGS (rHEALPix, Geohash, Maidenhead) reject `--cell-id uint64`.
 
 ## Parallelism — `--processes`
 
