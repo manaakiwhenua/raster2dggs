@@ -575,6 +575,57 @@ def _write_output(
         )
 
 
+def _stage1_partitioning(partition_col: str) -> ds.Partitioning:
+    """Hive partitioning for the Stage 1 store. The partition column is declared
+    a string because some cell IDs, geohash levels among them, otherwise read as
+    integers."""
+    return ds.partitioning(pa.schema([(partition_col, pa.string())]), flavor="hive")
+
+
+def _read_stage1_parent(pq_input: str, partition_col: str, parent: str) -> pd.DataFrame:
+    """Read every Stage 1 row belonging to one parent cell."""
+    dataset = ds.dataset(
+        pq_input, format="parquet", partitioning=_stage1_partitioning(partition_col)
+    )
+    return dataset.to_table(filter=ds.field(partition_col) == parent).to_pandas()
+
+
+def _read_stage1_by_parent(pq_input, partition_col: str) -> dd.DataFrame:
+    """Read the Stage 1 store as one partition per parent cell.
+
+    The aggregation that follows groups rows by cell, and a cell spanning two
+    raster windows has its pixels in several Stage 1 files, so every row for a
+    cell must reach the same partition. Parent directories are the coarsest
+    grouping that guarantees it, and hold a bounded number of cells (see
+    ``DGGS_Spec.default_parent_offset``).
+    """
+    dataset = ds.dataset(
+        str(pq_input),
+        format="parquet",
+        partitioning=_stage1_partitioning(partition_col),
+    )
+    parents = sorted(
+        set(
+            pa.compute.unique(
+                dataset.to_table(columns=[partition_col])[partition_col]
+            ).to_pylist()
+        )
+    )
+    LOGGER.debug("Stage 1 store spans %d parent cells", len(parents))
+    meta = _read_stage1_parent(str(pq_input), partition_col, parents[0]).head(0)
+    # --overlay list/histogram/fractions hold dicts and lists in their band
+    # columns, which dask's string conversion would stringify. Dtypes are fixed
+    # when the graph is built, so scoping it to construction is enough.
+    with dask.config.set({"dataframe.convert-string": False}):
+        return dd.from_map(
+            _read_stage1_parent,
+            [str(pq_input)] * len(parents),
+            [partition_col] * len(parents),
+            parents,
+            meta=meta,
+        )
+
+
 def address_boundary_issues(
     indexer: IRasterIndexer,
     pq_input: tempfile.TemporaryDirectory,
@@ -602,15 +653,7 @@ def address_boundary_issues(
     index_col = indexer.index_col(resolution)
     partition_col = indexer.partition_col(parent_res)
 
-    # Don't let partition schema be inferred; e.g. geohash levels can be
-    # inferred variously as int or string.
-    part_schema = pa.schema([(partition_col, pa.string())])
-    ddf = dd.read_parquet(
-        pq_input,
-        engine="pyarrow",
-        aggregate_files=True,
-        dataset={"partitioning": ds.partitioning(part_schema, flavor="hive")},
-    )
+    ddf = _read_stage1_by_parent(pq_input, partition_col)
     band_cols = [c for c in ddf.columns if not c.startswith(f"{indexer.dggs}_")]
     # Capture source dtypes before map_partitions changes them.
     # Stage 1 output for --overlay list/histogram already holds aggregated
@@ -653,6 +696,9 @@ def address_boundary_issues(
         else:
             mp_func = indexer.parent_groupby
             mp_args = (resolution, parent_res, aggfuncs, decimals)
+
+        # The partition count caps what Stage 2 can parallelise.
+        PROFILER.note("stage2_partitions", ddf.npartitions)
 
         ddf = ddf.map_partitions(mp_func, *mp_args, meta=out_meta)
 
