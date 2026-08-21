@@ -841,15 +841,61 @@ _START_METHOD = "spawn" if sys.platform == "win32" else "forkserver"
 _MIN_GDAL_CACHE_MB = 64
 
 
-def _gdal_cache_budget_mb() -> int:
-    """Total block cache to share between workers: GDAL's own default for one
-    process, which is a percentage of physical RAM."""
+def _total_ram_bytes() -> int | None:
+    """Physical RAM in bytes, or None if it cannot be determined."""
     try:
-        from osgeo import gdal
+        return os.sysconf("SC_PAGE_SIZE") * os.sysconf("SC_PHYS_PAGES")
+    except (AttributeError, OSError, ValueError):
+        pass
+    if sys.platform == "win32":  # pragma: no cover - Windows only
+        import ctypes
 
-        return max(_MIN_GDAL_CACHE_MB, int(gdal.GetCacheMax() / (1024 * 1024)))
-    except Exception:  # pragma: no cover - GDAL always present in practice
-        return _MIN_GDAL_CACHE_MB
+        class _MemoryStatusEx(ctypes.Structure):
+            _fields_ = [
+                ("dwLength", ctypes.c_uint32),
+                ("dwMemoryLoad", ctypes.c_uint32),
+                ("ullTotalPhys", ctypes.c_uint64),
+                ("ullAvailPhys", ctypes.c_uint64),
+                ("ullTotalPageFile", ctypes.c_uint64),
+                ("ullAvailPageFile", ctypes.c_uint64),
+                ("ullTotalVirtual", ctypes.c_uint64),
+                ("ullAvailVirtual", ctypes.c_uint64),
+                ("ullAvailExtendedVirtual", ctypes.c_uint64),
+            ]
+
+        status = _MemoryStatusEx()
+        status.dwLength = ctypes.sizeof(status)
+        if ctypes.windll.kernel32.GlobalMemoryStatusEx(ctypes.byref(status)):
+            return status.ullTotalPhys
+    return None
+
+
+def _gdal_cache_budget_mb() -> int:
+    """Total block cache to share between workers: a user-set GDAL_CACHEMAX if
+    present, otherwise GDAL's own single-process default (5% of physical RAM).
+
+    Computed here rather than asked of GDAL so that the osgeo bindings are not
+    a runtime dependency (raster I/O goes through rasterio's libgdal, which
+    needs no Python bindings). Parsing follows GDAL's rules for GDAL_CACHEMAX:
+    a percentage of RAM, or a number read as MB when small and bytes when
+    >= 100000. An unparseable value falls back to the default, as each worker's
+    libgdal will likewise ignore it."""
+    ram = _total_ram_bytes()
+    value = os.environ.get("GDAL_CACHEMAX", "").strip()
+    if value:
+        try:
+            if value.endswith("%"):
+                if ram is not None:
+                    pct = float(value[:-1])
+                    return max(_MIN_GDAL_CACHE_MB, int(ram * pct / 100 / 2**20))
+            else:
+                n = int(value)
+                return max(_MIN_GDAL_CACHE_MB, n if n < 100_000 else n // 2**20)
+        except ValueError:
+            pass
+    if ram is not None:
+        return max(_MIN_GDAL_CACHE_MB, int(ram * 0.05 / 2**20))
+    return _MIN_GDAL_CACHE_MB
 
 
 # Per-process Stage 1 state, populated once per worker. Worker callables must be
