@@ -1,12 +1,15 @@
-[tool.poetry]
+[project]
 name = "raster2dggs"
 version = "0.15.0"
 description = ""
-authors = ["James Ardo <ardoj@landcareresearch.co.nz>"]
-maintainers = ["Richard Law <lawr@landcareresearch.co.nz>"]
+authors = [
+    {name = "James Ardo", email = "ardoj@landcareresearch.co.nz"}
+]
+maintainers = [
+    {name = "Richard Law", email = "lawr@landcareresearch.co.nz"}
+]
 readme = "README.md"
 license = "LGPL-3.0-or-later"
-repository = "https://github.com/manaakiwhenua/raster2dggs"
 keywords = ["dggs", "raster", "h3", "rHEALPix", "cli"]
 classifiers = [
     "Topic :: Scientific/Engineering",
@@ -14,31 +17,69 @@ classifiers = [
     "Topic :: Scientific/Engineering :: Image Processing",
     "Topic :: Scientific/Engineering :: Information Analysis"
 ]
+requires-python = ">=3.11,<4.0"
+dependencies = [
+    "geopandas (>=1.0,<2.0)",
+    "rioxarray (>=0.19,<0.20)",
+    "pyarrow (>=23.0.1)",
+    "dask (>=2025.1,<2026.0)",
+    "click (>=8.1,<9.0)",
+    "tqdm (>=4,<5)",
+    "click-log (>=0.4,<0.5)",
+    "rasterio (>=1.4,<2.0)",
+    "numpy (>=2,<3)",
+    "shapely (>=2,<3)",
+    "pyproj (>=3.5,<4.0)",
+    "xarray (>=2025.1)",
+    "exactextract (>=0.3)",
+    "antimeridian (>=0.3)",
+]
+
+[project.urls]
+Repository = "https://github.com/manaakiwhenua/raster2dggs"
+
+[project.scripts]
+raster2dggs = "raster2dggs.cli:main"
+
+[project.optional-dependencies]
+h3 = ["h3 (>=4,<5)"]
+rhp = ["rhppandas (>=0.2,<0.3)", "rhealpixdggs (>=0.6,<0.7)"]
+geohash = ["python-geohash (>=0.8,<0.9)"]
+maidenhead = ["maidenhead (>=1.8,<2.0)"]
+s2 = ["s2sphere (>=0.2,<0.3)"]
+a5 = ["pya5 (>=0.9,<0.10)"]
+isea4r = ["dggal (>=0.0.6,<0.0.7)"]
+isea9r = ["dggal (>=0.0.6,<0.0.7)"]
+isea3h = ["dggal (>=0.0.6,<0.0.7)"]
+isea7h = ["dggal (>=0.0.6,<0.0.7)"]
+isea7h_z7 = ["dggal (>=0.0.6,<0.0.7)"]
+ivea4r = ["dggal (>=0.0.6,<0.0.7)"]
+ivea9r = ["dggal (>=0.0.6,<0.0.7)"]
+ivea3h = ["dggal (>=0.0.6,<0.0.7)"]
+ivea7h = ["dggal (>=0.0.6,<0.0.7)"]
+ivea7h_z7 = ["dggal (>=0.0.6,<0.0.7)"]
+rtea4r = ["dggal (>=0.0.6,<0.0.7)"]
+rtea9r = ["dggal (>=0.0.6,<0.0.7)"]
+rtea3h = ["dggal (>=0.0.6,<0.0.7)"]
+rtea7h = ["dggal (>=0.0.6,<0.0.7)"]
+rtea7h_z7 = ["dggal (>=0.0.6,<0.0.7)"]
+healpix = ["dggal (>=0.0.6,<0.0.7)"]
+rhealpix = ["dggal (>=0.0.6,<0.0.7)"]
+# Convenience extras
+dggal = ["dggal (>=0.0.6,<0.0.7)"]
+all = [
+    "h3 (>=4,<5)",
+    "rhppandas (>=0.2,<0.3)",
+    "rhealpixdggs (>=0.6,<0.7)",
+    "python-geohash (>=0.8,<0.9)",
+    "s2sphere (>=0.2,<0.3)",
+    "pya5 (>=0.9,<0.10)",
+    "maidenhead (>=1.8,<2.0)",
+    "dggal (>=0.0.6,<0.0.7)",
+]
+
+[tool.poetry]
 packages = [{include = "raster2dggs"}]
-[tool.poetry.dependencies]
-python = "^3.11"
-geopandas = "^1.0"
-rioxarray = "^0.19"
-pyarrow = ">=23.0.1"
-dask = "^2025.1"
-click = "^8.1"
-tqdm = "^4"
-click-log = "^0.4"
-rasterio = "^1.4"
-numpy = "^2"
-shapely = "^2"
-pyproj = "^3.5"
-xarray = ">=2025.1"
-exactextract = ">=0.3"
-antimeridian = ">=0.3"
-h3 = { version = "^4", optional = true }
-rhppandas = {version = "^0.2", optional = true}
-rhealpixdggs = {version = "^0.6", optional = true}
-python-geohash = {version = "^0.8", optional = true}
-maidenhead = {version = "^1.8", optional = true}
-s2sphere = {version = "^0.2", optional = true}
-pya5 = {version = "^0.9", optional = true}
-dggal = {version = "^0.0.6", optional = true}
 
 [tool.poetry.group.dev.dependencies]
 pytest = "^9.0.3"
@@ -47,11 +88,8 @@ twine ="*"
 black = "*"
 ruff = "*"
 
-[tool.poetry.scripts]
-raster2dggs = "raster2dggs.cli:main"
-
 [build-system]
-requires = ["poetry-core"]
+requires = ["poetry-core>=2.0"]
 build-backend = "poetry.core.masonry.api"
 
 [tool.pytest.ini_options]
@@ -68,31 +106,3 @@ target-version = "py311"
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B"]
 ignore = ["E501"]  # line-length is black's job
-
-[tool.poetry.extras]
-h3 = ["h3"]
-rhp = ["rhppandas","rhealpixdggs"]
-geohash = ["python-geohash"]
-maidenhead = ["maidenhead"]
-s2 = ["s2sphere"]
-a5 = ["pya5"]
-isea4r = ["dggal"]
-isea9r = ["dggal"]
-isea3h = ["dggal"]
-isea7h = ["dggal"]
-isea7h_z7 = ["dggal"]
-ivea4r = ["dggal"]
-ivea9r = ["dggal"]
-ivea3h = ["dggal"]
-ivea7h = ["dggal"]
-ivea7h_z7 = ["dggal"]
-rtea4r = ["dggal"]
-rtea9r = ["dggal"]
-rtea3h = ["dggal"]
-rtea7h = ["dggal"]
-rtea7h_z7 = ["dggal"]
-healpix = ["dggal"]
-rhealpix = ["dggal"]
-# Convenience extras
-dggal = ["dggal"]
-all = ["h3", "rhppandas", "rhealpixdggs", "python-geohash", "s2sphere", "pya5", "maidenhead", "dggal"]
