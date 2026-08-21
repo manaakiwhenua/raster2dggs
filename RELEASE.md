@@ -20,20 +20,29 @@ Releases are published to [PyPI](https://pypi.org/project/raster2dggs/) automati
    git push
    ```
 
-3. **Create a GitHub Release:**
+3. **Create a GitHub Release** — with the `gh` CLI:
+
+   ```bash
+   gh release create v0.9.1 --target master --title "v0.9.1" --generate-notes
+   ```
+
+   `--generate-notes` drafts the notes automatically from the PRs merged since the previous release; add `--notes "..."` to supplement them, or edit the release afterwards. The tag is created at the target commit when the release is published — do not push it manually beforehand.
+
+   Or via the web UI:
    - Go to the repository on GitHub → Releases → **Draft a new release**
-   - Create a new tag matching the version: `v0.9.1` (the tag is created at this point — do not push it manually beforehand)
-   - Write release notes summarising changes
+   - Create a new tag matching the version: `v0.9.1` (as with the CLI, the tag is created on publish)
+   - Write release notes summarising changes (**Generate release notes** drafts them from merged PRs)
    - Click **Publish release**
 
 4. The [`publish.yml`](.github/workflows/publish.yml) workflow triggers automatically, builds the distributions, and uploads them to PyPI. No further action is required.
 
 ## How it works
 
-The workflow (`.github/workflows/publish.yml`) has two jobs:
+The workflow (`.github/workflows/publish.yml`) has three jobs:
 
+- **`test`** — runs the full test suite and format checks (via `run-tests.yml`). A failure here stops the release before anything is built or published; fix the problem, then publish a fresh release (a published release whose workflow failed never reached PyPI, so its tag/release can be deleted and the version reused, or simply superseded).
 - **`build`** — installs Poetry, runs `poetry build` to produce the source distribution and wheel, and uploads them as a workflow artifact.
-- **`publish`** — downloads the artifact and uses [`pypa/gh-action-pypa-publish`](https://github.com/pypa/gh-action-pypa-publish) to upload to PyPI. This job runs in the `release` GitHub environment and holds the `id-token: write` permission needed to obtain a short-lived OIDC token from GitHub. PyPI exchanges this token for upload credentials without any stored secret.
+- **`publish`** — downloads the artifact and uses [`pypa/gh-action-pypi-publish`](https://github.com/pypa/gh-action-pypi-publish) to upload to PyPI. This job runs in the `release` GitHub environment and holds the `id-token: write` permission needed to obtain a short-lived OIDC token from GitHub. PyPI exchanges this token for upload credentials without any stored secret.
 
 The two jobs are separated so that the elevated OIDC permission is scoped only to the publish step.
 
