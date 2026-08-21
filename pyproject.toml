@@ -1,6 +1,6 @@
 [project]
 name = "raster2dggs"
-version = "0.15.1"
+version = "0.15.2"
 description = "CLI tool to index raster files to DGGS in parallel, writing out to Parquet."
 authors = [
     {name = "James Ardo", email = "ardoj@landcareresearch.co.nz"}
@@ -111,6 +111,7 @@ pythonpath = ["tests"]
 
 [tool.black]
 line-length = 88
+target-version = ["py311"]
 
 [tool.ruff]
 line-length = 88

@@ -1254,9 +1254,10 @@ def initial_index(
                     (w.col_off, w.row_off, w.width, w.height) for w in windows
                 ]
                 try:
-                    with PROFILER.phase("stage1.wall"), tqdm(
-                        total=len(windows), desc="Raster windows"
-                    ) as pbar:
+                    with (
+                        PROFILER.phase("stage1.wall"),
+                        tqdm(total=len(windows), desc="Raster windows") as pbar,
+                    ):
                         if processes > 1:
                             # One snapshot per worker: a worker's totals only
                             # grow, so the last one it sends is its total.
