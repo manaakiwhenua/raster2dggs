@@ -1,10 +1,7 @@
 import click
-from osgeo import gdal
 
 from raster2dggs import __version__
 from raster2dggs.cli_factory import SPECS, make_command
-
-gdal.UseExceptions()
 
 
 @click.group()

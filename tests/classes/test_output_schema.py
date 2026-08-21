@@ -5,7 +5,6 @@ from classes.base import TestRunthrough, read_output
 from classes.helpers import make_raster
 from click.testing import CliRunner
 from data.datapaths import TEST_OUTPUT_PATH
-from osgeo import gdal
 from rasterio.crs import CRS
 from rasterio.transform import from_bounds
 
@@ -489,10 +488,8 @@ def _make_categorical_raster(path: str) -> None:
 
 
 def _set_band_name(path: str, band_name: str, band_index: int = 1) -> None:
-    ds = gdal.Open(path, gdal.GA_Update)
-    ds.GetRasterBand(band_index).SetDescription(band_name)
-    ds.FlushCache()
-    ds.Close()
+    with rasterio.open(path, "r+") as ds:
+        ds.set_band_description(band_index, band_name)
 
 
 def _make_named_raster(path: str, band_name: str) -> None:
