@@ -11,6 +11,6 @@ authors:
     given-names: Nicoletta
 repository-code: https://github.com/manaakiwhenua/raster2dggs
 url: https://github.com/manaakiwhenua/raster2dggs
-version: "0.15.0"
-date-released: "2026-08-10"
+version: "0.15.1"
+date-released: "2026-08-21"
 license: LGPL-3.0-or-later
