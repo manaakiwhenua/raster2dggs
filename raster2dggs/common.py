@@ -134,7 +134,11 @@ def check_resolutions(resolution: int, parent_res: int) -> None:
 
 def resolve_input_path(raster_input: str | Path) -> str | Path:
     if not Path(raster_input).exists():
-        if not urlparse(raster_input).scheme:
+        # GDAL virtual filesystem paths (/vsicurl/, /vsis3/, chained forms
+        # like /vsizip//vsicurl/...) have no URI scheme but are remote/virtual.
+        if not (
+            str(raster_input).startswith("/vsi") or urlparse(str(raster_input)).scheme
+        ):
             LOGGER.warning(
                 f"Input raster {raster_input} does not exist, and is not recognised as a remote URI"
             )
