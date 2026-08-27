@@ -348,6 +348,19 @@ class TestMultiAgg(TestRunthrough):
         self.assertGreater(len(table), 0)
         self.assertIsInstance(table.schema.field("band_1").type, pa.StructType)
 
+    def test_multi_agg_with_na_in_struct_and_compaction(self):
+        # Regression: at res 8 some cells hold one pixel and their siblings
+        # several; with -d 0 the aggregates are nullable Int64, so a lone
+        # pixel's std is pd.NA inside the dict. Comparing that dict with a
+        # sibling's {"std": 0} raised "boolean value of NA is ambiguous".
+        table = self._run(8, "--agg", "mean,std,min", "-d", "0", "-co")
+        self.assertGreater(len(table), 0)
+        df = table.to_pandas()
+        # Uniform raster: every mean/min must be the pixel value, compacted or not.
+        for row in df["band_1"]:
+            self.assertEqual(row["mean"], _PIXEL_VALUE)
+            self.assertEqual(row["min"], _PIXEL_VALUE)
+
     def test_invalid_agg_name_rejected(self):
         runner = CliRunner()
         result = runner.invoke(

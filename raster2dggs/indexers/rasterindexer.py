@@ -19,13 +19,41 @@ def _is_nan(v) -> bool:
         return False
 
 
+# Sentinel standing in for every kind of missing value (pd.NA, None, NaN) in
+# _freeze, so that two missing values compare equal and a missing value compares
+# unequal to a number -- without ever evaluating ``pd.NA == x``, which yields NA
+# rather than a bool and makes dict equality raise.
+_MISSING = object()
+
+
+def _freeze(v):
+    """Hashable, NA-safe key for a cell value: a scalar, a dict/struct (e.g.
+    multi-aggregation ``{'mean': .., 'std': ..}``), or a list (e.g. ``list`` mode)."""
+    if isinstance(v, dict):
+        return tuple((k, _freeze(x)) for k, x in sorted(v.items()))
+    if isinstance(v, (list, tuple, np.ndarray)):
+        return tuple(_freeze(x) for x in v)
+    if v is pd.NA or v is None or _is_nan(v):
+        return _MISSING
+    return v
+
+
 def _col_is_uniform(series: pd.Series) -> bool:
-    """Return True if every value in series is identical. Handles unhashable types (e.g. dicts)."""
+    """Return True if every value in series is identical.
+
+    Scalar columns take pandas' C-level ``nunique`` path. Unhashable values
+    (dicts, lists) are compared through ``_freeze``, which is NA-safe -- nullable
+    aggregates (e.g. ``std`` of a single-pixel cell under ``-d 0``) put ``pd.NA``
+    inside the dicts, and ``dict.__eq__`` on those raises. Sibling groups at
+    coarse compaction levels can hold tens of thousands of cells, so the
+    comparison must short-circuit on the first mismatch as the scalar path does.
+    """
     try:
         return series.nunique(dropna=False) == 1
     except TypeError:
-        first = series.iloc[0]
-        return all(v == first for v in series)
+        it = iter(series)
+        first = _freeze(next(it))
+        return all(_freeze(v) == first for v in it)
 
 
 def _mask_is_nodata(series: pd.Series, nodata) -> pd.Series:
