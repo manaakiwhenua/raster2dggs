@@ -154,6 +154,7 @@ class RasterIndexer(IRasterIndexer):
         emit_nodata_value: Number | None = None,
         transformer=None,
         selected_indices: tuple[int] = None,
+        valid_mask: np.ndarray | None = None,
     ) -> pa.Table:
         if nodata_policy.lower() not in ("omit", "emit"):
             raise ValueError(f"Unknown nodata policy: {nodata_policy}")
@@ -169,6 +170,13 @@ class RasterIndexer(IRasterIndexer):
         if not np.issubdtype(values.dtype, np.floating):
             values = values.astype(np.float64)
         flat = values.reshape(n_bands, height * width)
+        # Dataset-mask validity (alpha / mask band), (bands, h, w) with True
+        # meaning valid; masked pixels are treated exactly like nodata below.
+        invalid_flat = (
+            None
+            if valid_mask is None
+            else ~np.asarray(valid_mask, dtype=bool).reshape(n_bands, height * width)
+        )
 
         with PROFILER.phase("stage1.reshape"):
             emit_mode = nodata_policy.lower() == "emit"
@@ -178,8 +186,10 @@ class RasterIndexer(IRasterIndexer):
             )
 
             cols = {}
-            for band_id, col in zip(band_ids, flat, strict=True):
+            for i, (band_id, col) in enumerate(zip(band_ids, flat, strict=True)):
                 mask = _mask_is_nodata_array(col, nodata)
+                if invalid_flat is not None:
+                    mask |= invalid_flat[i]
                 if mask.any():
                     col = col.copy()
                     col[mask] = np.nan if emit_fill is None else emit_fill

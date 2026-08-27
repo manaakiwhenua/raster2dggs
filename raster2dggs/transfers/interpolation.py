@@ -98,6 +98,9 @@ class _SampleIndexer:
     # keeps all non-default fields before these.
     bicubic_a: float = dataclasses.field(default=-0.5)
     lanczos_lobes: int = dataclasses.field(default=3)
+    # Set when the source carries an alpha/mask band and --mask is on: masked
+    # pixels are read as NaN so every kernel treats them as nodata.
+    apply_mask: bool = dataclasses.field(default=False)
 
     def __post_init__(self):
         self._read_lock = threading.Lock()
@@ -159,8 +162,18 @@ class _SampleIndexer:
         Reads are serialised: ``src`` is one GDAL dataset shared by every worker
         thread, and GDAL datasets are not safe for concurrent access.
         """
+        indexes = list(self.selected_indices)
         with PROFILER.phase("stage1.read_block"), self._read_lock:
-            return self.src.read(indexes=list(self.selected_indices), window=window)
+            data = self.src.read(indexes=indexes, window=window)
+            if not self.apply_mask:
+                return data
+            masks = self.src.read_masks(indexes=indexes, window=window)
+        # Masked pixels become NaN here, upstream of every kernel: each one
+        # already keys its nodata handling off isnan. Integer bands are widened
+        # so they can hold NaN.
+        data = data.astype(float, copy=False)
+        data[masks == 0] = np.nan
+        return data
 
     def _expand_window(self, window, margin: int):
         """Expand window by margin pixels, clamped to raster bounds."""

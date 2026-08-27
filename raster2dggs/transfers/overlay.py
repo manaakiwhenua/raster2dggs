@@ -29,6 +29,7 @@ import pyarrow as pa
 import pyproj
 import rasterio as rio
 from exactextract import exact_extract
+from exactextract.raster import RasterioRasterSource
 from rasterio.warp import transform as warp_transform
 from rasterio.warp import transform_bounds
 from shapely.geometry import Polygon, shape
@@ -123,6 +124,40 @@ def _fix_antimeridian(poly):
     return shape(fixed)
 
 
+class _MaskedRasterSource(RasterioRasterSource):
+    """exactextract raster source that honours the GDAL dataset mask.
+
+    exactextract's own sources return numpy masked arrays for masked pixels,
+    but exactextract 0.3 ignores the mask for some partially-masked windows
+    (observed: a 7x7 uint8 window with 42 masked pixels read as fully valid,
+    while fully-masked and other partially-masked windows were fine). NaN in
+    a float array is handled reliably, so masked pixels -- declared nodata and
+    alpha/mask bands alike, via rasterio's masked read -- become NaN here.
+    """
+
+    def nodata_value(self):
+        # Nodata pixels are already NaN; declaring the value as well would
+        # compare an integer against a float array.
+        return None
+
+    def read_window(self, x0, y0, nx, ny):
+        arr = super().read_window(x0, y0, nx, ny)
+        if not np.ma.isMaskedArray(arr):
+            return arr
+        # float64 is exact for every integer type GDAL produces.
+        return np.ma.filled(arr.astype(np.float64), np.nan)
+
+
+def masked_raster_sources(ds: rio.DatasetReader, indices) -> list:
+    """Per-band exactextract sources for ``indices`` (1-based), named the way
+    exactextract names bands read from a path (``band_{i}``, or unnamed for a
+    single-band raster) so downstream column renaming is unchanged."""
+    return [
+        _MaskedRasterSource(ds, i, name=f"band_{i}" if ds.count > 1 else None)
+        for i in indices
+    ]
+
+
 @dataclasses.dataclass(repr=False)
 class _OverlayIndexer:
     """Shared context for --transfer overlay_weighted / overlay_mode / mass_preserve.
@@ -151,6 +186,13 @@ class _OverlayIndexer:
     # here.
     shared_weights_path: str | None = None
     shared_coverage_mask_path: str | None = None
+    # Whether GDAL dataset masks (alpha / mask bands) count as nodata. When the
+    # source has one, raster_source replaces raster_input as what exactextract
+    # reads: masked_raster_sources(...) with --mask, or a rioxarray DataArray
+    # opened with masked=False (raw pixel values) with --no-mask. None means
+    # "use raster_input".
+    use_mask: bool = True
+    raster_source: Any = None
 
     def __post_init__(self):
         # mass_preserve (sum) must not filter by coverage — partial sums are correct
@@ -281,7 +323,6 @@ class _OverlayIndexer:
                 if self.shared_coverage_mask_path is not None:
                     self._coverage_mask_path = self.shared_coverage_mask_path
                 else:
-                    data = src.read(masked=True)
                     mask_profile = src.profile.copy()
                     mask_profile.update(dtype="float32", nodata=None)
                     with tempfile.NamedTemporaryFile(
@@ -289,13 +330,24 @@ class _OverlayIndexer:
                     ) as tmp:
                         self._coverage_mask_path = tmp.name
                     self._own_temp_paths.append(self._coverage_mask_path)
-                    # data.mask is scalar False when the source has no nodata value;
-                    # broadcast to full (bands, height, width) shape before writing.
-                    validity = (~np.broadcast_to(data.mask, data.shape)).astype(
-                        np.float32
-                    )
+                    if self.use_mask:
+                        # A masked read honours declared nodata and any alpha /
+                        # mask band. data.mask is scalar False when nothing is
+                        # masked; broadcast to (bands, height, width).
+                        data = src.read(masked=True)
+                        validity = ~np.broadcast_to(data.mask, data.shape)
+                    else:
+                        # --no-mask: only the declared nodata value counts.
+                        data = src.read()
+                        validity = np.ones(data.shape, dtype=bool)
+                        for b, nd in enumerate(src.nodatavals):
+                            if nd is None:
+                                continue
+                            validity[b] = ~(
+                                np.isnan(data[b]) if np.isnan(nd) else data[b] == nd
+                            )
                     with rio.open(self._coverage_mask_path, "w", **mask_profile) as dst:
-                        dst.write(validity)
+                        dst.write(validity.astype(np.float32))
             else:
                 self._raster_footprint_wgs84 = None
                 self._coverage_mask_path = None
@@ -454,10 +506,13 @@ class _OverlayIndexer:
             main_ops = [weighted_agg]
         else:
             main_ops = [str(self.op)]
+        rast = (
+            self.raster_source if self.raster_source is not None else self.raster_input
+        )
         with PROFILER.phase("stage1.exactextract"):
             if is_geodesic:
                 result_df = exact_extract(
-                    self.raster_input,
+                    rast,
                     gdf,
                     main_ops,
                     weights=self._geodesic_weights_path,
@@ -466,7 +521,7 @@ class _OverlayIndexer:
                 )
             else:
                 result_df = exact_extract(
-                    self.raster_input,
+                    rast,
                     gdf,
                     main_ops,
                     include_cols="_fid",

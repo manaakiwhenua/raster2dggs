@@ -87,6 +87,7 @@ DEFAULTS = {
     "geo": "none",
     "tempdir": tempfile.tempdir,
     "nodata_policy": "omit",
+    "use_mask": True,
 }
 
 

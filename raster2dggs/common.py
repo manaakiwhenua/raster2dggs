@@ -28,6 +28,7 @@ import pyproj
 import rasterio as rio
 import rioxarray
 import shapely
+from rasterio.enums import ColorInterp, MaskFlags
 from rasterio.warp import transform_bounds
 from tqdm import tqdm
 from tqdm.dask import TqdmCallback
@@ -39,7 +40,7 @@ from raster2dggs.interfaces import IRasterIndexer
 from raster2dggs.profiling import PROFILER
 from raster2dggs.transfers.assign_centers import _AssignCentersIndexer
 from raster2dggs.transfers.interpolation import _SampleIndexer
-from raster2dggs.transfers.overlay import _OverlayIndexer
+from raster2dggs.transfers.overlay import _OverlayIndexer, masked_raster_sources
 
 LOGGER = logging.getLogger(__name__)
 click_log.basic_config(LOGGER)
@@ -313,6 +314,7 @@ def assemble_kwargs(
     hist_weight: str = "count",
     hist_normalize: str = "none",
     cell_id: str = "string",
+    use_mask: bool = True,
 ) -> dict:
     return {
         "compression": compression,
@@ -332,6 +334,7 @@ def assemble_kwargs(
         "hist_weight": hist_weight,
         "hist_normalize": hist_normalize,
         "cell_id": cell_id,
+        "use_mask": use_mask,
     }
 
 
@@ -937,6 +940,18 @@ class _ParquetWriter:
             )
 
 
+def _needs_mask_read(src: rio.DatasetReader, selected_indices) -> bool:
+    """True if any selected band's validity comes from a mask band -- an alpha
+    band or an internal/sidecar mask -- rather than only from a declared nodata
+    value. Nodata alone is already handled by value, so reading the mask for it
+    would be pure overhead."""
+    flags = src.mask_flag_enums
+    return any(
+        MaskFlags.alpha in flags[i - 1] or MaskFlags.per_dataset in flags[i - 1]
+        for i in selected_indices
+    )
+
+
 def _setup_stage1_worker(cfg: dict) -> None:
     """Build this process's transfer context from picklable configuration.
 
@@ -949,6 +964,9 @@ def _setup_stage1_worker(cfg: dict) -> None:
     env = rio.Env()
     env.__enter__()
     src = rio.open(cfg["raster_input"], mode="r", sharing=False)
+    # .get: cfg is internal, and callers building it by hand predate use_mask.
+    use_mask = cfg.get("use_mask", True)
+    apply_mask = use_mask and _needs_mask_read(src, cfg["selected_indices"])
     indexer = idxfactory.indexer_instance(cfg["dggs"])
     write_result = _ParquetWriter(
         tmpdir=cfg["tmpdir"],
@@ -968,6 +986,17 @@ def _setup_stage1_worker(cfg: dict) -> None:
 
     da = None
     if cfg["transfer"] in const.OVERLAY_TRANSFER_KEYS:
+        # Only a source with an alpha/mask band needs anything other than the
+        # raster path: masked NaN-float sources with --mask (exactextract's own
+        # masked-array handling is unreliable), raw pixel values with --no-mask.
+        raster_source = None
+        if _needs_mask_read(src, range(1, src.count + 1)):
+            if use_mask:
+                raster_source = masked_raster_sources(src, cfg["selected_indices"])
+            else:
+                raster_source = rioxarray.open_rasterio(
+                    src, masked=False, default_name=const.DEFAULT_NAME
+                )
         ctx = _OverlayIndexer(
             raster_input=cfg["raster_input"],
             op=cfg["op"],
@@ -975,6 +1004,8 @@ def _setup_stage1_worker(cfg: dict) -> None:
             min_valid_coverage=cfg["min_valid_coverage"],
             decimals=cfg["decimals"],
             hist_spec=cfg["hist_spec"],
+            use_mask=use_mask,
+            raster_source=raster_source,
             **cfg["overlay_shared_paths"],
             **shared,
         )
@@ -1002,6 +1033,7 @@ def _setup_stage1_worker(cfg: dict) -> None:
                 da=da,
                 inverse_transformer=transformer,
                 nodata=src.nodata,
+                apply_mask=apply_mask,
                 **shared,
             )
             func = {
@@ -1014,7 +1046,12 @@ def _setup_stage1_worker(cfg: dict) -> None:
                 src.crs, "EPSG:4326", always_xy=True
             )
             ctx = _AssignCentersIndexer(
-                da=da, nodata=src.nodata, transformer=transformer, **shared
+                da=da,
+                nodata=src.nodata,
+                transformer=transformer,
+                src=src,
+                apply_mask=apply_mask,
+                **shared,
             )
             func = ctx.process_window
 
@@ -1153,8 +1190,28 @@ def initial_index(
                     )
                     for i in range(1, count + 1)
                 }
+                use_mask = bool(kwargs.get("use_mask", True))
                 if not bands:  # Covers None or empty tuple
                     selected_indices = list(range(1, count + 1))
+                    if use_mask:
+                        # An alpha band expresses validity, not data: with masks
+                        # honoured it is consumed as the dataset mask rather than
+                        # emitted. Selecting it explicitly with -b still emits it.
+                        alpha = [
+                            i
+                            for i in selected_indices
+                            if src.colorinterp[i - 1] == ColorInterp.alpha
+                        ]
+                        if alpha and len(alpha) < len(selected_indices):
+                            LOGGER.info(
+                                "Alpha band(s) %s used as the dataset mask and not "
+                                "emitted; select explicitly with -b to emit as data "
+                                "(or pass --no-mask)",
+                                alpha,
+                            )
+                            selected_indices = [
+                                i for i in selected_indices if i not in alpha
+                            ]
                 else:
                     if all(isinstance(b, int) or str(b).isdigit() for b in bands):
                         selected_indices = list(map(int, bands))
@@ -1212,6 +1269,7 @@ def initial_index(
                     "selected_labels": selected_labels,
                     "nodata_policy": nodata_policy,
                     "emit_nodata_value": emit_nodata_value,
+                    "use_mask": use_mask,
                     "transfer": kwargs["transfer"],
                     "interp": kwargs.get("interp", const.Interp.NN),
                     "op": kwargs.get("op"),
@@ -1251,6 +1309,7 @@ def initial_index(
                         min_valid_coverage=cfg["min_valid_coverage"],
                         decimals=cfg["decimals"],
                         hist_spec=cfg["hist_spec"],
+                        use_mask=use_mask,
                     )
                     cfg["overlay_shared_paths"] = shared_overlay.shared_temp_paths()
 
