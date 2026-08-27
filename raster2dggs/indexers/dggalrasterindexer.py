@@ -8,7 +8,7 @@ import pyarrow as pa
 import pyproj
 import shapely
 
-from raster2dggs.indexers.rasterindexer import RasterIndexer
+from raster2dggs.indexers.rasterindexer import RasterIndexer, _freeze
 
 # Instantiate DGGAL
 dggal.pydggal_setup(dggal.Application(appGlobals=globals()))
@@ -320,10 +320,15 @@ class DGGALRasterIndexer(RasterIndexer):
                 if len(children) != get_child_count(parent_id):
                     continue
 
-                # Check if all band values are qual across children
+                # Check if all band values are equal across children. Compared
+                # through _freeze: multi-aggregation dicts may hold pd.NA, on
+                # which plain == raises rather than returning a bool.
                 first_data = cell_data[children[0]]
                 if all(
-                    all(cell_data[c][band] == first_data[band] for c in children)
+                    all(
+                        _freeze(cell_data[c][band]) == _freeze(first_data[band])
+                        for c in children
+                    )
                     for band in band_cols
                 ):
                     # compactable[parent_id] = (children, first_data.copy())
