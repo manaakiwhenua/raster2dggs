@@ -109,6 +109,7 @@ class IRasterIndexer:
         emit_nodata_value: Number | None = None,
         transformer=None,
         selected_indices: tuple[int] = None,
+        valid_mask: np.ndarray | None = None,
     ) -> pa.Table:
         """
         Function for primary indexation.

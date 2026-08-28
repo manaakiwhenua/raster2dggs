@@ -54,3 +54,75 @@ def make_gradient_raster(
         transform=from_bounds(*bounds, size, size),
     ) as dst:
         dst.write(data)
+
+
+def make_rgba_raster(
+    path: str,
+    bounds: tuple,
+    size: int,
+    pixel_value: int = 100,
+    masked_cols: int | None = None,
+) -> None:
+    """Write a uint8 RGBA WGS84 GeoTIFF with no nodata value, coverage expressed
+    solely by the alpha band -- the LINZ-mosaic pattern of issue #105.
+
+    The leftmost ``masked_cols`` columns (default: half the width) have alpha 0
+    and RGB (0, 0, 0); everywhere else alpha is 255 and RGB is ``pixel_value``.
+    """
+    from rasterio.enums import ColorInterp
+
+    if masked_cols is None:
+        masked_cols = size // 2
+    data = np.full((4, size, size), pixel_value, dtype=np.uint8)
+    data[3] = 255
+    data[:, :, :masked_cols] = 0
+    with rasterio.open(
+        path,
+        "w",
+        driver="GTiff",
+        height=size,
+        width=size,
+        count=4,
+        dtype="uint8",
+        crs=CRS.from_epsg(4326),
+        transform=from_bounds(*bounds, size, size),
+    ) as dst:
+        dst.write(data)
+        dst.colorinterp = (
+            ColorInterp.red,
+            ColorInterp.green,
+            ColorInterp.blue,
+            ColorInterp.alpha,
+        )
+
+
+def make_internal_mask_raster(
+    path: str,
+    bounds: tuple,
+    size: int,
+    pixel_value: float = 1.0,
+    masked_cols: int | None = None,
+) -> None:
+    """Write a single-band float32 WGS84 GeoTIFF with no nodata value whose
+    validity is carried by an internal (TIFF) mask band: the leftmost
+    ``masked_cols`` columns (default: half) are masked, and hold 0.0."""
+    if masked_cols is None:
+        masked_cols = size // 2
+    data = np.full((1, size, size), pixel_value, dtype=np.float32)
+    data[:, :, :masked_cols] = 0.0
+    mask = np.full((size, size), 255, dtype=np.uint8)
+    mask[:, :masked_cols] = 0
+    with rasterio.Env(GDAL_TIFF_INTERNAL_MASK=True):
+        with rasterio.open(
+            path,
+            "w",
+            driver="GTiff",
+            height=size,
+            width=size,
+            count=1,
+            dtype="float32",
+            crs=CRS.from_epsg(4326),
+            transform=from_bounds(*bounds, size, size),
+        ) as dst:
+            dst.write(data)
+            dst.write_mask(mask)

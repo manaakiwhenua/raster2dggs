@@ -209,6 +209,7 @@ def run_index(
     band,
     nodata_policy: str,
     emit_nodata_value: float | None,
+    use_mask: bool,
     compression: str,
     processes: int,
     agg,
@@ -253,6 +254,7 @@ def run_index(
         hist_weight,
         hist_normalize,
         cell_id,
+        use_mask=use_mask,
     )
 
     PROFILER.reset(enabled=profile)
@@ -342,6 +344,19 @@ def make_command(spec: DGGS_Spec):
             "If omitted, the source raster nodata value is used (NaN if none is defined). "
             "Coerced to the output dtype. "
             "Note: non-NaN values participate in cell aggregation (see -a/--agg)."
+        ),
+    )
+    @click.option(
+        "--mask/--no-mask",
+        "use_mask",
+        default=const.DEFAULTS["use_mask"],
+        show_default=True,
+        help=(
+            "Honour the raster's GDAL dataset mask (an alpha band, or an internal/sidecar .msk mask band) "
+            "as nodata, in addition to any declared nodata value. Masked pixels are treated exactly like "
+            "nodata pixels by --nodata/--nodata-fill, aggregation and coverage accounting. An alpha band "
+            "that is not explicitly selected with -b is consumed as the mask and not emitted as a data band. "
+            "--no-mask ignores masks entirely: masked pixels are read as ordinary data."
         ),
     )
     @click.option(
@@ -563,6 +578,7 @@ def make_command(spec: DGGS_Spec):
         band,
         nodata_policy,
         emit_nodata_value,
+        use_mask,
         compression,
         processes,
         agg,
@@ -646,6 +662,7 @@ def make_command(spec: DGGS_Spec):
             band,
             nodata_policy,
             emit_nodata_value,
+            use_mask,
             compression,
             processes,
             agg,
