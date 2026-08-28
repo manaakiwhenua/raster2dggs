@@ -53,13 +53,12 @@ class _AssignCentersIndexer:
         sdf = self.da.rio.isel_window(window)
         valid_mask = None
         if self.apply_mask:
+            # Read in the DataArray's own band order, not selected_indices
+            # order: when every band is selected the DataArray is left in
+            # natural order regardless of the order -b was given in.
+            band_order = [int(b) for b in sdf["band"].values]
             with PROFILER.phase("stage1.read_mask"), self._read_lock:
-                valid_mask = (
-                    self.src.read_masks(
-                        indexes=list(self.selected_indices), window=window
-                    )
-                    != 0
-                )
+                valid_mask = self.src.read_masks(indexes=band_order, window=window) != 0
         result = self.indexer.index_func(
             sdf,
             self.resolution,
