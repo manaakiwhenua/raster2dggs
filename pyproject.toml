@@ -1,6 +1,6 @@
 [project]
 name = "raster2dggs"
-version = "0.15.2"
+version = "0.16.0"
 description = "CLI tool to index raster files to DGGS in parallel, writing out to Parquet."
 authors = [
     {name = "James Ardo", email = "ardoj@landcareresearch.co.nz"}
