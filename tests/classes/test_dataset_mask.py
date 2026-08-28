@@ -102,6 +102,26 @@ class TestAlphaMask(TestRunthrough):
         self.assertTrue((vals == -1).any())  # fully masked cells
         self.assertTrue((vals == _VALUE).any())  # fully valid cells
 
+    def test_point_all_bands_reordered_keeps_masks_aligned(self):
+        # Every band selected, non-natural order: the DataArray stays in
+        # natural order, so masks must be read in that order too. Alpha's own
+        # mask is all-valid, so a misalignment would unmask band 1.
+        df = self._run("-b", "4", "-b", "1", "-b", "2", "-b", "3")
+        b1 = df["band_1"].to_numpy(dtype=float)
+        b4 = df["band_4"].to_numpy(dtype=float)
+        self.assertTrue(np.all(b1[~np.isnan(b1)] == _VALUE))
+        # alpha-as-data is averaged per cell, so anything in [0, 255] is fine
+        self.assertTrue(np.all((b4 >= 0) & (b4 <= 255)))
+        self.assertTrue((b4 == 0).any())  # fully masked cells survive via alpha
+
+    def test_point_emit_without_fill_writes_nan(self):
+        df = self._run("-n", "emit")
+        b1 = df["band_1"].to_numpy(dtype=float)
+        self.assertTrue(np.isnan(b1).any())
+        self.assertTrue(np.all(b1[~np.isnan(b1)] == _VALUE))
+        # emit keeps every cell, masked or not: same cell count as --no-mask.
+        self.assertEqual(len(df), len(self._run("--no-mask")))
+
     def test_point_masked_run_has_fewer_cells(self):
         n_masked = len(self._run())
         n_raw = len(self._run("--no-mask"))
@@ -114,6 +134,14 @@ class TestAlphaMask(TestRunthrough):
 
     def test_sample_bilinear_masks(self):
         df = self._run("--sample", "bilinear", res=_SAMPLE_RES)
+        self._assert_only_valid_values(df)
+
+    def test_sample_bicubic_masks(self):
+        df = self._run("--sample", "bicubic", res=_SAMPLE_RES)
+        self._assert_only_valid_values(df)
+
+    def test_sample_lanczos_masks(self):
+        df = self._run("--sample", "lanczos", res=_SAMPLE_RES)
         self._assert_only_valid_values(df)
 
     def test_sample_no_mask_leaks_filler(self):
@@ -133,6 +161,24 @@ class TestAlphaMask(TestRunthrough):
         n_all = len(self._run("--overlay", "weighted"))
         n_vct = len(self._run("--overlay", "weighted", "-vct", "0.9"))
         self.assertLess(n_vct, n_all)  # edge cells straddling the mask are dropped
+
+    def test_overlay_coverage_threshold_no_mask_counts_masked_as_valid(self):
+        # With --no-mask the coverage raster must not honour the alpha band
+        # either, so only cells at the raster's own edge fall below threshold.
+        n_masked = len(self._run("--overlay", "weighted", "-vct", "0.9"))
+        n_raw = len(self._run("--overlay", "weighted", "-vct", "0.9", "--no-mask"))
+        self.assertGreater(n_raw, n_masked)
+
+    def test_overlay_mode_masks(self):
+        df = self._run("--overlay", "mode")
+        self._assert_only_valid_values(df)
+
+    def test_overlay_explicit_alpha_band_is_emitted_as_data(self):
+        df = self._run("--overlay", "weighted", "-b", "1", "-b", "4")
+        self.assertIn("band_4", df.columns)
+        b1 = df["band_1"].to_numpy(dtype=float)
+        self.assertTrue(np.all(b1[~np.isnan(b1)] == _VALUE))
+        self.assertTrue(np.all(df["band_4"].to_numpy(dtype=float) <= 255))
 
 
 class TestInternalMask(TestRunthrough):

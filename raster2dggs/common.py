@@ -40,7 +40,11 @@ from raster2dggs.interfaces import IRasterIndexer
 from raster2dggs.profiling import PROFILER
 from raster2dggs.transfers.assign_centers import _AssignCentersIndexer
 from raster2dggs.transfers.interpolation import _SampleIndexer
-from raster2dggs.transfers.overlay import _OverlayIndexer, masked_raster_sources
+from raster2dggs.transfers.overlay import (
+    _OverlayIndexer,
+    masked_raster_sources,
+    raw_raster_sources,
+)
 
 LOGGER = logging.getLogger(__name__)
 click_log.basic_config(LOGGER)
@@ -990,13 +994,9 @@ def _setup_stage1_worker(cfg: dict) -> None:
         # raster path: masked NaN-float sources with --mask (exactextract's own
         # masked-array handling is unreliable), raw pixel values with --no-mask.
         raster_source = None
-        if _needs_mask_read(src, range(1, src.count + 1)):
-            if use_mask:
-                raster_source = masked_raster_sources(src, cfg["selected_indices"])
-            else:
-                raster_source = rioxarray.open_rasterio(
-                    src, masked=False, default_name=const.DEFAULT_NAME
-                )
+        if _needs_mask_read(src, cfg["selected_indices"]):
+            make_sources = masked_raster_sources if use_mask else raw_raster_sources
+            raster_source = make_sources(src, cfg["selected_indices"])
         ctx = _OverlayIndexer(
             raster_input=cfg["raster_input"],
             op=cfg["op"],
@@ -1012,9 +1012,13 @@ def _setup_stage1_worker(cfg: dict) -> None:
         func = ctx.process_window
         transformer = None
     else:
+        # One lock guards every read of ``src`` in this process -- rioxarray's
+        # and the transfers' mask reads alike; GDAL datasets are not safe for
+        # concurrent access.
+        read_lock = dask.utils.SerializableLock()
         da = rioxarray.open_rasterio(
             src,
-            lock=dask.utils.SerializableLock(),
+            lock=read_lock,
             masked=False,
             default_name=const.DEFAULT_NAME,
         ).chunk(**{"y": "auto", "x": "auto"})
@@ -1034,6 +1038,7 @@ def _setup_stage1_worker(cfg: dict) -> None:
                 inverse_transformer=transformer,
                 nodata=src.nodata,
                 apply_mask=apply_mask,
+                read_lock=read_lock,
                 **shared,
             )
             func = {
@@ -1051,6 +1056,7 @@ def _setup_stage1_worker(cfg: dict) -> None:
                 transformer=transformer,
                 src=src,
                 apply_mask=apply_mask,
+                read_lock=read_lock,
                 **shared,
             )
             func = ctx.process_window

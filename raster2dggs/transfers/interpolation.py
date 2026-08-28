@@ -5,7 +5,7 @@ _SampleIndexer holds all shared state (open raster, transformer, indexer
 config) and exposes process_nn / process_bilinear / process_bicubic /
 process_lanczos as bound methods.  Each method accepts only a rasterio
 Window and returns None, making them drop-in callables for
-ThreadPoolExecutor.map.
+the Stage 1 worker, once per window.
 
 Keeping the sampling logic here (rather than as closures inside
 initial_index) makes the methods independently unit-testable and keeps
@@ -79,7 +79,7 @@ class _SampleIndexer:
     """Shared context for all --transfer sample process methods.
 
     Instantiate once per raster open; pass bound methods (e.g.
-    ctx.process_bicubic) to ThreadPoolExecutor.map.
+    ctx.process_bicubic) to the Stage 1 worker, once per window.
     """
 
     src: rio.DatasetReader
@@ -101,9 +101,12 @@ class _SampleIndexer:
     # Set when the source carries an alpha/mask band and --mask is on: masked
     # pixels are read as NaN so every kernel treats them as nodata.
     apply_mask: bool = dataclasses.field(default=False)
+    # Lock guarding reads of ``src``; share the one rioxarray uses for ``da``
+    # (the same GDAL dataset), which is not safe for concurrent access.
+    read_lock: Any = dataclasses.field(default=None)
 
     def __post_init__(self):
-        self._read_lock = threading.Lock()
+        self._read_lock = self.read_lock or threading.Lock()
         lobe = self.lanczos_lobes
         self._lanczos_ns: int = 2 * lobe
         self._lanczos_offsets_int: np.ndarray = np.arange(

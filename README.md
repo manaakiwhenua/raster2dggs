@@ -373,7 +373,9 @@ A pixel is *nodata* if it equals the band's declared nodata value **or** if the 
 
 When the alpha band is not explicitly requested with `-b`, it is consumed as the mask and **not** emitted as a data band (an RGBA raster yields `band_1`..`band_3`). Select it explicitly (`-b 4`) to also emit it as data — a per-cell coverage feature (note that the alpha band itself is then always valid, so under `--nodata omit` fully masked pixels still produce rows, with NaN in the masked bands and alpha 0). Use `--no-mask` to ignore masks entirely and read masked pixels as ordinary data; the alpha band is then emitted like any other. Rasters whose validity is expressed only by a declared nodata value behave identically either way, and the mask is only read when the source actually carries one.
 
-Value-based nodata is *not* a substitute here: 0 is a legitimate value in imagery (deep shadow, dark water), so declaring it nodata would silently drop real pixels. The mask is exact.
+Value-based nodata is *not* a substitute here: 0 is a legitimate value in imagery (deep shadow, dark water), so declaring it nodata would silently drop real pixels. The mask is exact. For the same reason, be deliberate with `--nodata emit --nodata-fill`: the fill participates in aggregation, so `--nodata-fill 0` on imagery re-creates exactly the edge bias the mask removes — use it only where the fill has a real meaning (e.g. 0 for sea-level elevation).
+
+Note that GDAL discovers **sidecar** `.msk` masks by listing the raster's directory, so `GDAL_DISABLE_READDIR_ON_OPEN=EMPTY_DIR` — a common optimisation for remote (`/vsicurl/`, `/vsis3/`) reads — silently disables them. Alpha bands and internal TIFF masks are unaffected; prefer those for remote data, or leave that setting off.
 
 #### Valid-data coverage threshold (`-vct` / `--valid-coverage-threshold`)
 

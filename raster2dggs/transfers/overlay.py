@@ -2,7 +2,7 @@
 Raster overlay context for --transfer overlay_weighted, overlay_mode, mass_preserve.
 
 _OverlayIndexer holds all shared state (raster path, indexer config) and exposes
-process_window as a bound method callable by ThreadPoolExecutor.map.
+process_window, called once per raster window in a Stage 1 worker process.
 
 exactextract reads from the full raster path for every polygon batch, so a cell
 whose polygon spans multiple raster windows always receives correct combined stats.
@@ -144,25 +144,56 @@ class _MaskedRasterSource(RasterioRasterSource):
         arr = super().read_window(x0, y0, nx, ny)
         if not np.ma.isMaskedArray(arr):
             return arr
-        # float64 is exact for every integer type GDAL produces.
-        return np.ma.filled(arr.astype(np.float64), np.nan)
+        # The narrowest float that holds every value of the source dtype
+        # exactly: float32 has a 24-bit significand, so it is exact for 8- and
+        # 16-bit integers (and float32 itself); wider integers need float64.
+        dtype = (
+            np.float32
+            if arr.dtype.itemsize <= 2 or arr.dtype == np.float32
+            else np.float64
+        )
+        return np.ma.filled(arr.astype(dtype), np.nan)
+
+
+class _RawRasterSource(RasterioRasterSource):
+    """exactextract raster source that ignores the GDAL dataset mask (--no-mask):
+    pixel values are read as stored, and only the declared nodata value (via
+    the inherited nodata_value) marks a pixel invalid."""
+
+    def read_window(self, x0, y0, nx, ny):
+        from rasterio.windows import Window
+
+        arr = self.ds.read(self.band_idx, window=Window(x0, y0, nx, ny), masked=False)
+        if self.scaled:
+            if issubclass(arr.dtype.type, np.integer):
+                arr = arr.astype(np.float64)
+            arr = arr * self.scale + self.offset
+        return arr
+
+
+def _band_name(ds: rio.DatasetReader, i: int) -> str | None:
+    # Named the way exactextract names bands read from a path (``band_{i}``,
+    # or unnamed for a single-band raster) so column renaming is unchanged.
+    return f"band_{i}" if ds.count > 1 else None
 
 
 def masked_raster_sources(ds: rio.DatasetReader, indices) -> list:
-    """Per-band exactextract sources for ``indices`` (1-based), named the way
-    exactextract names bands read from a path (``band_{i}``, or unnamed for a
-    single-band raster) so downstream column renaming is unchanged."""
-    return [
-        _MaskedRasterSource(ds, i, name=f"band_{i}" if ds.count > 1 else None)
-        for i in indices
-    ]
+    """Per-band exactextract sources for ``indices`` (1-based) that honour the
+    dataset mask (masked pixels read as NaN)."""
+    return [_MaskedRasterSource(ds, i, name=_band_name(ds, i)) for i in indices]
+
+
+def raw_raster_sources(ds: rio.DatasetReader, indices) -> list:
+    """Per-band exactextract sources for ``indices`` (1-based) that ignore the
+    dataset mask (raw pixel values; declared nodata only)."""
+    return [_RawRasterSource(ds, i, name=_band_name(ds, i)) for i in indices]
 
 
 @dataclasses.dataclass(repr=False)
 class _OverlayIndexer:
     """Shared context for --transfer overlay_weighted / overlay_mode / mass_preserve.
 
-    Instantiate once; pass ctx.process_window to ThreadPoolExecutor.map.
+    Instantiate once per worker process; call ctx.process_window per window.
     """
 
     raster_input: str
@@ -188,9 +219,8 @@ class _OverlayIndexer:
     shared_coverage_mask_path: str | None = None
     # Whether GDAL dataset masks (alpha / mask bands) count as nodata. When the
     # source has one, raster_source replaces raster_input as what exactextract
-    # reads: masked_raster_sources(...) with --mask, or a rioxarray DataArray
-    # opened with masked=False (raw pixel values) with --no-mask. None means
-    # "use raster_input".
+    # reads: masked_raster_sources(...) with --mask, raw_raster_sources(...)
+    # with --no-mask. None means "use raster_input".
     use_mask: bool = True
     raster_source: Any = None
 

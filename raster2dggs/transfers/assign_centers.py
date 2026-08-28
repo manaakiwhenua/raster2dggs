@@ -1,8 +1,8 @@
 """
 Raster assign_centers context for --transfer assign_centers (the default).
 
-_AssignCentersIndexer holds all shared state and exposes process_window as a bound
-method callable by ThreadPoolExecutor.map.
+_AssignCentersIndexer holds all shared state and exposes process_window, called
+once per raster window in a Stage 1 worker process.
 """
 
 from __future__ import annotations
@@ -24,7 +24,7 @@ from raster2dggs.profiling import PROFILER
 class _AssignCentersIndexer:
     """Shared context for --transfer assign_centers.
 
-    Instantiate once; pass ctx.process_window to ThreadPoolExecutor.map.
+    Instantiate once per worker process; call ctx.process_window per window.
     """
 
     da: xr.DataArray
@@ -42,11 +42,12 @@ class _AssignCentersIndexer:
     # is set when the source carries an alpha/mask band and --mask is on.
     src: rio.DatasetReader | None = None
     apply_mask: bool = False
+    # Lock guarding reads of ``src``; share the one rioxarray uses for ``da``
+    # (the same GDAL dataset), which is not safe for concurrent access.
+    read_lock: Any = None
 
     def __post_init__(self):
-        # ``src`` is one GDAL dataset shared by every worker thread and is not
-        # safe for concurrent access.
-        self._read_lock = threading.Lock()
+        self._read_lock = self.read_lock or threading.Lock()
 
     def process_window(self, window):
         """Index all pixels in this raster window to their containing DGGS cell."""
