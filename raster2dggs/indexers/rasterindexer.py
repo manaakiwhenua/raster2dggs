@@ -269,6 +269,24 @@ class RasterIndexer(IRasterIndexer):
         pts = [self.cell_to_point(c) for c in cells]
         return np.array([p.x for p in pts]), np.array([p.y for p in pts])
 
+    def cells_to_points(self, cells) -> np.ndarray:
+        """
+        Return centre Points for an iterable of cell IDs as an object array.
+
+        Subclasses whose DGGS library has a batch API should override this;
+        the fallback delegates per cell to cell_to_point.
+        """
+        return np.array([self.cell_to_point(c) for c in cells], dtype=object)
+
+    def cells_to_polygons(self, cells) -> np.ndarray:
+        """
+        Return boundary Polygons for an iterable of cell IDs as an object array.
+
+        Subclasses whose DGGS library has a batch API should override this;
+        the fallback delegates per cell to cell_to_polygon.
+        """
+        return np.array([self.cell_to_polygon(c) for c in cells], dtype=object)
+
     def _index_window(
         self,
         wide: pd.DataFrame,
