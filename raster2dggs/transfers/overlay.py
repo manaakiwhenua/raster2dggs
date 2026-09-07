@@ -493,7 +493,7 @@ class _OverlayIndexer:
 
         with PROFILER.phase("stage1.cell_polygons"):
             polygons = [
-                _fix_antimeridian(self.indexer.cell_to_polygon(c)) for c in cells
+                _fix_antimeridian(p) for p in self.indexer.cells_to_polygons(cells)
             ]
         # WGS84 GDF for VCT shapely area computation (raster_fracs).
         # exactextract carries a positional feature id rather than the cell ID:

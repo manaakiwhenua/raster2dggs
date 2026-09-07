@@ -352,8 +352,9 @@ def write_partition_as_geoparquet(
     cells_to_string=None,
 ) -> None:
     # Build shapely geometries for this partition. geom_func takes the working
-    # cell form, so geometry comes first and any string conversion after.
-    geoms = pdf.index.map(geom_func)
+    # cell form (a whole batch of it), so geometry comes first and any string
+    # conversion after.
+    geoms = geom_func(pdf.index)
     if cells_to_string is not None:
         pdf = pdf.copy(deep=False)
         pdf.index = pd.Index(
@@ -582,7 +583,7 @@ def _write_output(
     if geo:
         delayed_parts = ddf.to_delayed()
         geo_serialisation_method = (
-            indexer.cell_to_polygon if geo == "polygon" else indexer.cell_to_point
+            indexer.cells_to_polygons if geo == "polygon" else indexer.cells_to_points
         )
         write_tasks = [
             dask.delayed(write_partition_as_geoparquet)(
