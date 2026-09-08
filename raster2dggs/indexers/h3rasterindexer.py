@@ -107,6 +107,33 @@ class H3RasterIndexer(RasterIndexer):
         )
         return {int(c) for c in h3int.geo_to_cells(poly, resolution)}
 
+    SUPPORTS_OVERLAP_ENUMERATION: bool = True
+
+    def cells_overlapping_bbox(
+        self,
+        min_lon: float,
+        min_lat: float,
+        max_lon: float,
+        max_lat: float,
+        resolution: int,
+    ) -> set:
+        """
+        Return H3 cells at the given resolution whose polygons intersect the
+        WGS84 bounding box: a superset of cells_in_bbox.
+        """
+        poly = h3py.LatLngPoly(
+            [
+                (max_lat, min_lon),
+                (max_lat, max_lon),
+                (min_lat, max_lon),
+                (min_lat, min_lon),
+            ]
+        )
+        # h3 exposes overlap containment only through its experimental API;
+        # a future h3 release may rename it.
+        cells = h3int.h3shape_to_cells_experimental(poly, resolution, "overlap")
+        return {int(c) for c in cells}
+
     @staticmethod
     def cells_to_lonlat_arrays(cells: pd.Series) -> tuple[np.ndarray, np.ndarray]:
         arr = np.array([h3int.cell_to_latlng(int(c)) for c in cells])

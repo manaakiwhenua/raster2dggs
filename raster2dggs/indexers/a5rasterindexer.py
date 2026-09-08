@@ -150,6 +150,34 @@ class A5RasterIndexer(RasterIndexer):
         cells = a5py.uncompact(compacted, resolution)
         return {int(c) for c in cells}
 
+    SUPPORTS_OVERLAP_ENUMERATION: bool = True
+
+    @_locked
+    def cells_overlapping_bbox(
+        self,
+        min_lon: float,
+        min_lat: float,
+        max_lon: float,
+        max_lat: float,
+        resolution: int,
+    ) -> set:
+        """
+        Return A5 cell IDs at the given resolution whose polygons intersect
+        the WGS84 bounding box: a superset of cells_in_bbox.
+        """
+        ring = [
+            (min_lon, min_lat),
+            (max_lon, min_lat),
+            (max_lon, max_lat),
+            (min_lon, max_lat),
+            (min_lon, min_lat),
+        ]
+        compacted = a5py.polygon_to_cells(
+            ring, resolution, {"containment": "overlapping"}
+        )
+        cells = a5py.uncompact(compacted, resolution)
+        return {int(c) for c in cells}
+
     @_locked
     def cell_area_m2(self, resolution: int, lat: float, lon: float) -> float:
         # A5 is equal-area: every cell at a given resolution has the same area,

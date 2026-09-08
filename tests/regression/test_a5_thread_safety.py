@@ -128,3 +128,8 @@ def test_cell_to_polygon_holds_lock(indexer, assert_locked_during):
     assert_locked_during("cell_to_boundary")
     cell = int(a5.lonlat_to_cell((170.5, -40.5), 6))
     indexer.cell_to_polygon(cell)
+
+
+def test_cells_overlapping_bbox_holds_lock(indexer, assert_locked_during):
+    assert_locked_during("polygon_to_cells")
+    indexer.cells_overlapping_bbox(170.0, -41.0, 171.0, -40.0, 6)

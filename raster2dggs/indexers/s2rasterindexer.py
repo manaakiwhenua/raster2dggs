@@ -96,16 +96,57 @@ class S2RasterIndexer(RasterIndexer):
         resolution: int,
     ) -> set:
         """
-        Return S2 cell tokens at the given level whose centres fall within the
-        WGS84 bounding box.
-
-        Uses S2's RegionCoverer with max_cells computed from the ratio of the
-        bbox area to the S2 cell area at the target level (following the same
-        approach as vector2dggs). The covering is then filtered to cells whose
-        centre is actually inside the bbox.
+        Return S2 cell IDs at the given level whose centres fall within the
+        WGS84 bounding box: the bbox covering filtered by centre containment.
         """
-        # Estimate bbox area in m² using a flat-earth approximation (good enough
-        # for a max_cells upper bound).
+        result = set()
+        for cell_id in self._bbox_covering(
+            min_lon, min_lat, max_lon, max_lat, resolution
+        ):
+            ll = s2sphere.LatLng.from_point(cell_id.to_point())
+            lat = ll.lat().degrees
+            lon = ll.lng().degrees
+            if min_lat <= lat <= max_lat and min_lon <= lon <= max_lon:
+                result.add(cell_id.id())
+        return result
+
+    SUPPORTS_OVERLAP_ENUMERATION: bool = True
+
+    def cells_overlapping_bbox(
+        self,
+        min_lon: float,
+        min_lat: float,
+        max_lon: float,
+        max_lat: float,
+        resolution: int,
+    ) -> set:
+        """
+        Return S2 cell IDs at the given level whose polygons intersect the
+        WGS84 bounding box: the covering itself, a superset of cells_in_bbox.
+        """
+        return {
+            cell_id.id()
+            for cell_id in self._bbox_covering(
+                min_lon, min_lat, max_lon, max_lat, resolution
+            )
+        }
+
+    def _bbox_covering(
+        self,
+        min_lon: float,
+        min_lat: float,
+        max_lon: float,
+        max_lat: float,
+        resolution: int,
+    ) -> list:
+        """
+        S2 covering of the WGS84 bbox at a fixed level: every cell whose
+        polygon intersects the box.
+
+        max_cells comes from the ratio of the bbox area to the S2 cell area at
+        the target level (following the same approach as vector2dggs), with the
+        bbox area estimated flat-earth — good enough for an upper bound.
+        """
         lat_c = math.radians((min_lat + max_lat) / 2)
         bbox_area_m2 = (
             (max_lat - min_lat)
@@ -125,15 +166,7 @@ class S2RasterIndexer(RasterIndexer):
             s2sphere.LatLng.from_degrees(min_lat, min_lon),
             s2sphere.LatLng.from_degrees(max_lat, max_lon),
         )
-        covering = r.get_covering(ll_rect)
-        result = set()
-        for cell_id in covering:
-            ll = s2sphere.LatLng.from_point(cell_id.to_point())
-            lat = ll.lat().degrees
-            lon = ll.lng().degrees
-            if min_lat <= lat <= max_lat and min_lon <= lon <= max_lon:
-                result.add(cell_id.id())
-        return result
+        return r.get_covering(ll_rect)
 
     def cell_area_m2(self, resolution: int, lat: float, lon: float) -> float:
         cell_id = s2sphere.CellId.from_lat_lng(

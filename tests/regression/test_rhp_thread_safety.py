@@ -75,7 +75,7 @@ def test_index_window_holds_lock(indexer, assert_locked_during):
 
 
 def test_cells_in_bbox_holds_lock(indexer, assert_locked_during):
-    assert_locked_during(rhpmod.rhpw, "polyfill")
+    assert_locked_during(rhpmod.rhpw, "polyfill_array")
     indexer.cells_in_bbox(170.0, -41.0, 171.0, -40.0, 5)
 
 
@@ -102,3 +102,8 @@ def test_cells_to_points_holds_lock(indexer, assert_locked_during):
 def test_cells_to_polygons_holds_lock(indexer, assert_locked_during):
     assert_locked_during(rhpmod.WGS84_003, "boundary_array")
     indexer.cells_to_polygons(["Q333"])
+
+
+def test_cells_overlapping_bbox_holds_lock(indexer, assert_locked_during):
+    assert_locked_during(rhpmod.rhpw, "polyfill_array")
+    indexer.cells_overlapping_bbox(170.0, -41.0, 171.0, -40.0, 5)
