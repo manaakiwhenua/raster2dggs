@@ -56,11 +56,11 @@ raster2dggs = "raster2dggs.cli:main"
 
 [project.optional-dependencies]
 h3 = ["h3 (>=4,<5)"]
-rhp = ["rhealpixdggs (>=0.8.3,<0.9)"]
+rhp = ["rhealpixdggs (>=0.8.5,<0.9)"]
 geohash = ["python-geohash (>=0.8,<0.9)"]
 maidenhead = ["maidenhead (>=1.8,<2.0)"]
 s2 = ["s2sphere (>=0.2,<0.3)"]
-a5 = ["pya5 (>=0.9,<0.10)"]
+a5 = ["pya5 (>=0.10,<0.11)"]
 isea4r = ["dggal (>=0.0.6,<0.0.7)"]
 isea9r = ["dggal (>=0.0.6,<0.0.7)"]
 isea3h = ["dggal (>=0.0.6,<0.0.7)"]
@@ -82,10 +82,10 @@ rhealpix = ["dggal (>=0.0.6,<0.0.7)"]
 dggal = ["dggal (>=0.0.6,<0.0.7)"]
 all = [
     "h3 (>=4,<5)",
-    "rhealpixdggs (>=0.8.3,<0.9)",
+    "rhealpixdggs (>=0.8.5,<0.9)",
     "python-geohash (>=0.8,<0.9)",
     "s2sphere (>=0.2,<0.3)",
-    "pya5 (>=0.9,<0.10)",
+    "pya5 (>=0.10,<0.11)",
     "maidenhead (>=1.8,<2.0)",
     "dggal (>=0.0.6,<0.0.7)",
 ]

@@ -461,33 +461,44 @@ class _OverlayIndexer:
             self._src_crs, "EPSG:4326", *bounds
         )
 
-        # Expand so that cells touching the window edge are captured.
-        # cells_in_bbox is centre-based: a cell whose polygon overlaps this window
-        # but whose centre is just outside would be missed without a buffer.
-        # The buffer must be at least one cell circumradius in all directions.
-        # For H3 hexagons, circumradius R ≈ 0.62 * sqrt(area_m2); sqrt(area_m2)
-        # gives ~1.6 R — a comfortable margin.
-        # Latitude degrees are ~constant (111 195 m/°); longitude degrees shrink
-        # by cos(lat), so we correct the longitude pad to keep the buffer uniform
-        # in metres.  Clamped to cos(lat) ≥ 0.1 (≈ 84° lat) to avoid blowup at poles.
-        # False-positive cells (centres in-range but polygon outside raster) return
-        # NaN from exactextract and are dropped by the nodata policy.
-        cx = (min_lon + max_lon) / 2
-        cy = (min_lat + max_lat) / 2
-        area_m2 = self.indexer.cell_area_m2(self.resolution, cy, cx)
-        lat_pad = math.sqrt(area_m2) / const.WGS84_APPROX_DISTANCE_DEG_M
-        lon_pad = lat_pad / max(math.cos(math.radians(cy)), 0.1)
-        min_lon = max(-180.0, min_lon - lon_pad)
-        max_lon = min(180.0, max_lon + lon_pad)
-        min_lat = max(-90.0, min_lat - lat_pad)
-        max_lat = min(90.0, max_lat + lat_pad)
-
-        with PROFILER.phase("stage1.cells_in_bbox"):
-            cells = list(
-                self.indexer.cells_in_bbox(
-                    min_lon, min_lat, max_lon, max_lat, self.resolution
+        # Cells overlapping the window bbox but not actual raster data return
+        # NaN from exactextract and are dropped by the nodata policy, on both
+        # enumeration paths below.
+        if self.indexer.SUPPORTS_OVERLAP_ENUMERATION:
+            # Exact: every cell whose polygon meets the window bbox, so no
+            # padding is needed to capture cells straddling the window edge.
+            with PROFILER.phase("stage1.cells_in_bbox"):
+                cells = list(
+                    self.indexer.cells_overlapping_bbox(
+                        min_lon, min_lat, max_lon, max_lat, self.resolution
+                    )
                 )
-            )
+        else:
+            # Expand so that cells touching the window edge are captured.
+            # cells_in_bbox is centre-based: a cell whose polygon overlaps this window
+            # but whose centre is just outside would be missed without a buffer.
+            # The buffer must be at least one cell circumradius in all directions.
+            # For H3 hexagons, circumradius R ≈ 0.62 * sqrt(area_m2); sqrt(area_m2)
+            # gives ~1.6 R — a comfortable margin.
+            # Latitude degrees are ~constant (111 195 m/°); longitude degrees shrink
+            # by cos(lat), so we correct the longitude pad to keep the buffer uniform
+            # in metres.  Clamped to cos(lat) ≥ 0.1 (≈ 84° lat) to avoid blowup at poles.
+            cx = (min_lon + max_lon) / 2
+            cy = (min_lat + max_lat) / 2
+            area_m2 = self.indexer.cell_area_m2(self.resolution, cy, cx)
+            lat_pad = math.sqrt(area_m2) / const.WGS84_APPROX_DISTANCE_DEG_M
+            lon_pad = lat_pad / max(math.cos(math.radians(cy)), 0.1)
+            min_lon = max(-180.0, min_lon - lon_pad)
+            max_lon = min(180.0, max_lon + lon_pad)
+            min_lat = max(-90.0, min_lat - lat_pad)
+            max_lat = min(90.0, max_lat + lat_pad)
+
+            with PROFILER.phase("stage1.cells_in_bbox"):
+                cells = list(
+                    self.indexer.cells_in_bbox(
+                        min_lon, min_lat, max_lon, max_lat, self.resolution
+                    )
+                )
         if not cells:
             return None
 

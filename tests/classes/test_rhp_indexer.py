@@ -74,3 +74,22 @@ def test_batch_geometry_matches_scalar(indexer):
     for c, poly, pt in zip(cells, batch_polys, batch_pts, strict=True):
         assert poly.equals_exact(indexer.cell_to_polygon(c), 1e-12)
         assert pt.equals_exact(indexer.cell_to_point(c), 1e-9)
+
+
+def test_overlapping_bbox_is_superset_of_centre_bbox(indexer):
+    bbox = (174.0, -41.1, 174.1, -41.0)
+    centre = indexer.cells_in_bbox(*bbox, 7)
+    overlapping = indexer.cells_overlapping_bbox(*bbox, 7)
+    assert centre and centre <= overlapping
+    assert all(type(c) is str for c in centre | overlapping)
+
+
+def test_overlapping_bbox_catches_edge_straddling_cell(indexer):
+    # A thin box clipping one edge of a cell: the cell's centre lies outside
+    # the box, so centre-based enumeration misses it and overlap keeps it.
+    cell = "Q333"
+    minx, miny, maxx, maxy = indexer.cell_to_polygon(cell).bounds
+    sliver = (minx + (maxx - minx) * 0.98, miny, maxx + (maxx - minx) * 0.02, maxy)
+    res = len(cell) - 1
+    assert cell in indexer.cells_overlapping_bbox(*sliver, res)
+    assert cell not in indexer.cells_in_bbox(*sliver, res)

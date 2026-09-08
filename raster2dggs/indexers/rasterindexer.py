@@ -438,6 +438,28 @@ class RasterIndexer(IRasterIndexer):
             "--transfer sample requires cell enumeration; use a DGGS that supports it."
         )
 
+    #: Set to True in subclasses that implement cells_overlapping_bbox.
+    SUPPORTS_OVERLAP_ENUMERATION: bool = False
+
+    def cells_overlapping_bbox(
+        self,
+        min_lon: float,
+        min_lat: float,
+        max_lon: float,
+        max_lat: float,
+        resolution: int,
+    ) -> set:
+        """
+        Return cell IDs whose polygons intersect the WGS84 bounding box — a
+        superset of cells_in_bbox that captures cells straddling the box edge
+        without any padding heuristic.
+
+        Must be overridden by subclasses that set SUPPORTS_OVERLAP_ENUMERATION = True.
+        """
+        raise NotImplementedError(
+            f"{type(self).__name__} does not support overlap enumeration."
+        )
+
     def _collect_lists(
         self,
         df: pd.DataFrame,

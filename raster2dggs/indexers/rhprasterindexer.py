@@ -101,6 +101,7 @@ class RHPRasterIndexer(RasterIndexer):
         return self.cell_to_children_size(parent, resolution)
 
     SUPPORTS_CELL_ENUMERATION: bool = True
+    SUPPORTS_OVERLAP_ENUMERATION: bool = True
 
     @_locked
     def cells_in_bbox(
@@ -115,13 +116,45 @@ class RHPRasterIndexer(RasterIndexer):
         Return rHEALPix cell IDs at the given resolution whose centres fall
         within the WGS84 bounding box.
 
-        Uses rhealpixdggs's polyfill, which enumerates cells covering the
-        bbox's bounding region (via cells_from_region) and filters to those
-        whose centroid lies inside the geometry.
+        polyfill_array runs a hierarchical fill over index arrays, returning
+        a sorted, deduplicated array of index strings. For an axis-aligned box
+        the fill's coarse descent prunes nothing (every coarse cell meets the
+        box), so seeding min_res one level below the target skips it; the
+        resolution-1 covering of a box is bounded by the output size.
         """
         polygon = shapely.geometry.box(min_lon, min_lat, max_lon, max_lat)
-        cells = rhpw.polyfill(polygon, resolution, plane=False, dggs=WGS84_003)
-        return cells if cells is not None else set()
+        cells = rhpw.polyfill_array(
+            polygon,
+            resolution,
+            plane=False,
+            dggs=WGS84_003,
+            min_res=max(0, resolution - 1),
+        )
+        return set() if cells is None else set(cells.tolist())
+
+    @_locked
+    def cells_overlapping_bbox(
+        self,
+        min_lon: float,
+        min_lat: float,
+        max_lon: float,
+        max_lat: float,
+        resolution: int,
+    ) -> set:
+        """
+        Return rHEALPix cell IDs at the given resolution whose polygons
+        intersect the WGS84 bounding box: a superset of cells_in_bbox.
+        """
+        polygon = shapely.geometry.box(min_lon, min_lat, max_lon, max_lat)
+        cells = rhpw.polyfill_array(
+            polygon,
+            resolution,
+            plane=False,
+            dggs=WGS84_003,
+            containment="overlapping",
+            min_res=max(0, resolution - 1),
+        )
+        return set() if cells is None else set(cells.tolist())
 
     def cell_area_m2(self, resolution: int, lat: float, lon: float) -> float:
         # rHEALPix is equal-area: 6 face cells at resolution 1, each subdividing by 9.
