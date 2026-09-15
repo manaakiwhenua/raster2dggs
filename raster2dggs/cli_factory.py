@@ -92,8 +92,12 @@ class ResolutionParamType(click.ParamType):
     def convert(self, value, param, ctx):
         if isinstance(value, int):
             return value
-        if value in const.ResolutionMode:
+        try:
+            # Not `value in const.ResolutionMode`: testing a non-member value
+            # against an enum class raises TypeError before Python 3.12.
             return const.ResolutionMode(value)
+        except ValueError:
+            pass
         try:
             int_val = int(value)
         except (ValueError, TypeError):
