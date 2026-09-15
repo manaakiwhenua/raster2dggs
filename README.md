@@ -754,9 +754,9 @@ In brief, to get started:
     - If you're on Windows, `pip install gdal` may be necessary before running the subsequent commands.
     - On Linux, install GDAL 3.6+ according to your platform-specific instructions, including development headers, i.e. `libgdal-dev`.
 - Create the virtual environment with `poetry install`. This will install necessary dependencies.
-- Subsequently, the virtual environment can be re-activated with `poetry env activate`.
+- Subsequently, the virtual environment can be re-activated with `eval $(poetry env activate)`.
 
-If you run `poetry install -E all --with dev`, the CLI tool will be aliased so you can simply use `raster2dggs` rather than `poetry run raster2dggs`, which is the alternative if you do not `poetry install -E all --with dev`.
+Any `poetry install` installs the project itself, so the `raster2dggs` command is available inside the virtual environment. With the environment activated you can call `raster2dggs` directly; otherwise use `poetry run raster2dggs`. Use `poetry install -E all --with dev` to additionally pull in every optional DGGS backend and the development tooling.
 
 For partial backend support you can consider `poetry install --with dev -E h3 -E a5` etc. To check what is installed: `poetry show --tree`.
 
