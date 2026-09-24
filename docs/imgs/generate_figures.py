@@ -16,6 +16,10 @@ Sources (all CC BY 4.0):
 - ESA WorldCover 10 m 2021 v200, windowed over Rangatira (South East Island,
   Chatham Islands) — a categorical raster for the compaction figure, and the
   same island as vector2dggs's README figures.
+
+The struct figure is the exception: it needs a continuous field with known
+units and a controlled spread, so it synthesises one with the repo's own
+neutral landscape model (make_samples.nlm_fractal) rather than fetching it.
 """
 
 import argparse
@@ -35,7 +39,8 @@ import pyarrow.parquet as pq
 import rasterio
 import shapely
 from matplotlib.collections import PolyCollection
-from matplotlib.patches import Patch
+from matplotlib.patches import Patch, PathPatch
+from matplotlib.path import Path
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 
@@ -47,6 +52,10 @@ WORLDCOVER = (
 )
 
 INK, MUT, FAINT, NOTE = "#1a1a1a", "#555555", "#888888", "#b0332a"
+MONO = "DejaVu Sans Mono"
+# Neutral for glyph marks whose length encodes a count rather than a raster
+# value, so the YlGn ramp only ever means "this is a value".
+GLYPH = "#9aa2ab"
 MASKC = "#ebebeb"
 # ESA WorldCover class palette (their standard colours); identity is also
 # carried by the legend, and the three classes separate in lightness.
@@ -55,6 +64,17 @@ WC_CLASSES = {
     30: ("Grassland", "#ffff4c"),
     80: ("Open water", "#0064c8"),
 }
+# Struct figure: one neutral landscape model written as two co-registered
+# views, so the continuous and classified panels show the same landscape.
+# 50 m pixels put ~43 pixel centres in an H3 r9 cell (~0.105 km²), enough for a
+# distribution while still letting individual pixels read at panel scale.
+# A5 rather than H3: its cells are equal-area, so --overlay's area weights and
+# --overlay fractions mean exactly what they say. r14 puts ~46 pixel centres in
+# a cell; r18 is four levels finer, so 256 of them tile one r14 cell.
+NLM_SEED, NLM_PX, NLM_SIZE = 7, 50.0, 160
+STRUCT_DGGS, STRUCT_RES, SAMPLE_RES = "a5", 14, 18
+CLASS_STEPS = [0.22, 0.45, 0.68, 0.92]
+CLASS_NAME = {1: "bare", 2: "grass", 3: "shrub", 4: "forest"}
 HERO_RES = (12, 13)  # H3 resolutions for the hero's map panels
 # DGGS and resolutions for the "one argument picks the grid" strip: chosen so
 # cells are a legible size at strip-panel scale (~25-40 m over a 307 m window).
@@ -127,9 +147,48 @@ def acquire(w):
     )
 
 
+def synth(w):
+    """Write one NLM field as a continuous raster and its quantile classification."""
+    cont, cat = f"{w}/cover.tif", f"{w}/cover_class.tif"
+    if os.path.exists(cont) and os.path.exists(cat):
+        return cont, cat
+    sys.path.insert(0, os.path.dirname(os.path.dirname(HERE)))
+    from make_samples import nlm_fractal
+
+    rng = np.random.default_rng(NLM_SEED)
+    n = NLM_SIZE
+    base = nlm_fractal((n, n), rng, octaves=6, persistence=0.55)
+    # Logistic contrast, as make_fractional_cover does: pushes values toward the
+    # ends, so a binned histogram of one cell has shape rather than one spike.
+    cover = (1.0 / (1.0 + np.exp(-8.0 * (base - 0.5)))).astype(np.float32)
+    classes = (np.digitize(cover, np.quantile(cover, [0.25, 0.55, 0.80])) + 1).astype(
+        np.uint8
+    )
+    profile = dict(
+        driver="GTiff",
+        height=n,
+        width=n,
+        count=1,
+        crs=rasterio.crs.CRS.from_epsg(2193),
+        transform=rasterio.transform.from_origin(
+            1_750_000.0, 5_600_000.0, NLM_PX, NLM_PX
+        ),
+        compress="deflate",
+    )
+    for path, arr, dtype, nodata in [
+        (cont, cover, "float32", None),
+        (cat, classes, "uint8", 0),
+    ]:
+        with rasterio.open(path, "w", dtype=dtype, nodata=nodata, **profile) as d:
+            d.write(arr, 1)
+    return cont, cat
+
+
 def index_all(w):
     hero, strip_src = f"{w}/hero.tif", f"{w}/hero_strip.tif"
     edge, wc = f"{w}/as24_edge.tif", f"{w}/worldcover.tif"
+    cover, cover_cls = f"{w}/cover.tif", f"{w}/cover_class.tif"
+    sr, poly = STRUCT_RES, ("-g", "polygon")
     rgb = ("-b", "1", "-b", "2", "-b", "3", "-d", "0")
     r_lo, r_hi = HERO_RES
     jobs = {
@@ -158,6 +217,77 @@ def index_all(w):
         ),
         "comp_co": lambda o: r2d(
             "rhp", wc, o, 12, "-d", "0", "--overlay", "mode", "-co", "-g", "polygon"
+        ),
+        # The struct figure. --overlay fractions needs -d 3: --decimals rounds
+        # the fractions too, and -d 0 would flatten them to 0/1.
+        "struct_agg": lambda o: r2d(
+            STRUCT_DGGS,
+            cover,
+            o,
+            sr,
+            "-d",
+            "3",
+            "--point",
+            "value",
+            "-a",
+            "min,max,mean",
+            *poly,
+        ),
+        "struct_list": lambda o: r2d(
+            STRUCT_DGGS, cover, o, sr, "-d", "3", "--point", "list", *poly
+        ),
+        "struct_hist": lambda o: r2d(
+            STRUCT_DGGS,
+            cover,
+            o,
+            sr,
+            "-d",
+            "3",
+            "--point",
+            "histogram",
+            "--hist-width",
+            "0.1",
+            *poly,
+        ),
+        "struct_ovhist": lambda o: r2d(
+            STRUCT_DGGS,
+            cover,
+            o,
+            sr,
+            "-d",
+            "3",
+            "--overlay",
+            "histogram",
+            "--hist-width",
+            "0.1",
+            *poly,
+        ),
+        "struct_frac": lambda o: r2d(
+            STRUCT_DGGS, cover_cls, o, sr, "-d", "3", "--overlay", "fractions", *poly
+        ),
+        # No --hist-width: on a categorical raster histogram counts exact values,
+        # giving one bin per class and the struct<values, counts> schema.
+        "struct_cathist": lambda o: r2d(
+            STRUCT_DGGS, cover_cls, o, sr, "-d", "0", "--overlay", "histogram", *poly
+        ),
+        # -d 0 on the same fractions, for the --decimals footnote
+        "struct_frac_d0": lambda o: r2d(
+            STRUCT_DGGS, cover_cls, o, sr, "-d", "0", "--overlay", "fractions", *poly
+        ),
+        # Oversampled: cells finer than the pixels, where interpolation shows.
+        # Run on both rasters — on the classified one bilinear is the wrong
+        # choice, and the figure says so.
+        **{
+            f"struct_{k}samp_{m}": (
+                lambda o, m=m, src=src: r2d(
+                    STRUCT_DGGS, src, o, SAMPLE_RES, "-d", "3", "--sample", m, *poly
+                )
+            )
+            for k, src in (("", cover), ("cat", cover_cls))
+            for m in ("nn", "bilinear")
+        },
+        "struct_mode": lambda o: r2d(
+            STRUCT_DGGS, cover_cls, o, sr, "-d", "0", "--overlay", "mode", *poly
         ),
         **{
             f"strip_{d}": (
@@ -251,8 +381,8 @@ def fig_hero(w, style):
     fig.text(
         0.018,
         0.917,
-        "every pixel lands in the DGGS cell containing its centre, and each cell aggregates its pixels' band values\n"
-        "a finer resolution keeps more of the image — and costs proportionally more rows",
+        "Every pixel lands in the DGGS cell containing its centre, and each cell aggregates its pixels' band values\n"
+        "A finer resolution keeps more of the image — and costs proportionally more rows",
         size=11,
         va="top",
         linespacing=1.5,
@@ -262,7 +392,7 @@ def fig_hero(w, style):
     for x, (title, run) in zip(
         (0.018, 0.352, 0.686),
         [
-            ("raster input", None),
+            ("Raster input", None),
             (f"H3 resolution {r_lo}", f"hero_h3_{r_lo}"),
             (f"H3 resolution {r_hi}", f"hero_h3_{r_hi}"),
         ],
@@ -306,7 +436,7 @@ def fig_hero(w, style):
     fig.text(
         0.018,
         0.478,
-        "one argument picks the grid — the rest of the command is unchanged",
+        "One argument picks the grid — the rest of the command is unchanged",
         size=12,
         weight="bold",
         va="top",
@@ -341,7 +471,7 @@ def fig_hero(w, style):
     fig.text(
         0.018,
         0.228,
-        "pixels in  ·  one row per cell out",
+        "Pixels in  ·  one row per cell out",
         size=12,
         weight="bold",
         va="top",
@@ -380,7 +510,7 @@ def fig_hero(w, style):
     fig.text(
         0.52,
         0.228,
-        "on disk  ·  hive-partitioned by parent cell  ·  -c brotli",
+        "On disk  ·  hive-partitioned by parent cell  ·  -c brotli",
         size=12,
         weight="bold",
         va="top",
@@ -406,7 +536,7 @@ def fig_hero(w, style):
     fig.text(
         0.52,
         0.130,
-        f"a reader can skip whole partitions without opening them\n"
+        f"A reader can skip whole partitions without opening them\n"
         f"{n13:,} rows at H3 res {r_hi} · {in_mb:.0f} MB source window · ≈ {px_per_cell:,.0f} pixels per cell",
         size=10,
         color=MUT,
@@ -460,7 +590,7 @@ def fig_sampling(w, style):
     fig.text(
         0.018,
         0.965,
-        "three ways to move pixel values onto cells",
+        "Three ways to move pixel values onto cells",
         size=15,
         weight="bold",
         va="top",
@@ -468,28 +598,28 @@ def fig_sampling(w, style):
     fig.text(
         0.018,
         0.885,
-        "the choice matters most at edges — here, a mask boundary in the LINZ 10 m mosaic "
+        "The choice matters most at edges — here, a mask boundary in the LINZ 10 m mosaic "
         "(zoomed; H3 resolution 12, cells ≈ 2 × 2 pixels)",
         size=11,
         color=MUT,
         va="top",
     )
     panels = [
-        (None, "input (zoom)", "grey = masked (alpha 0)"),
+        (None, "Input (zoom)", "Grey = masked (alpha 0)"),
         (
             "samp_point",
             "--point value",
-            "cell centre's pixel value\nfast, exact at native scale",
+            "Cell centre's pixel value\nFast, exact at native scale",
         ),
         (
             "samp_overlay",
             "--overlay weighted",
-            "area-weighted mean of every\nvalid pixel the cell touches",
+            "Area-weighted mean of every\nvalid pixel the cell touches",
         ),
         (
             "samp_bilinear",
             "--sample bilinear",
-            "kernel interpolation at the\ncell centre (bicubic, lanczos…)",
+            "Kernel interpolation at the\ncell centre (bicubic, lanczos…)",
         ),
     ]
     for i, (run, title, caption) in enumerate(panels):
@@ -557,8 +687,8 @@ def fig_compaction(w):
     counts, xs = {}, None
     for i, (run, title) in enumerate(
         [
-            ("comp", "as indexed · resolution 12"),
-            ("comp_co", "with --compact · mixed resolutions"),
+            ("comp", "As indexed · resolution 12"),
+            ("comp_co", "With --compact · mixed resolutions"),
         ]
     ):
         g = cells(w, run, crs=None)
@@ -612,6 +742,531 @@ def fig_compaction(w):
     plt.close(fig)
 
 
+def pick_struct_cell(w):
+    """The cell the struct figure explodes: widest spread over the most classes.
+
+    Chosen rather than hardcoded so the figure survives a change of seed or
+    grid; deterministic, since the landscape model is seeded.
+    """
+    lst = pq.read_table(f"{w}/runs/struct_list").to_pandas()
+    frac = pq.read_table(f"{w}/runs/struct_frac").to_pandas()
+    hist = pq.read_table(f"{w}/runs/struct_hist").to_pandas()
+    best, best_score = None, -1.0
+    for cid in lst.index.intersection(frac.index).intersection(hist.index):
+        v = np.asarray(lst.loc[cid, "band_1"], dtype=float)
+        if len(v) < 35:
+            continue
+        score = (
+            v.std()
+            * (v.max() - v.min())
+            * len(frac.loc[cid, "band_1"]["classes"])
+            * int((np.asarray(hist.loc[cid, "band_1"]["counts"]) > 0).sum())
+        )
+        if score > best_score:
+            best, best_score = cid, score
+    return best
+
+
+def fig_structs(w):
+    """One cell, every output schema.
+
+    Blocked by *input raster* rather than by --point/--overlay, so each block
+    lines up with the panel on the left that it reads from; the route stays
+    legible because every row is labelled with the flag that produced it.
+
+    Colour is load-bearing: the YlGn ramp appears only where a mark carries a
+    raster value or a class identity. Marks whose length encodes a count are
+    neutral, so green never reads as decoration.
+    """
+    cover = plt.get_cmap("YlGn")
+    cid = pick_struct_cell(w)
+
+    def band(run):
+        return pq.read_table(f"{w}/runs/{run}").to_pandas().loc[cid, "band_1"]
+
+    with rasterio.open(f"{w}/cover.tif") as s:
+        cont, bounds = s.read(1), s.bounds
+    with rasterio.open(f"{w}/cover_class.tif") as s:
+        classified = s.read(1)
+
+    g = cells(w, "struct_list")
+    demo = g.loc[cid, "geometry"]
+    cx, cy = demo.centroid.x, demo.centroid.y
+    half, area_km2 = 400.0, demo.area / 1e6
+    lst = np.asarray(band("struct_list"), dtype=float)
+    agg = band("struct_agg")
+    classes = [int(c) for c in band("struct_frac")["classes"]]
+    fracs = [float(f) for f in band("struct_frac")["fractions"]]
+    fracs_d0 = [float(f) for f in band("struct_frac_d0")["fractions"]]
+    mode = int(band("struct_mode"))
+    cat_h = band("struct_cathist")
+    cat_vals = [int(v) for v in cat_h["values"]]
+    cat_counts = [int(c) for c in cat_h["counts"]]
+    n_pt = int(np.asarray(band("struct_hist")["counts"]).sum())
+    n_ov = int(np.asarray(band("struct_ovhist")["counts"]).sum())
+
+    # The oversampled cells lying in this one, for the two --sample rows.
+    # Centre-containment rather than the ID hierarchy: A5's nesting is
+    # non-congruent, so a cell's 256 true descendants do not tile its geometry
+    # (the two sets disagree both ways on roughly a third of the cells here).
+    # What the panel is illustrating is the sampled surface over this cell's
+    # footprint, so the footprint is what should select it.
+    def inside(run):
+        sub = cells(w, run)
+        minx, miny, maxx, maxy = demo.bounds
+        sub = sub.cx[minx:maxx, miny:maxy]
+        return sub[sub.geometry.centroid.within(demo)]
+
+    samp = {
+        f"{k}{m}": inside(f"struct_{k}samp_{m}")
+        for k in ("", "cat")
+        for m in ("nn", "bilinear")
+    }
+    n_samp = len(samp["bilinear"])
+    n_cat_distinct = samp["catbilinear"]["band_1"].nunique()
+
+    fig = plt.figure(figsize=(13.4, 12.0), dpi=100)
+    fig.text(
+        0.018,
+        0.986,
+        "What a cell holds when many pixels fall inside",
+        size=15,
+        weight="bold",
+        va="top",
+    )
+    fig.text(
+        0.018,
+        0.957,
+        f"One A5 resolution {STRUCT_RES} cell over a synthetic neutral landscape model "
+        f"at {NLM_PX:.0f} m \u2014 {n_pt} pixel centres inside it, {n_ov} pixels touched.\n"
+        "The column type is the choice: a scalar discards the distribution, a struct "
+        "keeps it. Every value below is real CLI output for the outlined cell.",
+        size=10.5,
+        color=MUT,
+        va="top",
+        linespacing=1.5,
+    )
+
+    # ---- left: one panel per input, each aligned with its block ----------
+    extent = (bounds.left, bounds.right, bounds.bottom, bounds.top)
+    panels = [
+        (
+            cont,
+            0.645,
+            "Continuous \u2014 tree cover 0\u20131",
+            dict(cmap=cover, vmin=0, vmax=1),
+        ),
+        (
+            classified,
+            0.272,
+            "Classified \u2014 land cover classes",
+            dict(
+                cmap=matplotlib.colors.ListedColormap([cover(s) for s in CLASS_STEPS]),
+                vmin=0.5,
+                vmax=4.5,
+            ),
+        ),
+    ]
+    for arr, y, title, kw in panels:
+        fig.text(0.018, y + 0.228, title, size=9.5, color=MUT, va="bottom")
+        ax = fig.add_axes([0.018, y, 0.196, 0.220])
+        ax.imshow(arr, extent=extent, interpolation="nearest", **kw)
+        # Mid grey, semi-transparent: it darkens the pale end of the ramp and
+        # lightens the dark end, so one stroke reads across the whole surface
+        # where white only held over the dark greens.
+        ax.add_collection(
+            PolyCollection(
+                [np.asarray(p.exterior.coords) for p in g.geometry],
+                facecolors="none",
+                edgecolors=FAINT,
+                linewidths=0.9,
+                alpha=0.8,
+            )
+        )
+        ax.add_collection(
+            PolyCollection(
+                [np.asarray(demo.exterior.coords)],
+                facecolors="none",
+                edgecolors=NOTE,
+                linewidths=2.4,
+            )
+        )
+        ax.set_xlim(cx - half, cx + half), ax.set_ylim(cy - half, cy + half)
+        ax.set_aspect("equal"), ax.set_xticks([]), ax.set_yticks([])
+
+    # class identity by name, never by colour alone
+    lg = fig.add_axes([0.018, 0.222, 0.196, 0.026])
+    for i, c in enumerate(CLASS_NAME):
+        lg.add_patch(
+            plt.Rectangle(
+                (i * 0.25, 0.45), 0.055, 0.42, color=cover(CLASS_STEPS[c - 1]), lw=0
+            )
+        )
+        lg.text(i * 0.25 + 0.072, 0.66, CLASS_NAME[c], size=8, color=MUT, va="center")
+    lg.set_xlim(0, 1), lg.set_ylim(0, 1)
+    lg.set_axis_off()
+    # names the outlined cell, keyed by a sample of the outline itself
+    key = fig.add_axes([0.018, 0.186, 0.196, 0.022])
+    key.plot([0.0, 0.075], [0.5, 0.5], color=NOTE, lw=2.4)
+    key.text(0.10, 0.5, cid, size=8.5, family=MONO, color=MUT, va="center")
+    key.set_xlim(0, 1), key.set_ylim(0, 1)
+    key.set_axis_off()
+    fig.text(
+        0.018,
+        0.168,
+        f"Every r{STRUCT_RES} cell is {area_km2:.3f} km\u00b2 \u2248 {n_pt} pixels at "
+        f"{NLM_PX:.0f} m.",
+        size=9,
+        color=MUT,
+        va="top",
+    )
+
+    # ---- right: one row per output schema --------------------------------
+    X_FLAG, X_SIG, X_GLYPH, W_GLYPH = 0.255, 0.445, 0.70, 0.285
+    VMAX = 0.8  # shared value axis, so the continuous glyphs compare
+
+    def value_axis(ax):
+        ax.set_xlim(0, VMAX)
+        ax.set_yticks([])
+        for side in ("top", "left", "right"):
+            ax.spines[side].set_visible(False)
+        ax.spines["bottom"].set_color("#cccccc")
+        ax.tick_params(axis="x", labelsize=8, colors=MUT, length=2.5, pad=1.5)
+
+    def header(y, title, note):
+        fig.text(X_FLAG, y, title, size=11, weight="bold", va="center")
+        fig.text(X_FLAG + 0.205, y, note, size=9, color=MUT, va="center")
+        fig.add_artist(
+            plt.Line2D([X_FLAG, 0.985], [y - 0.018] * 2, color="#dddddd", lw=0.8)
+        )
+
+    def row(y, flag, sig, val, draw, h=0.042):
+        fig.text(X_FLAG, y, flag, size=10, family=MONO, va="center")
+        fig.text(X_SIG, y + 0.012, sig, size=8.5, family=MONO, va="center")
+        fig.text(X_SIG, y - 0.012, val, size=8.5, family=MONO, color=MUT, va="center")
+        draw(fig.add_axes([X_GLYPH, y - h / 2, W_GLYPH, h]))
+
+    def binned(run, n_label):
+        v = band(run)
+        left, right = np.asarray(v["left"]), np.asarray(v["right"])
+        counts = np.asarray(v["counts"], dtype=float)
+        keep = counts > 0
+
+        def draw(ax):
+            # Neutral: bar height is a count, not a raster value.
+            # 2 px of surface between adjacent bars.
+            ax.bar(
+                (left[keep] + right[keep]) / 2,
+                counts[keep],
+                width=(right[keep] - left[keep]) * 0.86,
+                color=GLYPH,
+                linewidth=0,
+            )
+            ax.set_ylim(0, counts.max() * 1.35)
+            ax.text(
+                0.995,
+                0.9,
+                n_label,
+                transform=ax.transAxes,
+                ha="right",
+                va="top",
+                size=8,
+                color=MUT,
+            )
+            value_axis(ax)
+
+        return draw, list(counts[keep].astype(int))
+
+    def sample_pair(key, colour_of):
+        """Two mini-maps of the oversampled cells lying in this one.
+
+        Clipped to the outline: selection is by centre, so the raw boundary is
+        ragged in a way that reads as a rendering fault.
+        """
+        outline = Path(np.asarray(demo.exterior.coords))
+
+        def draw(ax):
+            ax.set_axis_off()
+            for i, m in enumerate(("nn", "bilinear")):
+                sub = samp[f"{key}{m}"]
+                a = ax.inset_axes([i * 0.52, 0.0, 0.46, 1.0])
+                coll = PolyCollection(
+                    [np.asarray(p.exterior.coords) for p in sub.geometry],
+                    facecolors=colour_of(sub["band_1"].to_numpy()),
+                    edgecolors="none",
+                    rasterized=True,
+                )
+                a.add_collection(coll)
+                a.set_xlim(cx - 250, cx + 250), a.set_ylim(cy - 250, cy + 250)
+                clip = PathPatch(outline, transform=a.transData, fc="none", lw=0)
+                a.add_patch(clip)
+                coll.set_clip_path(clip)
+                a.set_aspect("equal"), a.set_xticks([]), a.set_yticks([])
+                a.set_frame_on(False)
+                a.text(
+                    0.5,
+                    -0.06,
+                    f"--sample {m}",
+                    transform=a.transAxes,
+                    ha="center",
+                    va="top",
+                    size=8,
+                    family=MONO,
+                    color=MUT,
+                )
+
+        return draw
+
+    # ===== block 1: the continuous surface ================================
+    header(
+        0.912,
+        "From the continuous surface",
+        f"\u00b7 --point sees {n_pt} pixel centres; --overlay sees {n_ov} pixels",
+    )
+
+    def g_agg(ax):
+        value_axis(ax)
+        ax.plot(
+            [agg["min"], agg["max"]],
+            [0.5, 0.5],
+            color=GLYPH,
+            lw=5,
+            solid_capstyle="round",
+        )
+        ax.plot(
+            [agg["mean"]], [0.5], "o", ms=8, color="white", mec=MUT, mew=1.8, zorder=3
+        )
+        ax.set_ylim(0, 1)
+        ax.text(agg["min"], 0.88, "min", size=7.5, color=MUT, ha="center")
+        ax.text(agg["max"], 0.88, "max", size=7.5, color=MUT, ha="center")
+        ax.text(agg["mean"], 0.0, "mean", size=7.5, color=MUT, ha="center")
+
+    row(
+        0.868,
+        "--point -a min,max,mean",
+        "struct<min, max, mean>",
+        f"{{{agg['min']}, {agg['max']}, {agg['mean']}}}",
+        g_agg,
+    )
+
+    def g_list(ax):
+        value_axis(ax)
+        ax.vlines(lst, 0.18, 0.82, color=GLYPH, lw=1.1)
+        ax.set_ylim(0, 1)
+
+    row(
+        0.808,
+        "--point list",
+        "list<double>",
+        f"[{lst[0]}, {lst[1]}, {lst[2]}, \u2026 {lst[-1]}]   n={len(lst)}",
+        g_list,
+    )
+
+    draw_pt, counts_pt = binned("struct_hist", f"{n_pt} pixel centres")
+    row(
+        0.748,
+        "--point histogram\n  --hist-width 0.1",
+        "struct<left, right, counts>",
+        f"counts: {counts_pt}",
+        draw_pt,
+    )
+
+    draw_ov, counts_ov = binned("struct_ovhist", f"{n_ov} pixels, area-weighted")
+    row(
+        0.688,
+        "--overlay histogram\n  --hist-width 0.1",
+        "struct<left, right, counts>",
+        f"counts: {counts_ov}",
+        draw_ov,
+    )
+
+    row(
+        0.605,
+        f"--sample bilinear\n  -r {SAMPLE_RES}",
+        "double",
+        f"One scalar per cell \u00b7 --agg ignored\n{n_samp} cells centred inside this one",
+        sample_pair("", lambda v: cover(np.clip(v, 0, 1))),
+        h=0.088,
+    )
+    fig.text(
+        X_SIG,
+        0.529,
+        f"Oversampling: r{SAMPLE_RES} cells are finer than the {NLM_PX:.0f} m pixels, so the "
+        "kernel does the work \u2014 nn steps, bilinear interpolates",
+        size=8,
+        color=FAINT,
+        va="center",
+    )
+
+    # ===== block 2: the classified surface ================================
+    header(
+        0.508,
+        "From the classified surface",
+        "\u00b7 Only three of the four classes fall in this cell",
+    )
+
+    def g_cathist(ax):
+        for v, c in zip(cat_vals, cat_counts, strict=True):
+            # class identity is a real encoding, so these bars keep the ramp
+            ax.bar(v, c, width=0.55, color=cover(CLASS_STEPS[v - 1]), linewidth=0)
+            ax.text(
+                v, c + max(cat_counts) * 0.08, str(c), ha="center", size=7.5, color=MUT
+            )
+        ax.set_xlim(0.4, 4.6), ax.set_ylim(0, max(cat_counts) * 1.45)
+        ax.set_xticks(cat_vals)
+        ax.set_xticklabels([CLASS_NAME[v] for v in cat_vals])
+        ax.set_yticks([])
+        for side in ("top", "left", "right"):
+            ax.spines[side].set_visible(False)
+        ax.spines["bottom"].set_color("#cccccc")
+        ax.tick_params(axis="x", labelsize=8, colors=MUT, length=0, pad=2)
+
+    row(
+        0.462,
+        "--overlay histogram",
+        "struct<values, counts>",
+        f"{{values: {cat_vals}, counts: {cat_counts}}}",
+        g_cathist,
+        h=0.050,
+    )
+    fig.text(
+        X_SIG,
+        0.422,
+        "No --hist-width, so it counts exact values \u2014 one bin per class present",
+        size=8,
+        color=FAINT,
+        va="center",
+    )
+
+    def g_frac(ax):
+        x = 0.0
+        for c, f in zip(classes, fracs, strict=True):
+            ax.barh(
+                0,
+                max(f - 0.006, 0.002),  # 2 px of surface between segments
+                left=x,
+                height=0.5,
+                color=cover(CLASS_STEPS[c - 1]),
+                linewidth=0,
+            )
+            ax.text(
+                x + f / 2, -0.52, f"{f:.0%}", ha="center", va="top", size=7.5, color=MUT
+            )
+            x += f
+        ax.set_xlim(0, 1), ax.set_ylim(-1.15, 0.45)
+        ax.set_xticks([]), ax.set_yticks([]), ax.set_frame_on(False)
+
+    row(
+        0.388,
+        "--overlay fractions",
+        "struct<classes, fractions>",
+        "{" + ", ".join(f"{c}: {f}" for c, f in zip(classes, fracs, strict=True)) + "}",
+        g_frac,
+    )
+    fig.text(
+        X_SIG,
+        0.348,
+        "Area each class covers \u2014 area-weighted, so not the counts above rescaled",
+        size=8,
+        color=FAINT,
+        va="center",
+    )
+
+    def g_mode(ax):
+        ax.barh(0, 0.16, height=0.5, color=cover(CLASS_STEPS[mode - 1]), linewidth=0)
+        ax.text(
+            0.19,
+            0,
+            f"Class {mode} \u2014 {CLASS_NAME[mode]} (largest overlap area)",
+            va="center",
+            size=8.5,
+            color=MUT,
+        )
+        ax.set_xlim(0, 1), ax.set_ylim(-0.5, 0.5)
+        ax.set_xticks([]), ax.set_yticks([]), ax.set_frame_on(False)
+
+    row(0.315, "--overlay mode", "int64", f"{mode}", g_mode)
+
+    cat_norm = matplotlib.colors.Normalize(vmin=0.5, vmax=4.5)
+    row(
+        0.232,
+        f"--sample nn\n  -r {SAMPLE_RES}",
+        "double",
+        "One scalar per cell \u00b7 --agg ignored\nClass codes are labels, not "
+        "measurements",
+        sample_pair(
+            "cat",
+            lambda v: cover(
+                np.interp(cat_norm(v), [0, 1], [CLASS_STEPS[0], CLASS_STEPS[-1]])
+            ),
+        ),
+        h=0.088,
+    )
+    fig.text(
+        X_SIG,
+        0.158,
+        f"nn keeps {len(set(samp['catnn']['band_1']))} real classes; bilinear averages "
+        f"'grass' and 'shrub' into 2.4, inventing {n_cat_distinct:,} values that are no "
+        "class at all",
+        size=8,
+        color=NOTE,
+        va="center",
+    )
+
+    # ===== the footnote: what -d actually reaches =========================
+    fig.add_artist(plt.Line2D([X_FLAG, 0.985], [0.145] * 2, color="#dddddd", lw=0.8))
+    fig.text(X_FLAG, 0.126, "-d / --decimals", size=10, family=MONO, va="center")
+    fig.text(
+        X_SIG,
+        0.126,
+        "Rounds every number a schema emits \u2014 struct members, list elements and "
+        "fractions alike,",
+        size=8.5,
+        color=MUT,
+        va="center",
+    )
+    fig.text(
+        X_SIG,
+        0.104,
+        "not only scalar band values. On a classified raster the obvious -d 0 is a trap:",
+        size=8.5,
+        color=MUT,
+        va="center",
+    )
+    for i, (flag, vals, note) in enumerate(
+        [
+            ("-d 3", fracs, "As shown above"),
+            ("-d 0", fracs_d0, "Every fraction collapses to 0 or 1"),
+        ]
+    ):
+        y = 0.078 - i * 0.022
+        fig.text(X_SIG, y, flag, size=8.5, family=MONO, color=INK, va="center")
+        fig.text(
+            X_SIG + 0.033,
+            y,
+            "{"
+            + ", ".join(f"{c}: {f}" for c, f in zip(classes, vals, strict=True))
+            + "}",
+            size=8.5,
+            family=MONO,
+            color=MUT,
+            va="center",
+        )
+        fig.text(X_SIG + 0.20, y, note, size=8, color=FAINT, va="center")
+
+    fig.text(
+        0.985,
+        0.018,
+        "raster2dggs \u00b7 synthetic neutral landscape model "
+        f"(make_samples.nlm_fractal, seed {NLM_SEED})",
+        size=8.5,
+        color=FAINT,
+        ha="right",
+    )
+    fig.savefig(f"{HERE}/struct-outputs.png", dpi=100)
+    plt.close(fig)
+
+
 def quantise(paths):
     """Palette-quantise the PNGs in place when it saves space and PIL is present."""
     try:
@@ -639,21 +1294,20 @@ def main():
     os.makedirs(f"{w}/runs", exist_ok=True)
     print(f"workdir: {w}")
     acquire(w)
+    synth(w)
     index_all(w)
     fig_hero(w, Style(f"{w}/hero.tif"))
     fig_sampling(w, Style(f"{w}/as24_edge.tif"))
     fig_compaction(w)
-    quantise(
-        [
-            f"{HERE}/{n}.png"
-            for n in (
-                "raster2dggs-example",
-                "sampling-strategies",
-                "compaction-example",
-            )
-        ]
+    fig_structs(w)
+    figs = (
+        "raster2dggs-example",
+        "sampling-strategies",
+        "compaction-example",
+        "struct-outputs",
     )
-    for n in ("raster2dggs-example", "sampling-strategies", "compaction-example"):
+    quantise([f"{HERE}/{n}.png" for n in figs])
+    for n in figs:
         print(f"{n}.png  {os.path.getsize(f'{HERE}/{n}.png') / 1024:.0f} KB")
 
 
