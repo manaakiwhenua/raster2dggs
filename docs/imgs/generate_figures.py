@@ -266,6 +266,7 @@ def fig_hero(w, style):
             (f"H3 resolution {r_lo}", f"hero_h3_{r_lo}"),
             (f"H3 resolution {r_hi}", f"hero_h3_{r_hi}"),
         ],
+        strict=True,
     ):
         ax = fig.add_axes([x, 0.555, 0.30, 0.315])
         ax.set_title(title, size=13, pad=6)
@@ -427,7 +428,7 @@ def fig_hero(w, style):
     ]
     bx = fig.add_axes([0.665, 0.012, 0.30, 0.082])
     xmax = max(v for _, v, _ in bars) * 1.22
-    for y, (label, v, c) in zip(np.arange(len(bars))[::-1], bars):
+    for y, (label, v, c) in zip(np.arange(len(bars))[::-1], bars, strict=True):
         bx.barh(y, v, height=0.62, color=c)
         bx.text(v + xmax * 0.017, y, f"{v:,} KB", va="center", size=9.5)
         bx.text(-xmax * 0.017, y, label, va="center", ha="right", size=9.5)
