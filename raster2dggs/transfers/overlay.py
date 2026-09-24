@@ -87,7 +87,10 @@ def _build_collect_table(
     arrays = {}
     for col in result_df.columns:
         if col not in band_cols:
-            arrays[col] = pa.array(result_df[col].tolist())
+            # Pass the Series, not .tolist(): a list of Python ints makes
+            # PyArrow infer int64, which overflows for cell IDs that use the
+            # full 64 bits (A5 at any resolution, S2 on faces 4 and 5).
+            arrays[col] = pa.array(result_df[col])
     for idx, col in zip(selected_indices, band_cols, strict=True):
         if out == const.OutputSchema.LIST:
             elem_type = _pa_elem_type(src_dtypes[idx - 1], decimals)
@@ -105,7 +108,9 @@ def _build_frac_table(result_df: pd.DataFrame, band_cols: list) -> pa.Table:
         if col in band_cols:
             arrays[col] = pa.array(result_df[col].tolist(), type=_FRAC_STRUCT_TYPE)
         else:
-            arrays[col] = pa.array(result_df[col].tolist())
+            # See _build_collect_table: .tolist() would overflow int64 for
+            # full-width uint64 cell IDs.
+            arrays[col] = pa.array(result_df[col])
     return pa.table(arrays)
 
 
