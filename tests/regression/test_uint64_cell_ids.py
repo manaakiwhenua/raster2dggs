@@ -15,6 +15,7 @@ import pytest
 import s2sphere
 
 from raster2dggs import common
+from raster2dggs import constants as const
 from raster2dggs.indexerfactory import indexer_instance
 
 
@@ -108,3 +109,45 @@ def test_string_round_trip_is_exact(dggs, res):
     strings = indexer.cells_to_string(cells)
     assert len(set(strings)) == len(cells), "string forms collide"
     assert all(isinstance(t, str) for t in strings)
+
+
+def test_overlay_struct_tables_keep_full_width_uint64_cell_ids():
+    """--overlay list/histogram/fractions build their PyArrow tables by hand.
+
+    Passing the cell column through ``.tolist()`` hands PyArrow a list of Python
+    ints, which it infers as int64; IDs that use the full 64 bits -- every A5
+    cell, and S2 on faces 4 and 5 -- overflow that with
+    "Python int too large to convert to C long". The scalar overlay ops take a
+    different path, so only the three struct-producing ones regress.
+    """
+    from raster2dggs.transfers.overlay import (
+        _build_collect_table,
+        _build_frac_table,
+    )
+
+    a5_id = 0xB2A1000000000000
+    assert a5_id > 2**63, "fixture must exercise the top bit"
+    cells = np.array([a5_id], dtype=np.uint64)
+
+    collect = _build_collect_table(
+        pd.DataFrame({"_cell_id": cells, "band_1": [[1.0, 2.0]]}),
+        ["band_1"],
+        (np.dtype("float32"),),
+        (1,),
+        const.OutputSchema.LIST,
+        3,
+    )
+    assert collect["_cell_id"].type == pa.uint64()
+    assert int(collect["_cell_id"][0].as_py()) == a5_id
+
+    frac = _build_frac_table(
+        pd.DataFrame(
+            {
+                "_cell_id": cells,
+                "band_1": [{"classes": [1, 2], "fractions": [0.25, 0.75]}],
+            }
+        ),
+        ["band_1"],
+    )
+    assert frac["_cell_id"].type == pa.uint64()
+    assert int(frac["_cell_id"][0].as_py()) == a5_id
