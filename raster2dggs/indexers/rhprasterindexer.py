@@ -73,11 +73,9 @@ class RHPRasterIndexer(RasterIndexer):
 
         Implementation of interface function.
         """
-        if desired_resolution < len(cell):
-            return 0
-        if len(cell) == 1:  # Level 0 has 6 faces, each then divides into 9
-            return 6 * (9 ** (desired_resolution - 1))
-        return 9 ** (desired_resolution - len(cell) + 1)
+        # len(suid) == res + 1, so base cells are resolution 0.
+        offset = desired_resolution - (len(cell) - 1)
+        return 9**offset if offset >= 0 else 0
 
     @staticmethod
     def valid_set(cells: set) -> set[str]:
@@ -157,11 +155,9 @@ class RHPRasterIndexer(RasterIndexer):
         return set() if cells is None else set(cells.tolist())
 
     def cell_area_m2(self, resolution: int, lat: float, lon: float) -> float:
-        # rHEALPix is equal-area: 6 face cells at resolution 1, each subdividing by 9.
-        # At resolution n>=1: 6 * 9^(n-1) cells; resolution 0 is the single whole-globe cell.
-        if resolution == 0:
-            return const.WGS84_SURFACE_AREA_M2
-        return const.WGS84_SURFACE_AREA_M2 / (6 * 9 ** (resolution - 1))
+        # Equal-area, 6 * 9**res cells. Arithmetic rather than
+        # WGS84_003.cell_area so this stays lock-free.
+        return const.WGS84_SURFACE_AREA_M2 / (6 * 9**resolution)
 
     @staticmethod
     @_locked
