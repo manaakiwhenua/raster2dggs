@@ -79,7 +79,7 @@ def transformer():
 
 @pytest.fixture(scope="session")
 def make_block():
-    """Build a raster block shaped as ``rioxarray`` hands it to ``index_func``.
+    """Build a raster block shaped as ``process_window`` hands it to ``index_func``.
 
     ``nodata_fraction`` is applied independently per band, so a pixel is
     dropped by the 'omit' policy only when it is nodata in every band -- which

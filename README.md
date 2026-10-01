@@ -360,21 +360,9 @@ raster2dggs h3 input.tif output/ -r 8 --overlay histogram --hist-width 10 --hist
 GDAL_CACHEMAX=512 raster2dggs h3 input.tif output/ -r 8 --overlay weighted
 ```
 
-The value is in megabytes. The default is 64 MB. For large rasters or high DGGS resolutions where each window covers many cells, a larger cache can significantly reduce processing time.
+The value is the *total* cache in megabytes, shared out equally between the worker processes (each has its own), with a floor of 64 MB per worker. Unset, the total is GDAL's own default of 5% of physical RAM. For large rasters or high DGGS resolutions where each window covers many cells, a larger cache can significantly reduce processing time.
 
-**Check your input's internal tiling.** raster2dggs processes one GDAL block at a time (`src.block_windows()`), for every mode — `--point`, `--sample`, and `--overlay` alike. Some GeoTIFFs (particularly ones exported without explicit tiling options) are stored as *strips* — one block per row — rather than square tiles. A strip-encoded raster can produce thousands of tiny windows instead of a few hundred properly-sized ones, and since each window carries its own per-window overhead (more so for `--overlay`, which re-derives the set of overlapping DGGS cells per window), this can turn an otherwise-quick job into one that appears to hang. Check with:
-
-```bash
-gdalinfo input.tif | grep Block=
-```
-
-`Block=<width>x1` (block height of 1) means it's strip-encoded. If so, re-tile it first:
-
-```bash
-gdal_translate -co TILED=YES -co BLOCKXSIZE=256 -co BLOCKYSIZE=256 input.tif input_tiled.tif
-```
-
-(If `gdal_translate` warns about the CRS definition not matching the EPSG registry, prefer re-tiling via `rasterio` directly instead, copying `src.profile`/`src.crs` as-is, to avoid GDAL rewriting the projection metadata.)
+**Internal tiling.** raster2dggs reads the raster one window at a time, for every mode — `--point`, `--sample`, and `--overlay` alike. Windows follow the file's own blocks; a GeoTIFF stored as *strips* (one full-width block a row or a few rows tall, typical of exports made without explicit tiling options) has its strips stacked into windows of about 512 × 512 pixels, so it costs about as many windows as a tiled file of the same size. Tiling still matters for remote inputs, where a cloud-optimised GeoTIFF lets each window be fetched as a few range requests. Check with `gdalinfo input.tif | grep Block=`; a block height of 1 means strips.
 
 #### Nodata and dataset masks (`--nodata`, `--mask`)
 
@@ -560,7 +548,7 @@ Reading it:
 - **`seconds` is elapsed time; `cpu` is time actually spent computing.** Both are summed across every worker that ran the phase, so with `--processes 7` they can exceed the wall clock several times over. A phase where `cpu` is far below `seconds` was mostly *waiting* — on IO, or on a lock. The two dispatcher rows are the exception: `stage1.wall` and `stage2.total` are measured in the parent while the work happens elsewhere, so their own `cpu` is near zero by construction.
 - **`Stage 1 parallelism`** is worker CPU per second of Stage 1 wall clock, i.e. how many cores' worth of work the pool actually achieved. It is deliberately *not* derived from summed worker elapsed time, because a blocked worker accumulates elapsed time just as a busy one does — that ratio rises towards the worker count exactly when the workers are achieving nothing. `Stage 1 worker stall` is the share of worker time spent blocked rather than computing.
 - **More workers do not always pay.** If parallelism is well below 1.5x, the report says so. Starting a worker pool costs about a second, so on a raster of only a few windows `--processes 1` is genuinely faster — worth measuring both ways on your own data.
-- **`ms/call` with `windows`** is what makes an unexpectedly slow run legible. A large window count with a small per-window cost points at the *input's* block layout rather than at the indexing work — check `block_shape` (a block height of 1 means the GeoTIFF is strip-encoded, giving one window per raster row) and see the [overlay performance note](#performance-note) for how to re-tile.
+- **`ms/call` with `windows`** is what makes an unexpectedly slow run legible. A large window count with a small per-window cost points at the *input's* block layout rather than at the indexing work — `block_shape` and `windows` together show how the raster was cut up (see the [performance note](#performance-note)).
 - Profiling is off by default and the instrumentation is a single branch when disabled, so there is no reason to avoid it in normal use. Worker processes send their measurements back to be summed into the report. The `cpu` column needs a per-thread CPU clock (Linux, Windows); where the platform has none, it and the two figures derived from it are omitted.
 
 ## Visualising output
