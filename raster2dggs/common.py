@@ -945,6 +945,41 @@ class _ParquetWriter:
             )
 
 
+# Pixels per Stage 1 window to aim for when a raster's own blocks are small:
+# a 512 x 512 tile, the common COG tile size, so that strip-encoded and tiled
+# inputs of the same extent cost about the same number of windows.
+_WINDOW_TARGET_PIXELS = 512 * 512
+
+
+def coalesce_windows(
+    windows: Sequence[rio.windows.Window], target_pixels: int = _WINDOW_TARGET_PIXELS
+) -> list[rio.windows.Window]:
+    """Stack vertically adjacent same-width windows until each holds about
+    ``target_pixels``.
+
+    ``block_windows()`` is row-major, so for a strip-encoded raster (one
+    full-width block a few rows tall) consecutive windows sit directly below
+    one another and merge; for a tiled raster the next window is to the right
+    and nothing changes. Every pixel stays in exactly one window.
+    """
+    merged: list[rio.windows.Window] = []
+    for w in windows:
+        if merged:
+            last = merged[-1]
+            stacked = (
+                w.col_off == last.col_off
+                and w.width == last.width
+                and w.row_off == last.row_off + last.height
+            )
+            if stacked and (last.height + w.height) * w.width <= target_pixels:
+                merged[-1] = rio.windows.Window(
+                    last.col_off, last.row_off, last.width, last.height + w.height
+                )
+                continue
+        merged.append(w)
+    return merged
+
+
 def _needs_mask_read(src: rio.DatasetReader, selected_indices) -> bool:
     """True if any selected band's validity comes from a mask band -- an alpha
     band or an internal/sidecar mask -- rather than only from a declared nodata
@@ -1223,7 +1258,9 @@ def initial_index(
                         i for i in selected_indices if not (i in seen or seen.add(i))
                     ]
 
-                windows = [window for _, window in src.block_windows()]
+                windows = coalesce_windows(
+                    [window for _, window in src.block_windows()]
+                )
                 LOGGER.debug(
                     "%d windows",
                     len(windows),
