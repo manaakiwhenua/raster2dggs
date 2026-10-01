@@ -24,7 +24,6 @@ import pandas as pd
 import pyarrow as pa
 import pyproj
 import rasterio as rio
-import xarray as xr
 from rasterio.warp import transform_bounds
 
 from raster2dggs.indexers.rasterindexer import _is_nan
@@ -83,7 +82,6 @@ class _SampleIndexer:
     """
 
     src: rio.DatasetReader
-    da: xr.DataArray
     inverse_transformer: pyproj.Transformer
     nodata: Any
     indexer: IRasterIndexer
@@ -101,8 +99,8 @@ class _SampleIndexer:
     # Set when the source carries an alpha/mask band and --mask is on: masked
     # pixels are read as NaN so every kernel treats them as nodata.
     apply_mask: bool = dataclasses.field(default=False)
-    # Lock guarding reads of ``src``; share the one rioxarray uses for ``da``
-    # (the same GDAL dataset), which is not safe for concurrent access.
+    # Lock guarding reads of ``src``: a GDAL dataset is not safe for
+    # concurrent access.
     read_lock: Any = dataclasses.field(default=None)
 
     def __post_init__(self):
