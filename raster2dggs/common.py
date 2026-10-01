@@ -9,6 +9,7 @@ import os
 import shutil
 import sys
 import tempfile
+import threading
 from collections.abc import Callable, Sequence
 from concurrent.futures import ProcessPoolExecutor
 from pathlib import Path
@@ -26,7 +27,6 @@ import pyarrow.dataset as ds
 import pyarrow.parquet as pq
 import pyproj
 import rasterio as rio
-import rioxarray
 import shapely
 from rasterio.enums import ColorInterp, MaskFlags
 from rasterio.warp import transform_bounds
@@ -945,6 +945,41 @@ class _ParquetWriter:
             )
 
 
+# Pixels per Stage 1 window to aim for when a raster's own blocks are small:
+# a 512 x 512 tile, the common COG tile size, so that strip-encoded and tiled
+# inputs of the same extent cost about the same number of windows.
+_WINDOW_TARGET_PIXELS = 512 * 512
+
+
+def coalesce_windows(
+    windows: Sequence[rio.windows.Window], target_pixels: int = _WINDOW_TARGET_PIXELS
+) -> list[rio.windows.Window]:
+    """Stack vertically adjacent same-width windows until each holds about
+    ``target_pixels``.
+
+    ``block_windows()`` is row-major, so for a strip-encoded raster (one
+    full-width block a few rows tall) consecutive windows sit directly below
+    one another and merge; for a tiled raster the next window is to the right
+    and nothing changes. Every pixel stays in exactly one window.
+    """
+    merged: list[rio.windows.Window] = []
+    for w in windows:
+        if merged:
+            last = merged[-1]
+            stacked = (
+                w.col_off == last.col_off
+                and w.width == last.width
+                and w.row_off == last.row_off + last.height
+            )
+            if stacked and (last.height + w.height) * w.width <= target_pixels:
+                merged[-1] = rio.windows.Window(
+                    last.col_off, last.row_off, last.width, last.height + w.height
+                )
+                continue
+        merged.append(w)
+    return merged
+
+
 def _needs_mask_read(src: rio.DatasetReader, selected_indices) -> bool:
     """True if any selected band's validity comes from a mask band -- an alpha
     band or an internal/sidecar mask -- rather than only from a declared nodata
@@ -989,7 +1024,6 @@ def _setup_stage1_worker(cfg: dict) -> None:
         write_result=write_result,
     )
 
-    da = None
     if cfg["transfer"] in const.OVERLAY_TRANSFER_KEYS:
         # Only a source with an alpha/mask band needs anything other than the
         # raster path: masked NaN-float sources with --mask (exactextract's own
@@ -1013,29 +1047,15 @@ def _setup_stage1_worker(cfg: dict) -> None:
         func = ctx.process_window
         transformer = None
     else:
-        # One lock guards every read of ``src`` in this process -- rioxarray's
-        # and the transfers' mask reads alike; GDAL datasets are not safe for
-        # concurrent access.
-        read_lock = dask.utils.SerializableLock()
-        da = rioxarray.open_rasterio(
-            src,
-            lock=read_lock,
-            masked=False,
-            default_name=const.DEFAULT_NAME,
-        ).chunk(**{"y": "auto", "x": "auto"})
-        if "band" in da.dims and len(cfg["selected_indices"]) != src.count:
-            if "band" in da.coords:
-                da = da.sel(band=list(cfg["selected_indices"]))
-            else:
-                da = da.isel(band=[i - 1 for i in cfg["selected_indices"]])
-
+        # One lock guards every read of ``src`` in this process: GDAL datasets
+        # are not safe for concurrent access.
+        read_lock = threading.Lock()
         if cfg["transfer"] == const.Transfer.SAMPLE:
             transformer = pyproj.Transformer.from_crs(
                 "EPSG:4326", src.crs, always_xy=True
             )
             ctx = _SampleIndexer(
                 src=src,
-                da=da,
                 inverse_transformer=transformer,
                 nodata=src.nodata,
                 apply_mask=apply_mask,
@@ -1052,7 +1072,6 @@ def _setup_stage1_worker(cfg: dict) -> None:
                 src.crs, "EPSG:4326", always_xy=True
             )
             ctx = _AssignCentersIndexer(
-                da=da,
                 nodata=src.nodata,
                 transformer=transformer,
                 src=src,
@@ -1062,7 +1081,7 @@ def _setup_stage1_worker(cfg: dict) -> None:
             )
             func = ctx.process_window
 
-    _WORKER.update(env=env, src=src, da=da, transformer=transformer, ctx=ctx, func=func)
+    _WORKER.update(env=env, src=src, transformer=transformer, ctx=ctx, func=func)
 
 
 def _init_stage1_worker(cfg: dict) -> None:
@@ -1087,23 +1106,20 @@ def _run_stage1_window(window: tuple):
 def _close_stage1_worker() -> None:
     """Release this process's GDAL/PROJ objects.
 
-    ``da`` and the transformer are held by ``ctx`` as dataclass fields and are
-    not freed by reference counting alone if they are in a dask task-graph cycle.
-    Dropping them explicitly while the dataset is still open tears the GDAL/PROJ
-    objects down during normal execution rather than at interpreter shutdown,
-    which causes a silent "Error in sys.excepthook" crash for non-WGS84 rasters.
+    The transformer and the dataset are held by ``ctx`` as dataclass fields.
+    Dropping them explicitly, in this order and while the dataset is still
+    open, tears the GDAL/PROJ objects down during normal execution rather than
+    at interpreter shutdown, which causes a silent "Error in sys.excepthook"
+    crash for non-WGS84 rasters.
     """
     if not _WORKER:
         return
     ctx = _WORKER.pop("ctx", None)
-    da = _WORKER.pop("da", None)
     _WORKER.pop("transformer", None)
     _WORKER.pop("func", None)
-    if da is not None:
-        da.close()
     if hasattr(ctx, "close"):
         ctx.close()
-    del ctx, da
+    del ctx
     gc.collect()
     src = _WORKER.pop("src", None)
     if src is not None:
@@ -1242,7 +1258,9 @@ def initial_index(
                         i for i in selected_indices if not (i in seen or seen.add(i))
                     ]
 
-                windows = [window for _, window in src.block_windows()]
+                windows = coalesce_windows(
+                    [window for _, window in src.block_windows()]
+                )
                 LOGGER.debug(
                     "%d windows",
                     len(windows),
