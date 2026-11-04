@@ -14,6 +14,8 @@ Currently this supports the following DGGSs:
 - [A5](https://a5geo.org/)
 - Via [DGGAL](https://github.com/IAAA-Lab/dggal): ISEA4R, ISEA9R, ISEA3H, ISEA7H, IVEA4R, IVEA9R, IVEA3H, IVEA7H, RTEA4R, RTEA9R, RTEA7H, HEALPix, rHEALPix
 
+> **A5 cell IDs** follow the [A5 v1 index](https://a5geo.org/docs/upgrade-guide) (pya5 ≥ 1.0). Output written by raster2dggs ≤ 0.18 carries v0 IDs: the cells are the same, but their IDs differ. Re-index the raster, or convert each existing ID with pya5's [`migrate`](https://a5geo.org/docs/api-reference/miscellaneous#migrate) function (`a5_migrate` in DuckDB).
+
 And these geocode systems:
 
 - [Geohash](https://en.wikipedia.org/wiki/Geohash)

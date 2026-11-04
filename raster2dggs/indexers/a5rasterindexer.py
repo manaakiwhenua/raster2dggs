@@ -116,9 +116,12 @@ class A5RasterIndexer(RasterIndexer):
         Not a part of the RasterIndexer interface
         """
         try:
-            return const.MIN_A5 <= a5py.get_resolution(int(cell)) <= const.MAX_A5
-        except Exception:
+            cell = int(cell)
+        except (TypeError, ValueError, OverflowError):
             return False
+        return a5py.is_valid_cell(cell) and (
+            const.MIN_A5 <= a5py.get_resolution(cell) <= const.MAX_A5
+        )
 
     SUPPORTS_CELL_ENUMERATION: bool = True
 
@@ -132,12 +135,13 @@ class A5RasterIndexer(RasterIndexer):
         resolution: int,
     ) -> set:
         """
-        Return A5 cell IDs (hex strings) at the given resolution whose centres
-        fall within the WGS84 bounding box.
+        Return A5 cell IDs at the given resolution whose centres fall within
+        the WGS84 bounding box.
 
-        Uses pya5's polygon_to_cells (dense boundary sampling + flood fill) to
-        find every cell whose centre lies in the bbox, then uncompact to expand
-        the (possibly-compacted) result to the target resolution.
+        pya5's polygon_to_cells returns a covering: compacted cells followed by
+        a compaction marker that records the resolution. uncompact reads the
+        resolution from that marker and drops it, so the covering is passed
+        through whole.
         """
         ring = [
             (min_lon, min_lat),
@@ -147,7 +151,7 @@ class A5RasterIndexer(RasterIndexer):
             (min_lon, min_lat),
         ]
         compacted = a5py.polygon_to_cells(ring, resolution)
-        cells = a5py.uncompact(compacted, resolution)
+        cells = a5py.uncompact(compacted)
         return {int(c) for c in cells}
 
     SUPPORTS_OVERLAP_ENUMERATION: bool = True
@@ -175,7 +179,7 @@ class A5RasterIndexer(RasterIndexer):
         compacted = a5py.polygon_to_cells(
             ring, resolution, {"containment": "overlapping"}
         )
-        cells = a5py.uncompact(compacted, resolution)
+        cells = a5py.uncompact(compacted)
         return {int(c) for c in cells}
 
     @_locked
