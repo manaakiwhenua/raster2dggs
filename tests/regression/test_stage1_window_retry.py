@@ -23,6 +23,7 @@ from rasterio.errors import RasterioIOError
 
 from raster2dggs import common
 from raster2dggs.cli import cli
+from raster2dggs.profiling import PROFILER
 
 _WINDOW = (0, 0, 8, 8)
 _BOUNDS = (174.0, -41.2, 174.2, -41.0)
@@ -66,8 +67,20 @@ def test_retries_are_bounded_and_name_the_window(worker, caplog):
             common._run_stage1_window(_WINDOW)
     assert len(calls) == 4
     assert sleeps == [2.0, 4.0, 8.0]
-    assert "col 0 row 0 size 8x8" in caplog.text
+    assert "Window(col_off=0, row_off=0, width=8, height=8)" in caplog.text
     assert "attempt 4 of 4" in caplog.text
+
+
+def test_retry_wait_is_its_own_profile_phase(worker):
+    worker(failures=2, attempts=4)
+    PROFILER.reset(enabled=True)
+    try:
+        common._run_stage1_window(_WINDOW)
+        counts = PROFILER.snapshot()["counts"]
+    finally:
+        PROFILER.reset(enabled=False)
+    assert counts["stage1.window_retry"] == 2
+    assert counts["stage1.window_total"] == 3
 
 
 def test_local_input_gets_one_attempt(worker):
@@ -139,14 +152,21 @@ def test_vrt_with_remote_source_counts_as_remote(tmp_path, local_raster):
 
 
 @pytest.fixture
-def captured_cfg(monkeypatch):
-    """The configuration the parent hands to Stage 1 workers."""
-    seen: list[dict] = []
+def worker_state(monkeypatch):
+    """What each Stage 1 worker is told, and what it makes of it: the
+    (remote flag, read attempts, GDAL options) of every worker set up."""
+    seen: list[tuple] = []
     original = common._setup_stage1_worker
 
     def recording(cfg):
-        seen.append(cfg)
         original(cfg)
+        seen.append(
+            (
+                cfg["remote"],
+                common._WORKER["read_attempts"],
+                dict(common._WORKER["env"].options),
+            )
+        )
 
     monkeypatch.setattr(common, "_setup_stage1_worker", recording)
     return seen
@@ -162,17 +182,19 @@ def _run(raster, out):
 
 
 def test_workers_retry_only_for_remote_inputs(
-    monkeypatch, tmp_path, local_raster, captured_cfg
+    monkeypatch, tmp_path, local_raster, worker_state
 ):
     monkeypatch.delenv("GDAL_HTTP_MAX_RETRY", raising=False)
     monkeypatch.delenv("GDAL_HTTP_RETRY_DELAY", raising=False)
 
     _run(local_raster, tmp_path / "local")
-    assert captured_cfg[-1]["window_read_attempts"] == 1
-    assert captured_cfg[-1]["gdal_options"] == {}
+    assert worker_state[-1] == (False, 1, {})
 
     # The same local file, treated as if a VRT had listed a remote source.
     monkeypatch.setattr(common, "_remote_sources", lambda _: ["/vsicurl/x.tif"])
     _run(local_raster, tmp_path / "remote")
-    assert captured_cfg[-1]["window_read_attempts"] == common._WINDOW_READ_ATTEMPTS
-    assert captured_cfg[-1]["gdal_options"] == common._GDAL_HTTP_RETRY_DEFAULTS
+    assert worker_state[-1] == (
+        True,
+        common._WINDOW_READ_ATTEMPTS,
+        common._GDAL_HTTP_RETRY_DEFAULTS,
+    )

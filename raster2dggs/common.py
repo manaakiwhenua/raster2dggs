@@ -1058,8 +1058,9 @@ def _setup_stage1_worker(cfg: dict) -> None:
     if cfg["gdal_cachemax_mb"]:
         os.environ["GDAL_CACHEMAX"] = str(cfg["gdal_cachemax_mb"])
 
-    # .get: cfg is internal, and callers building it by hand predate these.
-    env = rio.Env(**cfg.get("gdal_options", {}))
+    # .get: cfg is internal, and callers building it by hand predate remote.
+    remote = cfg.get("remote", False)
+    env = rio.Env(**_gdal_http_retry_options(remote))
     env.__enter__()
     src = rio.open(cfg["raster_input"], mode="r", sharing=False)
     # .get: cfg is internal, and callers building it by hand predate use_mask.
@@ -1145,7 +1146,7 @@ def _setup_stage1_worker(cfg: dict) -> None:
         transformer=transformer,
         ctx=ctx,
         func=func,
-        read_attempts=cfg.get("window_read_attempts", 1),
+        read_attempts=_WINDOW_READ_ATTEMPTS if remote else 1,
     )
 
 
@@ -1159,13 +1160,6 @@ def _init_stage1_worker(cfg: dict) -> None:
     atexit.register(_close_stage1_worker)
 
 
-def _window_label(window: rio.windows.Window) -> str:
-    return (
-        f"col {window.col_off} row {window.row_off} "
-        f"size {window.width}x{window.height}"
-    )
-
-
 def _run_stage1_window(window: tuple):
     """Index one window. Returns this worker's profile totals when profiling.
 
@@ -1176,30 +1170,29 @@ def _run_stage1_window(window: tuple):
     """
     w = rio.windows.Window(*window)
     attempts = _WORKER.get("read_attempts", 1)
-    with PROFILER.phase("stage1.window_total"):
-        for attempt in range(1, attempts + 1):
-            try:
+    for attempt in range(1, attempts + 1):
+        try:
+            with PROFILER.phase("stage1.window_total"):
                 _WORKER["func"](w)
-                break
-            except RasterioIOError as exc:
-                if attempt == attempts:
-                    LOGGER.error(
-                        "Window %s failed on attempt %d of %d: %s",
-                        _window_label(w),
-                        attempt,
-                        attempts,
-                        exc,
-                    )
-                    raise
-                delay = _WINDOW_READ_RETRY_DELAY_S * 2 ** (attempt - 1)
-                LOGGER.warning(
-                    "Window %s read failed on attempt %d of %d, retrying in %.0f s: %s",
-                    _window_label(w),
-                    attempt,
-                    attempts,
-                    delay,
-                    exc,
+            break
+        except RasterioIOError as exc:
+            if attempt == attempts:
+                LOGGER.error(
+                    "%r failed on attempt %d of %d: %s", w, attempt, attempts, exc
                 )
+                raise
+            delay = _WINDOW_READ_RETRY_DELAY_S * 2 ** (attempt - 1)
+            LOGGER.warning(
+                "%r read failed on attempt %d of %d, retrying in %.0f s: %s",
+                w,
+                attempt,
+                attempts,
+                delay,
+                exc,
+            )
+            # Its own phase, so --profile reports retries and the time they
+            # cost rather than folding the wait into the window's own time.
+            with PROFILER.phase("stage1.window_retry"):
                 time.sleep(delay)
     if PROFILER.enabled:
         return os.getpid(), PROFILER.snapshot()
@@ -1304,19 +1297,13 @@ def initial_index(
         LOGGER.debug(f"Create temporary directory {tmpdir}")
 
         remote_sources = _remote_sources(raster_input)
-        gdal_options = _gdal_http_retry_options(bool(remote_sources))
         if remote_sources:
             LOGGER.info(
-                "Remote input (%s): a failed window read is retried up to %d times%s",
+                "Remote input (%s): a failed window read is retried up to %d times",
                 remote_sources[0],
                 _WINDOW_READ_ATTEMPTS - 1,
-                (
-                    "; " + ", ".join(f"{k}={v}" for k, v in gdal_options.items())
-                    if gdal_options
-                    else ""
-                ),
             )
-        with rio.Env(**gdal_options):
+        with rio.Env(**_gdal_http_retry_options(bool(remote_sources))):
             with rio.open(raster_input, mode="r", sharing=False) as src:
                 LOGGER.debug("Source CRS: %s", src.crs)
                 band_names = tuple(src.descriptions) if src.descriptions else tuple()
@@ -1427,10 +1414,7 @@ def initial_index(
                         _MIN_GDAL_CACHE_MB, _gdal_cache_budget_mb() // processes
                     ),
                     "overlay_shared_paths": {},
-                    "gdal_options": gdal_options,
-                    "window_read_attempts": (
-                        _WINDOW_READ_ATTEMPTS if remote_sources else 1
-                    ),
+                    "remote": bool(remote_sources),
                 }
 
                 # --overlay may need raster-sized weights and validity rasters.
