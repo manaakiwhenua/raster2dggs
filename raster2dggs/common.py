@@ -10,6 +10,7 @@ import shutil
 import sys
 import tempfile
 import threading
+import time
 from collections.abc import Callable, Sequence
 from concurrent.futures import ProcessPoolExecutor
 from pathlib import Path
@@ -29,6 +30,7 @@ import pyproj
 import rasterio as rio
 import shapely
 from rasterio.enums import ColorInterp, MaskFlags
+from rasterio.errors import RasterioIOError
 from rasterio.warp import transform_bounds
 from tqdm import tqdm
 from tqdm.dask import TqdmCallback
@@ -156,6 +158,55 @@ def resolve_input_path(raster_input: str | Path) -> str | Path:
         raster_input = Path(raster_input)
 
     return raster_input
+
+
+# GDAL virtual filesystems that read over the network, matched anywhere in
+# the path so chained forms (/vsizip//vsicurl/...) count too.
+_REMOTE_VSI_PREFIXES = (
+    "/vsicurl",
+    "/vsis3",
+    "/vsigs",
+    "/vsiaz",
+    "/vsiadls",
+    "/vsioss",
+    "/vsiswift",
+    "/vsihdfs",
+    "/vsiwebhdfs",
+)
+_REMOTE_URI_SCHEMES = frozenset(
+    {"http", "https", "ftp", "s3", "gs", "az", "adls", "oss", "swift", "hdfs"}
+)
+
+# GDAL's HTTP retry, applied for a remote input unless the environment sets
+# it. It covers HTTP error codes and dropped connections; a 200 with an empty
+# body is not an HTTP error and is left to the window retry.
+_GDAL_HTTP_RETRY_DEFAULTS = {"GDAL_HTTP_MAX_RETRY": "5", "GDAL_HTTP_RETRY_DELAY": "2"}
+
+
+def _is_remote_path(path: str | Path) -> bool:
+    """True for a path GDAL reads over the network."""
+    s = str(path)
+    if any(prefix in s for prefix in _REMOTE_VSI_PREFIXES):
+        return True
+    return urlparse(s).scheme.lower() in _REMOTE_URI_SCHEMES
+
+
+def _remote_sources(raster_input: str | Path) -> list[str]:
+    """The network-read files behind an input: the input itself, or the
+    remote sources of a local container such as a VRT. Listing a dataset's
+    files reads its header only, not the sources."""
+    if _is_remote_path(raster_input):
+        return [str(raster_input)]
+    with rio.open(raster_input, mode="r", sharing=False) as src:
+        return [f for f in (src.files or []) if _is_remote_path(f)]
+
+
+def _gdal_http_retry_options(remote: bool) -> dict[str, str]:
+    """GDAL configuration for this run: HTTP retries for a remote input, for
+    each option the caller has not set in the environment."""
+    if not remote:
+        return {}
+    return {k: v for k, v in _GDAL_HTTP_RETRY_DEFAULTS.items() if k not in os.environ}
 
 
 def create_aggfuncs(
@@ -915,6 +966,12 @@ def _gdal_cache_budget_mb() -> int:
 # hand-off between the initialiser and the per-window function.
 _WORKER: dict = {}
 
+# A window read of a remote input that fails is re-run after a backoff of
+# _WINDOW_READ_RETRY_DELAY_S doubling per attempt, up to this many attempts
+# in all. A local read error is not transient, so local inputs get one.
+_WINDOW_READ_ATTEMPTS = 4
+_WINDOW_READ_RETRY_DELAY_S = 2.0
+
 
 @dataclasses.dataclass(frozen=True)
 class _ParquetWriter:
@@ -1001,7 +1058,9 @@ def _setup_stage1_worker(cfg: dict) -> None:
     if cfg["gdal_cachemax_mb"]:
         os.environ["GDAL_CACHEMAX"] = str(cfg["gdal_cachemax_mb"])
 
-    env = rio.Env()
+    # .get: cfg is internal, and callers building it by hand predate remote.
+    remote = cfg.get("remote", False)
+    env = rio.Env(**_gdal_http_retry_options(remote))
     env.__enter__()
     src = rio.open(cfg["raster_input"], mode="r", sharing=False)
     # .get: cfg is internal, and callers building it by hand predate use_mask.
@@ -1081,7 +1140,14 @@ def _setup_stage1_worker(cfg: dict) -> None:
             )
             func = ctx.process_window
 
-    _WORKER.update(env=env, src=src, transformer=transformer, ctx=ctx, func=func)
+    _WORKER.update(
+        env=env,
+        src=src,
+        transformer=transformer,
+        ctx=ctx,
+        func=func,
+        read_attempts=_WINDOW_READ_ATTEMPTS if remote else 1,
+    )
 
 
 def _init_stage1_worker(cfg: dict) -> None:
@@ -1095,9 +1161,39 @@ def _init_stage1_worker(cfg: dict) -> None:
 
 
 def _run_stage1_window(window: tuple):
-    """Index one window. Returns this worker's profile totals when profiling."""
-    with PROFILER.phase("stage1.window_total"):
-        _WORKER["func"](rio.windows.Window(*window))
+    """Index one window. Returns this worker's profile totals when profiling.
+
+    A window is a function of its bounds and writes to a fixed file name, so
+    re-running it after a failed read is safe. The retry lives here, not in
+    GDAL: GDAL's HTTP retry covers error codes and dropped connections, and a
+    range read answered with an empty body is neither.
+    """
+    w = rio.windows.Window(*window)
+    attempts = _WORKER.get("read_attempts", 1)
+    for attempt in range(1, attempts + 1):
+        try:
+            with PROFILER.phase("stage1.window_total"):
+                _WORKER["func"](w)
+            break
+        except RasterioIOError as exc:
+            if attempt == attempts:
+                LOGGER.error(
+                    "%r failed on attempt %d of %d: %s", w, attempt, attempts, exc
+                )
+                raise
+            delay = _WINDOW_READ_RETRY_DELAY_S * 2 ** (attempt - 1)
+            LOGGER.warning(
+                "%r read failed on attempt %d of %d, retrying in %.0f s: %s",
+                w,
+                attempt,
+                attempts,
+                delay,
+                exc,
+            )
+            # Its own phase, so --profile reports retries and the time they
+            # cost rather than folding the wait into the window's own time.
+            with PROFILER.phase("stage1.window_retry"):
+                time.sleep(delay)
     if PROFILER.enabled:
         return os.getpid(), PROFILER.snapshot()
     return None
@@ -1200,7 +1296,14 @@ def initial_index(
     with tempfile.TemporaryDirectory() as tmpdir:
         LOGGER.debug(f"Create temporary directory {tmpdir}")
 
-        with rio.Env():
+        remote_sources = _remote_sources(raster_input)
+        if remote_sources:
+            LOGGER.info(
+                "Remote input (%s): a failed window read is retried up to %d times",
+                remote_sources[0],
+                _WINDOW_READ_ATTEMPTS - 1,
+            )
+        with rio.Env(**_gdal_http_retry_options(bool(remote_sources))):
             with rio.open(raster_input, mode="r", sharing=False) as src:
                 LOGGER.debug("Source CRS: %s", src.crs)
                 band_names = tuple(src.descriptions) if src.descriptions else tuple()
@@ -1311,6 +1414,7 @@ def initial_index(
                         _MIN_GDAL_CACHE_MB, _gdal_cache_budget_mb() // processes
                     ),
                     "overlay_shared_paths": {},
+                    "remote": bool(remote_sources),
                 }
 
                 # --overlay may need raster-sized weights and validity rasters.

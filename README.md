@@ -37,6 +37,7 @@ Contributions (particularly for additional DGGSs), suggestions, bug reports and 
 - [Compaction](#compaction---compact)
 - [Integer cell IDs](#integer-cell-ids---cell-id-uint64)
 - [Parallelism](#parallelism---processes)
+- [Remote inputs](#remote-inputs)
 - [Profiling a run](#profiling-a-run----profile)
 - [Visualising output](#visualising-output)
   - [DuckDB](#duckdb)
@@ -504,6 +505,12 @@ raster2dggs h3 input.tif output/ -r 11 --processes 4
 ```
 
 Memory scales with the worker count (each opens its own copy of the raster), so **lower `--processes` if a run is memory-constrained**. `--processes 1` runs inline without a pool, which is faster for a raster of only a few windows and is the mode to use when debugging. `-t`/`--threads` is accepted as a deprecated alias.
+
+## Remote inputs
+
+A raster can be read over the network: a `/vsicurl/`, `/vsis3/` or `http(s)://` path, or a local VRT whose sources are. For such inputs raster2dggs sets GDAL's HTTP retry (`GDAL_HTTP_MAX_RETRY=5`, `GDAL_HTTP_RETRY_DELAY=2`) for any of those options not already in the environment, and re-runs a window whose read fails, three more times with a backoff of 2, 4 and 8 seconds, before giving up. The two cover different failures: GDAL retries HTTP error codes and dropped connections, while the window retry catches a range request answered with an empty body, which GDAL reports as a read error rather than an HTTP one. A window that still fails is reported with its pixel offset and size.
+
+Remote reads share one link, so a large `--processes` can be slower than a small one: see [Parallelism](#parallelism---processes).
 
 ## Profiling a run — `--profile`
 
