@@ -40,6 +40,7 @@ dependencies = [
     "tqdm (>=4,<5)",
     "click-log (>=0.4,<0.5)",
     "rasterio (>=1.4,<2.0)",
+    "affine (>=3.0,<4.0)",
     "numpy (>=2,<3)",
     "shapely (>=2,<3)",
     "pyproj (>=3.5,<4.0)",
@@ -107,6 +108,12 @@ build-backend = "poetry.core.masonry.api"
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["tests"]
+filterwarnings = [
+    # rasterio < 1.6 composes and applies Affine transforms with *, which
+    # affine >= 3.0.1 deprecates. Scoped to rasterio's modules so the same
+    # warning from raster2dggs code stays visible.
+    'ignore:Use `@` matmul instead of `\*` mul operator:PendingDeprecationWarning:rasterio',
+]
 
 [tool.black]
 line-length = 88

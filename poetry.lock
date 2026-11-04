@@ -2909,4 +2909,4 @@ s2 = ["s2sphere"]
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.11,<4.0"
-content-hash = "564c3e5657f595b608ba265f61917599915e87d0c87b01c7840deb6d40062c59"
+content-hash = "6646d34425bce54715884c5bfdbc387049891cd2e9426ff91b71fb786a3cb422"
