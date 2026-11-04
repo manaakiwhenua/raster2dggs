@@ -329,6 +329,8 @@ Uses [exactextract](https://github.com/isciences/exactextract) to compute exact 
 
 These schemas are easier to read as output than as type signatures. The figure explodes a single A5 resolution 14 cell — 52 pixel centres inside it, 69 pixels touched — and shows what each mode writes into its column, for a continuous surface and for its classification. Two things it makes concrete: `--overlay histogram` bins continuous data into `struct<left, right, counts>`, but with no `--hist-bins`/`--hist-width` it counts *exact values* into the `struct<values, counts>` above, one bin per class present; and `-d`/`--decimals` rounds every number a schema emits — struct members, list elements and fractions alike — so `-d 0` on a classified raster collapses every fraction to 0 or 1.
 
+With `-d none` nothing is rounded and each column's dtype follows its operation. An operation that returns one of its inputs (`min`, `max`, `mode`, `majority`, `--overlay mode`, `--sample nn`) keeps the source dtype; a count (`count`, `nunique`) is int64; `sum`, `prod` and `range` of an integer source are int64; anything else derived from an integer source (`mean`, `median`, `std`, `var`, the other overlay methods, interpolated samples) is float64. A float source keeps its own precision for everything but a count. Rounding overrides this: a positive number of places gives float64, zero or fewer an integer.
+
 ```bash
 # Area-weighted mean (intensive quantities)
 raster2dggs h3 input.tif output/ -r 8 --overlay weighted
