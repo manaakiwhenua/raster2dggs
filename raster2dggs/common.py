@@ -469,12 +469,58 @@ def write_partition_as_geoparquet(
     )
 
 
-def _element_type(src_dtype, decimals) -> pa.DataType:
-    if decimals is not None and decimals <= 0:
-        return pa.int64()
-    if decimals is not None:  # decimals > 0: always float64
-        return pa.float64()
-    return pa.from_numpy_dtype(src_dtype)
+# With rounding disabled, the written dtype follows what the operation
+# returns. A value-preserving operation returns one of its inputs, so the
+# source dtype holds it; a count is an int64; an integer-valued operation on an
+# integer source needs a wider integer; anything else is derived arithmetic,
+# float64 for an integer source. A float source keeps its own precision
+# throughout. Rounding overrides all of this: to a positive number of places
+# the result is float64, to zero or fewer it is an integer.
+_VALUE_AGGS = frozenset({"min", "max", "mode", "majority"})
+_COUNT_AGGS = frozenset({"count", "nunique"})
+_INTEGER_AGGS = frozenset({"sum", "prod", "range"})
+
+
+def _agg_kind(agg_name: str) -> str:
+    if agg_name in _VALUE_AGGS:
+        return "value"
+    if agg_name in _COUNT_AGGS:
+        return "count"
+    if agg_name in _INTEGER_AGGS:
+        return "integer"
+    return "derived"
+
+
+def _transfer_kind(transfer: str, interp: str, op: str | None) -> str:
+    """The result kind of a sample or overlay transfer's scalar output."""
+    if transfer == const.Transfer.SAMPLE:
+        return "value" if interp == const.Interp.NN else "derived"
+    return "value" if op == const.Op.MAJORITY else "derived"
+
+
+def _unrounded_dtype(src_dtype, kind: str) -> np.dtype:
+    src = np.dtype(src_dtype)
+    if kind == "value":
+        return src
+    if kind == "count":
+        return np.dtype("int64")
+    if src.kind in "iub":
+        return np.dtype("int64" if kind == "integer" else "float64")
+    return src
+
+
+def _scalar_dtype(src_dtype, decimals, kind: str):
+    """The pandas dtype of a scalar output column."""
+    if decimals is None:
+        return _unrounded_dtype(src_dtype, kind)
+    return "Int64" if decimals <= 0 else "float64"
+
+
+def _element_type(src_dtype, decimals, kind: str = "value") -> pa.DataType:
+    """The arrow type of a scalar output, or of an element of a list or struct."""
+    if decimals is None:
+        return pa.from_numpy_dtype(_unrounded_dtype(src_dtype, kind))
+    return pa.int64() if decimals <= 0 else pa.float64()
 
 
 def _build_output_meta(
@@ -489,6 +535,7 @@ def _build_output_meta(
     index_col: str,
     compact: bool,
     interp: str,
+    op: str | None = None,
     cell_dtype: str = "string",
 ) -> tuple[pd.DataFrame, str]:
     if (
@@ -504,20 +551,17 @@ def _build_output_meta(
         )
         or (out == const.OutputSchema.VALUE and len(aggfuncs) == 1)
     ):
+        kind = (
+            _agg_kind(aggfuncs[0][0])
+            if transfer == const.Transfer.ASSIGN_CENTERS
+            else _transfer_kind(transfer, interp, op)
+        )
         out_meta = pd.DataFrame(
             {
                 partition_col: pd.Series([], dtype=cell_dtype),
                 **{
                     c: pd.Series(
-                        [],
-                        dtype=(
-                            "Int64"
-                            if decimals is not None and decimals <= 0
-                            # decimals > 0: always float64 regardless of source
-                            # dtype — aggregations on integer rasters (e.g. mean)
-                            # produce floats, and rounding to dp implies a float result
-                            else "float64" if decimals is not None else source_dtypes[c]
-                        ),
+                        [], dtype=_scalar_dtype(source_dtypes[c], decimals, kind)
                     )
                     for c in band_cols
                 },
@@ -599,7 +643,10 @@ def _build_write_schema(
                     pa.struct(
                         [
                             pa.field(
-                                agg_name, _element_type(source_dtypes[c], decimals)
+                                agg_name,
+                                _element_type(
+                                    source_dtypes[c], decimals, _agg_kind(agg_name)
+                                ),
                             )
                             for agg_name, _ in aggfuncs
                         ]
@@ -807,6 +854,7 @@ def address_boundary_issues(
         index_col=index_col,
         compact=kwargs["compact"],
         interp=kwargs.get("interp", const.Interp.NN),
+        op=kwargs.get("op"),
         cell_dtype=indexer.cell_pd_dtype,
     )
 
