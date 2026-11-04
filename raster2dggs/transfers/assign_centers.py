@@ -85,11 +85,11 @@ def window_block(
     raster: a window-local transform would carry the offset into the affine
     constants and could differ in the last bit.
     """
-    centre = transform * transform.translation(0.5, 0.5)
+    centre = transform @ transform.translation(0.5, 0.5)
     cols = np.arange(window.col_off, window.col_off + window.width)
     rows = np.arange(window.row_off, window.row_off + window.height)
-    xs, _ = centre * (cols, np.zeros(window.width))
-    _, ys = centre * (np.zeros(window.height), rows)
+    xs, _ = centre @ (cols, np.zeros(window.width))
+    _, ys = centre @ (np.zeros(window.height), rows)
     return xr.DataArray(
         values,
         dims=("band", "y", "x"),
