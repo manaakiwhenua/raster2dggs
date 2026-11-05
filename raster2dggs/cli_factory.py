@@ -215,7 +215,7 @@ def run_index(
     emit_nodata_value: float | None,
     use_mask: bool,
     compression: str,
-    processes: int,
+    jobs: int,
     agg,
     decimals,
     overwrite: bool,
@@ -242,7 +242,7 @@ def run_index(
     agg = common.create_aggfuncs(agg, decimals)
     kwargs = common.assemble_kwargs(
         compression,
-        processes,
+        jobs,
         agg,
         decimals,
         overwrite,
@@ -371,18 +371,20 @@ def make_command(spec: DGGS_Spec):
         help="Compression method to use for the output Parquet files. Options include 'snappy', 'gzip', 'brotli', 'lz4', 'zstd', etc. Use 'none' for no compression.",
     )
     @click.option(
+        "-j",
+        "--jobs",
         "-p",
         "--processes",
         "-t",
         "--threads",
-        "processes",
-        default=const.DEFAULTS["processes"],
+        "jobs",
+        default=const.DEFAULTS["jobs"],
         help=(
             "How many raster windows (Stage 1, worker processes) and parent "
             "cells (Stage 2, threads) are processed at once; memory scales "
             "with it in both stages. The default is the number of available "
             "cores minus one. 1 runs both stages inline, without a pool. "
-            "--threads is accepted as a deprecated alias."
+            "--processes and --threads are accepted as aliases."
         ),
     )
     @click.option(
@@ -585,7 +587,7 @@ def make_command(spec: DGGS_Spec):
         emit_nodata_value,
         use_mask,
         compression,
-        processes,
+        jobs,
         agg,
         decimals,
         overwrite,
@@ -669,7 +671,7 @@ def make_command(spec: DGGS_Spec):
             emit_nodata_value,
             use_mask,
             compression,
-            processes,
+            jobs,
             agg,
             decimals,
             overwrite,

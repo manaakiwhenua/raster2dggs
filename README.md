@@ -36,7 +36,7 @@ Contributions (particularly for additional DGGSs), suggestions, bug reports and 
   - [Windowed resampling](#windowed-resampling---sample)
 - [Compaction](#compaction---compact)
 - [Integer cell IDs](#integer-cell-ids---cell-id-uint64)
-- [Parallelism](#parallelism---processes)
+- [Parallelism](#parallelism---jobs)
 - [Remote inputs](#remote-inputs)
 - [Profiling a run](#profiling-a-run----profile)
 - [Visualising output](#visualising-output)
@@ -165,13 +165,15 @@ Options:
                                   'gzip', 'brotli', 'lz4', 'zstd', etc. Use
                                   'none' for no compression.  [default:
                                   snappy]
-  -p, -t, --processes, --threads INTEGER
-                                  Number of worker processes to use for
-                                  indexing. The default is determined
-                                  dynamically as the total number of available
-                                  cores, minus one. 1 runs inline, without a
-                                  worker pool. --threads is accepted as a
-                                  deprecated alias.
+  -j, -p, -t, --jobs, --processes, --threads INTEGER
+                                  How many raster windows (Stage 1, worker
+                                  processes) and parent cells (Stage 2,
+                                  threads) are processed at once; memory
+                                  scales with it in both stages. The default
+                                  is the number of available cores minus one.
+                                  1 runs both stages inline, without a pool.
+                                  --processes and --threads are accepted as
+                                  aliases.
   --point OUTPUT                  [Mutually exclusive with --overlay and
                                   --sample] Assign each pixel to the DGGS
                                   cell containing its centre (default).
@@ -498,21 +500,21 @@ raster2dggs h3 input.tif output/ -r 9 --cell-id uint64
 
 Useful where downstream tools take integer cell IDs directly — e.g. DuckDB's `h3` extension accepts them without a conversion step. String-only DGGS (rHEALPix, Geohash, Maidenhead) reject `--cell-id uint64`.
 
-## Parallelism — `--processes`
+## Parallelism — `--jobs`
 
 Each raster window is indexed in a separate worker process, `cpu_count - 1` of them by default:
 
 ```bash
-raster2dggs h3 input.tif output/ -r 11 --processes 4
+raster2dggs h3 input.tif output/ -r 11 --jobs 4
 ```
 
-The same count bounds Stage 2, the per-parent-cell aggregation and write: it runs on Dask's threaded scheduler with `--processes` threads, each holding one parent cell's pixels across every band. Memory scales with the count in both stages (each Stage 1 worker opens its own copy of the raster), so **lower `--processes` if a run is memory-constrained**; at fine resolutions on high-resolution imagery, Stage 2 is usually the stage that needs it. `--processes 1` runs both stages inline without a pool, which is faster for a raster of only a few windows and is the mode to use when debugging. `-t`/`--threads` is accepted as a deprecated alias.
+The same count bounds Stage 2, the per-parent-cell aggregation and write: it runs on Dask's threaded scheduler with `--jobs` threads, each holding one parent cell's pixels across every band. Memory scales with the count in both stages (each Stage 1 worker opens its own copy of the raster), so **lower `--jobs` if a run is memory-constrained**; at fine resolutions on high-resolution imagery, Stage 2 is usually the stage that needs it. `--jobs 1` runs both stages inline without a pool, which is faster for a raster of only a few windows and is the mode to use when debugging. `-p`/`--processes` and `-t`/`--threads` are accepted as aliases.
 
 ## Remote inputs
 
 A raster can be read over the network: a `/vsicurl/`, `/vsis3/` or `http(s)://` path, or a local VRT whose sources are. For such inputs raster2dggs sets GDAL's HTTP retry (`GDAL_HTTP_MAX_RETRY=5`, `GDAL_HTTP_RETRY_DELAY=2`) for any of those options not already in the environment, and re-runs a window whose read fails, three more times with a backoff of 2, 4 and 8 seconds, before giving up. The two cover different failures: GDAL retries HTTP error codes and dropped connections, while the window retry catches a range request answered with an empty body, which GDAL reports as a read error rather than an HTTP one. A window that still fails is reported with its pixel offset and size.
 
-Remote reads share one link, so a large `--processes` can be slower than a small one: see [Parallelism](#parallelism---processes).
+Remote reads share one link, so a large `--jobs` can be slower than a small one: see [Parallelism](#parallelism---jobs).
 
 ## Profiling a run — `--profile`
 
@@ -527,7 +529,7 @@ Profile
   bands: 1
   block_shape: 256x256
   internally_tiled: True
-  processes: 7
+  jobs: 7
   raster_size: 4977x9661
   windows: 760
   pixels_read: 49,806,197

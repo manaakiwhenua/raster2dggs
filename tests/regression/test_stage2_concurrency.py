@@ -1,10 +1,10 @@
 """
---processes bounds Stage 2 as well as Stage 1.
+--jobs bounds Stage 2 as well as Stage 1.
 
 Stage 2 is a Dask compute on the threaded scheduler, which sizes its pool to
 the machine's CPU count unless told otherwise, and each thread holds one
 parent cell's working set. address_boundary_issues runs the compute under a
-Dask configuration of --processes threads, or the synchronous scheduler for
+Dask configuration of --jobs threads, or the synchronous scheduler for
 one, so the one option bounds concurrency, and memory, in both stages.
 
 The configuration is read where it takes effect: inside _write_output, which
@@ -66,7 +66,7 @@ def _run(raster, out, processes):
             str(out),
             "-r",
             "9",
-            "--processes",
+            "--jobs",
             str(processes),
             "--overwrite",
         ],

@@ -296,11 +296,11 @@ class Profiler:
                 f"  Stage 1 worker stall: {100 * stalled / worker_wall:.1f}% "
                 f"({stalled:.3f}s of {worker_wall:.3f}s worker time blocked)"
             )
-        workers = context.get("processes")
+        workers = context.get("jobs")
         if isinstance(workers, int) and workers > 1 and worker_cpu / stage1_wall < 1.5:
             lines.append(
                 f"  ^ {workers} workers are not paying for themselves here; "
-                f"compare against --processes 1"
+                f"compare against --jobs 1"
             )
         return lines
 

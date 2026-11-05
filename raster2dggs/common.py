@@ -353,7 +353,7 @@ def validate_config(
 
 def assemble_kwargs(
     compression: str,
-    processes: int,
+    jobs: int,
     aggfuncs: list[tuple[str, str | Callable]],
     decimals: int,
     overwrite: bool,
@@ -373,7 +373,7 @@ def assemble_kwargs(
 ) -> dict:
     return {
         "compression": compression,
-        "processes": processes,
+        "jobs": jobs,
         "aggfuncs": aggfuncs,
         "decimals": decimals,
         "overwrite": overwrite,
@@ -788,17 +788,17 @@ def _cells_frame_to_string(
     return pdf
 
 
-def _stage2_scheduler(processes: int) -> dict:
-    """Dask configuration that bounds Stage 2 by the same count as Stage 1.
+def _stage2_scheduler(jobs: int) -> dict:
+    """Dask configuration that bounds Stage 2 by --jobs, as Stage 1 is.
 
     Stage 2 runs on Dask's threaded scheduler, whose pool is otherwise sized
     to the machine's CPU count, and each thread holds one partition's working
     set (a parent cell's pixels across every band), so memory scales with the
-    thread count. One process runs synchronously, as Stage 1 runs inline.
+    thread count. One job runs synchronously, as Stage 1 runs inline.
     """
-    if processes <= 1:
+    if jobs <= 1:
         return {"scheduler": "synchronous"}
-    return {"scheduler": "threads", "num_workers": processes}
+    return {"scheduler": "threads", "num_workers": jobs}
 
 
 def address_boundary_issues(
@@ -871,11 +871,11 @@ def address_boundary_issues(
         cell_dtype=indexer.cell_pd_dtype,
     )
 
-    processes = max(1, int(kwargs.get("processes", const.DEFAULTS["processes"])))
+    jobs = max(1, int(kwargs.get("jobs", const.DEFAULTS["jobs"])))
     with (
         PROFILER.phase("stage2.total"),
         TqdmCallback(desc=tqdm_label),
-        dask.config.set(_stage2_scheduler(processes)),
+        dask.config.set(_stage2_scheduler(jobs)),
     ):
         if transfer == const.Transfer.SAMPLE or transfer in const.OVERLAY_TRANSFER_KEYS:
             mp_func = indexer.parent_groupby_nn
@@ -1444,7 +1444,7 @@ def initial_index(
                     "block_shape", f"{src.block_shapes[0][1]}x{src.block_shapes[0][0]}"
                 )
                 PROFILER.note("internally_tiled", bool(src.profile.get("tiled", False)))
-                PROFILER.note("processes", kwargs["processes"])
+                PROFILER.note("jobs", kwargs["jobs"])
 
                 selected_labels = tuple([labels_by_index[i] for i in selected_indices])
                 kwargs["source_pixel_dtypes"] = {
@@ -1453,7 +1453,7 @@ def initial_index(
                         selected_indices, selected_labels, strict=True
                     )
                 }
-                processes = max(1, int(kwargs["processes"]))
+                processes = max(1, int(kwargs["jobs"]))
                 cfg = {
                     "raster_input": str(raster_input),
                     "dggs": dggs,
