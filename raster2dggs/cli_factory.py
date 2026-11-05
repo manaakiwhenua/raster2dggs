@@ -378,10 +378,11 @@ def make_command(spec: DGGS_Spec):
         "processes",
         default=const.DEFAULTS["processes"],
         help=(
-            "Number of worker processes to use for indexing. The default is "
-            "determined dynamically as the total number of available cores, "
-            "minus one. 1 runs inline, without a worker pool. --threads is "
-            "accepted as a deprecated alias."
+            "How many raster windows (Stage 1, worker processes) and parent "
+            "cells (Stage 2, threads) are processed at once; memory scales "
+            "with it in both stages. The default is the number of available "
+            "cores minus one. 1 runs both stages inline, without a pool. "
+            "--threads is accepted as a deprecated alias."
         ),
     )
     @click.option(

@@ -788,6 +788,19 @@ def _cells_frame_to_string(
     return pdf
 
 
+def _stage2_scheduler(processes: int) -> dict:
+    """Dask configuration that bounds Stage 2 by the same count as Stage 1.
+
+    Stage 2 runs on Dask's threaded scheduler, whose pool is otherwise sized
+    to the machine's CPU count, and each thread holds one partition's working
+    set (a parent cell's pixels across every band), so memory scales with the
+    thread count. One process runs synchronously, as Stage 1 runs inline.
+    """
+    if processes <= 1:
+        return {"scheduler": "synchronous"}
+    return {"scheduler": "threads", "num_workers": processes}
+
+
 def address_boundary_issues(
     indexer: IRasterIndexer,
     pq_input: tempfile.TemporaryDirectory,
@@ -858,7 +871,12 @@ def address_boundary_issues(
         cell_dtype=indexer.cell_pd_dtype,
     )
 
-    with PROFILER.phase("stage2.total"), TqdmCallback(desc=tqdm_label):
+    processes = max(1, int(kwargs.get("processes", const.DEFAULTS["processes"])))
+    with (
+        PROFILER.phase("stage2.total"),
+        TqdmCallback(desc=tqdm_label),
+        dask.config.set(_stage2_scheduler(processes)),
+    ):
         if transfer == const.Transfer.SAMPLE or transfer in const.OVERLAY_TRANSFER_KEYS:
             mp_func = indexer.parent_groupby_nn
             mp_args = (resolution, parent_res, decimals)

@@ -506,7 +506,7 @@ Each raster window is indexed in a separate worker process, `cpu_count - 1` of t
 raster2dggs h3 input.tif output/ -r 11 --processes 4
 ```
 
-Memory scales with the worker count (each opens its own copy of the raster), so **lower `--processes` if a run is memory-constrained**. `--processes 1` runs inline without a pool, which is faster for a raster of only a few windows and is the mode to use when debugging. `-t`/`--threads` is accepted as a deprecated alias.
+The same count bounds Stage 2, the per-parent-cell aggregation and write: it runs on Dask's threaded scheduler with `--processes` threads, each holding one parent cell's pixels across every band. Memory scales with the count in both stages (each Stage 1 worker opens its own copy of the raster), so **lower `--processes` if a run is memory-constrained**; at fine resolutions on high-resolution imagery, Stage 2 is usually the stage that needs it. `--processes 1` runs both stages inline without a pool, which is faster for a raster of only a few windows and is the mode to use when debugging. `-t`/`--threads` is accepted as a deprecated alias.
 
 ## Remote inputs
 
