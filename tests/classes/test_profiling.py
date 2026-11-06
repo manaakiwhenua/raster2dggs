@@ -168,7 +168,7 @@ class TestParallelismIsCPUBased:
 
     Deriving it from summed worker *wall* time makes it tend towards the worker
     count whenever workers block, so it reads ~7x on runs that are slower than
-    --processes 1.
+    --jobs 1.
 
     test_blocked_workers_are_not_reported_as_parallelism is the one that catches
     that directly: substituting worker wall time back into the formula fails it
@@ -233,7 +233,7 @@ class TestParallelismIsCPUBased:
     def test_poor_parallelism_is_called_out_when_workers_were_requested(self):
         p = Profiler()
         p.reset(enabled=True)
-        p.note("processes", 7)
+        p.note("jobs", 7)
         with p.phase("stage1.wall"):
             with p.phase("stage1.window_total"):
                 time.sleep(0.05)
@@ -245,7 +245,7 @@ class TestParallelismIsCPUBased:
     def test_no_warning_when_a_single_worker_was_requested(self):
         p = Profiler()
         p.reset(enabled=True)
-        p.note("processes", 1)
+        p.note("jobs", 1)
         with p.phase("stage1.wall"):
             with p.phase("stage1.window_total"):
                 time.sleep(0.05)

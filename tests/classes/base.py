@@ -56,7 +56,9 @@ class TestRunthrough(TestCase):
         than the indexing it would parallelise.
         """
         args = [dggs, str(raster), str(output), "-r", str(resolution), *extra_args]
-        if not {"-p", "--processes", "-t", "--threads"}.intersection(extra_args):
+        if not {"-j", "--jobs", "-p", "--processes", "-t", "--threads"}.intersection(
+            extra_args
+        ):
             args += ["--processes", "1"]
         if output.exists():
             clear_folder(output)

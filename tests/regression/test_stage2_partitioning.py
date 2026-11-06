@@ -110,7 +110,7 @@ def test_each_cell_is_aggregated_once_over_all_its_files(stage1_store, tmp_path)
     output = tmp_path / "out"
     kwargs = common.assemble_kwargs(
         compression="snappy",
-        processes=1,
+        jobs=1,
         aggfuncs=common.create_aggfuncs(("mean",)),
         decimals=None,
         overwrite=True,

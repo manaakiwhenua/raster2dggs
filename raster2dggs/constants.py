@@ -81,7 +81,7 @@ DEFAULT_NAME: str = "value"
 
 DEFAULTS = {
     "compression": "snappy",
-    "processes": (multiprocessing.cpu_count() - 1),
+    "jobs": (multiprocessing.cpu_count() - 1),
     "aggfunc": "mean",
     "decimals": 1,
     "geo": "none",
