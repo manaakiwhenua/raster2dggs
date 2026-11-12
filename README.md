@@ -80,19 +80,21 @@ Commands:
   geohash     Index raster data into the Geohash DGGS
   h3          Index raster data into the H3 DGGS
   healpix     Index raster data into the HEALPix DGGS
+  isea3h      Index raster data into the ISEA3H DGGS
   isea4r      Index raster data into the ISEA4R DGGS
   isea7h      Index raster data into the ISEA7H DGGS
   isea9r      Index raster data into the ISEA9R DGGS
+  ivea3h      Index raster data into the IVEA3H DGGS
   ivea4r      Index raster data into the IVEA4R DGGS
   ivea7h      Index raster data into the IVEA7H DGGS
   ivea9r      Index raster data into the IVEA9R DGGS
   maidenhead  Index raster data into the Maidenhead DGGS
+  rhealpix    Index raster data into the rHEALPix DGGS
   rhp         Index raster data into the rHEALPix DGGS
   rtea4r      Index raster data into the RTEA4R DGGS
   rtea7h      Index raster data into the RTEA7H DGGS
   rtea9r      Index raster data into the RTEA9R DGGS
   s2          Index raster data into the S2 DGGS
-
 ```
 
 ```
@@ -135,13 +137,12 @@ Options:
                                   -b B02 -b B07 -b B12.
   -n, --nodata [omit|emit]        'omit' excludes nodata cells from output
                                   (default). 'emit' includes them, writing the
-                                  source raster nodata value (or
-                                  --nodata-fill if set). Note: non-NaN
-                                  emitted values participate in cell
-                                  aggregation (see -a/--agg); if this is
-                                  undesired, ensure your source nodata is NaN
-                                  or override with --nodata-fill.
-                                  [default: omit]
+                                  source raster nodata value (or --nodata-fill
+                                  if set). Note: non-NaN emitted values
+                                  participate in cell aggregation (see
+                                  -a/--agg); if this is undesired, ensure your
+                                  source nodata is NaN or override with
+                                  --nodata-fill.  [default: omit]
   --nodata-fill NUMBER            Override the value written for nodata cells
                                   when --nodata=emit. If omitted, the source
                                   raster nodata value is used (NaN if none is
@@ -152,11 +153,11 @@ Options:
                                   alpha band, or an internal/sidecar .msk mask
                                   band) as nodata, in addition to any declared
                                   nodata value. Masked pixels are treated
-                                  exactly like nodata pixels by --nodata
-                                  /--nodata-fill, aggregation and coverage
-                                  accounting. An alpha band that is not
-                                  explicitly selected with -b is consumed as
-                                  the mask and not emitted as a data band.
+                                  exactly like nodata pixels by
+                                  --nodata/--nodata-fill, aggregation and
+                                  coverage accounting. An alpha band that is
+                                  not explicitly selected with -b is consumed
+                                  as the mask and not emitted as a data band.
                                   --no-mask ignores masks entirely: masked
                                   pixels are read as ordinary data.  [default:
                                   mask]
@@ -175,24 +176,23 @@ Options:
                                   --processes and --threads are accepted as
                                   aliases.
   --point OUTPUT                  [Mutually exclusive with --overlay and
-                                  --sample] Assign each pixel to the DGGS
-                                  cell containing its centre (default).
-                                  OUTPUT: 'value' (scalar per cell, default),
-                                  'list' (sorted list of all contributing
-                                  pixel values), 'histogram' (value-count
-                                  struct).
+                                  --sample] Assign each pixel to the DGGS cell
+                                  containing its centre (default). OUTPUT:
+                                  'value' (scalar per cell, default), 'list'
+                                  (sorted list of all contributing pixel
+                                  values), 'histogram' (value-count struct).
   --overlay METHOD                [Mutually exclusive with --point and
                                   --sample] Area-based polygon intersection.
                                   METHOD: 'weighted' (area-weighted mean),
                                   'mode' (majority class by overlap area),
-                                  'mass-preserve' (area-weighted sum; conserves
-                                  total — use when pixel value is a total
-                                  count/mass), 'density-preserve' (integrates
-                                  density × pixel area; use when pixel value
-                                  is a per-area rate), 'fractions' (per-class
-                                  area fractions → struct), 'list' (all
-                                  overlapping pixel values as a sorted list),
-                                  'histogram' (value-count histogram of
+                                  'mass-preserve' (area-weighted sum;
+                                  conserves total — use when pixel value is a
+                                  total count/mass), 'density-preserve'
+                                  (integrates density × pixel area; use when
+                                  pixel value is a per-area rate), 'fractions'
+                                  (per-class area fractions → struct), 'list'
+                                  (all overlapping pixel values as a sorted
+                                  list), 'histogram' (value-count histogram of
                                   overlapping pixels).
   --sample INTERP                 [Mutually exclusive with --point and
                                   --overlay] Sample the raster at each DGGS
@@ -229,22 +229,22 @@ Options:
                                   --point/--overlay histogram. Bins are
                                   [origin + k*width, origin + (k+1)*width);
                                   every finite value falls in a bin (nothing
-                                  is dropped). Mutually exclusive with
-                                  --hist-bins.
+                                  is dropped). Mutually exclusive with --hist-
+                                  bins.
   --hist-origin FLOAT             Anchor for --hist-width bins (a bin edge is
                                   placed at this value).  [default: 0.0]
   --hist-weight [count|area]      Histogram weighting: 'count' (number of
                                   contributing pixels), 'area' (each pixel
                                   weighted by its overlap area with the cell,
-                                  in m², geodesic for geographic CRS). 'area'
+                                  in m^2; geodesic for geographic CRS). 'area'
                                   requires --overlay histogram.  [default:
                                   count]
   --hist-normalize [none|cell-area|valid-overlap]
                                   Histogram normalization: 'none' (raw
                                   counts/weights), 'cell-area' (divide by the
-                                  DGGS cell's area in m²), 'valid-overlap'
+                                  DGGS cell's area in m^2), 'valid-overlap'
                                   (divide by the total weight of all valid
-                                  contributing pixels, so bins sum to ≤ 1).
+                                  contributing pixels, so bins sum to <= 1).
                                   Non-integer results make counts float64.
                                   [default: none]
   -d, --decimals INTEGER|none     Decimal places to round output values. 0 =
@@ -558,9 +558,9 @@ Profile
 Reading it:
 
 - **Indentation is nesting, not addition.** `read_block`, `dggs_index` and friends are measured *inside* `window_total`, which is itself measured inside `stage1.wall` — so those rows are a decomposition of their parent, not terms to be summed. Percentages are all of total wall clock.
-- **`seconds` is elapsed time; `cpu` is time actually spent computing.** Both are summed across every worker that ran the phase, so with `--processes 7` they can exceed the wall clock several times over. A phase where `cpu` is far below `seconds` was mostly *waiting* — on IO, or on a lock. The two dispatcher rows are the exception: `stage1.wall` and `stage2.total` are measured in the parent while the work happens elsewhere, so their own `cpu` is near zero by construction.
+- **`seconds` is elapsed time; `cpu` is time actually spent computing.** Both are summed across every worker that ran the phase, so with `--jobs 7` they can exceed the wall clock several times over. A phase where `cpu` is far below `seconds` was mostly *waiting* — on IO, or on a lock. The two dispatcher rows are the exception: `stage1.wall` and `stage2.total` are measured in the parent while the work happens elsewhere, so their own `cpu` is near zero by construction.
 - **`Stage 1 parallelism`** is worker CPU per second of Stage 1 wall clock, i.e. how many cores' worth of work the pool actually achieved. It is deliberately *not* derived from summed worker elapsed time, because a blocked worker accumulates elapsed time just as a busy one does — that ratio rises towards the worker count exactly when the workers are achieving nothing. `Stage 1 worker stall` is the share of worker time spent blocked rather than computing.
-- **More workers do not always pay.** If parallelism is well below 1.5x, the report says so. Starting a worker pool costs about a second, so on a raster of only a few windows `--processes 1` is genuinely faster — worth measuring both ways on your own data.
+- **More workers do not always pay.** If parallelism is well below 1.5x, the report says so. Starting a worker pool costs about a second, so on a raster of only a few windows `--jobs 1` is genuinely faster — worth measuring both ways on your own data.
 - **`ms/call` with `windows`** is what makes an unexpectedly slow run legible. A large window count with a small per-window cost points at the *input's* block layout rather than at the indexing work — `block_shape` and `windows` together show how the raster was cut up (see the [performance note](#performance-note)).
 - Profiling is off by default and the instrumentation is a single branch when disabled, so there is no reason to avoid it in normal use. Worker processes send their measurements back to be summed into the report. The `cpu` column needs a per-thread CPU clock (Linux, Windows); where the platform has none, it and the two figures derived from it are omitted.
 
@@ -775,11 +775,11 @@ For partial backend support you can consider `poetry install --with dev -E h3 -E
 
 The README figures are generated by [docs/imgs/generate_figures.py](docs/imgs/generate_figures.py), which fetches its source rasters from their public homes and runs the CLI — rerun it (with `matplotlib` installed and the `gdal_translate` binary on `PATH`) whenever output or behaviour they depict changes. The output-schema figure is the exception: it needs a continuous field with known units and a controlled spread, so it synthesises one with this repo's own neutral landscape model ([make_samples.py](make_samples.py)) and classifies the same field, seeded so the figure is reproducible.
 
-#### Code formatting
+#### Code formatting and linting
 
 [![Code style: black](https://img.shields.io/badge/code%20style-black-000000.svg)](https://github.com/psf/black)
 
-Please run `black .` before committing.
+Please run `black .` and `ruff check .` before committing. Both are enforced in CI. See [CONTRIBUTING.md](CONTRIBUTING.md) for how to report problems and contribute changes.
 
 #### Tests
 
