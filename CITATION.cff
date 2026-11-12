@@ -9,6 +9,7 @@ authors:
     given-names: Richard
   - family-names: De Maio
     given-names: Nicoletta
+doi: 10.5281/zenodo.24149873
 repository-code: https://github.com/manaakiwhenua/raster2dggs
 url: https://github.com/manaakiwhenua/raster2dggs
 version: "0.19.2"

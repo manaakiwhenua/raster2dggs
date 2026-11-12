@@ -1,6 +1,6 @@
 # raster2dggs
 
-[![pypi](https://img.shields.io/pypi/v/raster2dggs?label=raster2dggs)](https://pypi.org/project/raster2dggs/)
+[![pypi](https://img.shields.io/pypi/v/raster2dggs?label=raster2dggs)](https://pypi.org/project/raster2dggs/) [![DOI](https://zenodo.org/badge/608857264.svg)](https://doi.org/10.5281/zenodo.24149873)
 
 Python-based CLI tool to index raster files to DGGS in parallel, writing out to Parquet.
 
