@@ -578,6 +578,8 @@ tree /home/user/example.pq
     └── part.0.parquet
 ```
 
+Within each file, rows are sorted by cell ID and the cell ID column is written with Parquet's delta encoding (`DELTA_BINARY_PACKED` for `--cell-id uint64`, `DELTA_BYTE_ARRAY` for strings). Sorted cell IDs differ from their neighbours by small, regular increments, so the identifier column, which would otherwise dominate a file, costs a few bits per row. These are standard Parquet (v2) encodings, read by pyarrow, DuckDB, Polars, Spark, GDAL and R's arrow among others.
+
 Output can also be written to GeoParquet (v1.1.0) by including the `-g/--geo` parameter, which accepts:
 - `polygon` for cells represented as boundary polygons
 - `point` for cells represented as centre points

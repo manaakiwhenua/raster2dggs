@@ -2,6 +2,7 @@ import atexit
 import dataclasses
 import errno
 import gc
+import io
 import json
 import logging
 import multiprocessing
@@ -393,6 +394,37 @@ def assemble_kwargs(
     }
 
 
+def _sort_by_cell(pdf: pd.DataFrame) -> pd.DataFrame:
+    """Rows in cell ID order, so neighbouring cells are adjacent on disk."""
+    return pdf.sort_index(kind="stable")
+
+
+def _cell_column_encoding(schema: pa.Schema, index_col: str) -> dict:
+    """pyarrow writer options that delta-encode the cell ID column.
+
+    Sorted cell IDs step by small regular increments (or share long prefixes,
+    as strings), which DELTA_BINARY_PACKED / DELTA_BYTE_ARRAY store in a few
+    bits each; the default encoding stores them whole. Naming an encoding
+    requires dictionary encoding to be listed per column, so every other leaf
+    column is named, keeping the default for all of them.
+    """
+    buf = io.BytesIO()
+    pq.write_table(schema.empty_table(), buf)
+    leaves = pq.ParquetFile(buf).schema
+    others = [
+        leaves.column(i).path
+        for i in range(len(leaves))
+        if leaves.column(i).path != index_col
+    ]
+    integer = pa.types.is_integer(schema.field(index_col).type)
+    return {
+        "use_dictionary": others,
+        "column_encoding": {
+            index_col: "DELTA_BINARY_PACKED" if integer else "DELTA_BYTE_ARRAY"
+        },
+    }
+
+
 def write_partition_as_geoparquet(
     pdf: pd.DataFrame,
     geom_func,
@@ -435,11 +467,8 @@ def write_partition_as_geoparquet(
     # Convert to WKB bytes (canonical encoding)
     pdf["geometry"] = shapely.to_wkb(geoms, hex=False)
 
-    table = pa.Table.from_pandas(
-        pdf,
-        schema=schema.append(pa.field("geometry", pa.binary())),
-        preserve_index=True,
-    )
+    schema = schema.append(pa.field("geometry", pa.binary()))
+    table = pa.Table.from_pandas(pdf, schema=schema, preserve_index=True)
 
     # GeoParquet 1.1.0 metadata
     crs_meta = pyproj.CRS.from_epsg(4326).to_json_dict()
@@ -466,6 +495,7 @@ def write_partition_as_geoparquet(
         basename_template="part.{i}.parquet",
         existing_data_behavior="delete_matching",
         use_threads=True,
+        **_cell_column_encoding(schema, pdf.index.name),
     )
 
 
@@ -707,6 +737,7 @@ def _write_output(
             append=False,
             compression=compression,
             schema=write_schema,
+            **_cell_column_encoding(write_schema, ddf.index.name),
         )
 
 
@@ -899,6 +930,10 @@ def address_boundary_issues(
             ddf = ddf.map_partitions(
                 indexer.compaction, resolution, parent_res, meta=out_meta
             )
+        # Cell ID order within each partition: the delta-encoded ID column and
+        # the compression of every other column both depend on neighbours
+        # being adjacent, and compaction's output order is arbitrary.
+        ddf = ddf.map_partitions(_sort_by_cell, meta=out_meta)
 
         if emit_string and not kwargs["geo"]:
             # The GeoParquet path converts inside its writer instead, after
