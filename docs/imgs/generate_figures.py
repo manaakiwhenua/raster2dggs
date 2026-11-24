@@ -194,14 +194,14 @@ def index_all(w):
     jobs = {
         f"hero_h3_{r_lo}": lambda o: r2d("h3", hero, o, r_lo, *rgb, "-g", "polygon"),
         f"hero_h3_{r_hi}": lambda o: r2d(
-            "h3", hero, o, r_hi, *rgb, "-g", "polygon", "-c", "brotli"
+            "h3", hero, o, r_hi, *rgb, "-g", "polygon", "-c", "zstd"
         ),
-        "disk_string": lambda o: r2d("h3", hero, o, r_hi, *rgb, "-c", "brotli"),
+        "disk_string": lambda o: r2d("h3", hero, o, r_hi, *rgb, "-c", "zstd"),
         "disk_u64": lambda o: r2d(
-            "h3", hero, o, r_hi, *rgb, "--cell-id", "uint64", "-c", "brotli"
+            "h3", hero, o, r_hi, *rgb, "--cell-id", "uint64", "-c", "zstd"
         ),
         "disk_geo_point": lambda o: r2d(
-            "h3", hero, o, r_hi, *rgb, "-g", "point", "-c", "brotli"
+            "h3", hero, o, r_hi, *rgb, "-g", "point", "-c", "zstd"
         ),
         "samp_point": lambda o: r2d(
             "h3", edge, o, 12, *rgb, "--point", "value", "-g", "polygon"
@@ -510,7 +510,7 @@ def fig_hero(w, style):
     fig.text(
         0.52,
         0.228,
-        "On disk  ·  hive-partitioned by parent cell  ·  -c brotli",
+        "On disk  ·  hive-partitioned by parent cell  ·  -c zstd",
         size=12,
         weight="bold",
         va="top",
