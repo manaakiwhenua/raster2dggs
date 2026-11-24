@@ -54,15 +54,64 @@ We built on these tools because the need was not for more grid operations but fo
 
 **A command-line tool that writes Parquet.** Target inputs do not fit in memory, the consumers of the output do not use a single language, and conversions typically run as data transformation steps in pipelines on shared compute. A CLI whose product is a file serves all three requirements.
 
-**Common output format for raster and vector.** A raster is a grid of values and a vector layer is a set of shapes with attributes, but on a DGGS both reduce to rows of cell identifier and attributes (\autoref{fig:raster}, \autoref{fig:vector}). We chose Parquet [@parquet] to hold that table because it is columnar. By Tobler's first law of geography, near things are more alike than distant ones [@tobler1970], so cells stored near one another carry similar or identical values, and the identifiers of neighbouring cells share most of their digits. Stored column by column, such data encodes and compresses very well, giving small files that analytical engines may read selectively (spatial partitions). A join between a raster-derived and a vector-derived dataset becomes trivial.
+**Common output format for raster and vector.** A raster is a grid of values and a vector layer is a set of shapes with attributes, but on a DGGS both reduce to rows of cell identifier and attributes (\autoref{fig:indexing}, \autoref{tbl:raster}, \autoref{tbl:vector}). We chose Parquet [@parquet] to hold that table because it is columnar. By Tobler's first law of geography, near things are more alike than distant ones [@tobler1970], so cells stored near one another carry similar or identical values, and the identifiers of neighbouring cells share most of their digits. A join between a raster-derived and a vector-derived dataset becomes trivial. Stored column by column, such data encodes and compresses very well, giving small files (\autoref{fig:size}) that analytical engines may read selectively (spatial partitions). Both tools exploit this deliberately: each partition is written sorted by cell identifier, and the identifier column is delta-encoded using Parquet's standard encodings, so consecutive identifiers, which differ by small, regular increments as integers or share a long prefix as strings, cost a few bits each. The identifier column would otherwise dominate the file; sorted and delta-encoded it almost vanishes, and the output of a categorical raster input can be smaller than the compressed raster itself.
 
-**Spatially partitioned by parent cell.** Output is hive-partitioned on each cell's ancestor at a coarser resolution, which keeps nearby cells together on disk. Two datasets indexed with the same parent resolution can be joined one partition at a time. Cell geometry is optional (GeoParquet [@geoparquet]) because it can always be recomputed from the identifier; and compaction can replace complete sets of sibling cells with their parent losslessly.
+![Raster and vector inputs become cells. Top: a window of LINZ 0.3 m aerial imagery (CC BY 4.0) indexed by `raster2dggs` to H3 at resolutions 12 and 13, each cell coloured by the mean of its pixels' band values. Bottom: LCDB v5.0 land-cover polygons for Rangatira, Chatham Islands (CC BY 4.0, LRIS) indexed by `vector2dggs` to H3 at resolutions 10 and 12, each cell carrying its feature's class. A finer resolution follows the source more closely and costs proportionally more rows.\label{fig:indexing}](figures/indexing-example.png){ width=100% }
 
-**A single interface for all grid systems.** Each grid is described by a small specification from which its subcommand is generated, and implemented by an indexer class behind a common interface, loaded lazily from an optional dependency. The value is in the abstraction: users do not need to learn each DGGS API (\autoref{fig:raster}, middle row). Support for a new grid system is achieved with a new indexer, by subclassing a common base class.
+**Spatially partitioned by parent cell.** Output is hive-partitioned on each cell's ancestor at a coarser resolution, which keeps nearby cells together on disk. Two datasets indexed with the same parent resolution can be joined one partition at a time. Cell geometry is optional (GeoParquet [@geoparquet]) because it can always be recomputed from the identifier; and compaction can replace complete sets of sibling cells with their parent losslessly. The resolution 12 raster output in \autoref{fig:indexing} is laid out on disk by its resolution 6 ancestors:
 
-![`raster2dggs` applied to LINZ 0.3 m aerial imagery (CC BY 4.0): the same window indexed to H3 at two resolutions and to four other grids by changing one argument. The output table is shown in preview, and the disk size of the partitioned Parquet output.\label{fig:raster}](figures/raster-indexing-example.png){ width=100% }
+```
+out/
+  h3_06=86bb2b60fffffff/part.0.parquet
+  h3_06=86bb2b657ffffff/part.1.parquet
+  h3_06=86bb2b677ffffff/part.2.parquet
+```
 
-![Land-cover polygons (LCDB v5.0, CC BY, LRIS) indexed to H3 cells by `vector2dggs`, giving the same form of table and partitioned output as \autoref{fig:raster}.\label{fig:vector}](figures/vector-indexing-example.png){ width=80% }
+| `h3_12` | `h3_06` | `band_1` | `band_2` | `band_3` |
+|--------------------|--------------------|---------|---------|---------|
+| `8cbb2b609b693ff` | `86bb2b60fffffff` | 87 | 111 | 88 |
+| `8cbb2b609b699ff` | `86bb2b60fffffff` | 91 | 116 | 92 |
+| `8cbb2b609b69bff` | `86bb2b60fffffff` | 85 | 109 | 88 |
+| `8cbb2b609b6d1ff` | `86bb2b60fffffff` | 76 | 101 | 85 |
+| `8cbb2b609b6d3ff` | `86bb2b60fffffff` | 93 | 116 | 93 |
+
+: The first rows of `raster2dggs` output for the resolution 12 imagery in \autoref{fig:indexing} (4,901 rows): one row per cell, holding the cell identifier, the partition key (the cell's ancestor six levels coarser) and the mean of each band over the cell's pixels.\label{tbl:raster}
+
+| `h3_12` | `h3_06` | `band_1` | `band_2` | `band_3` |
+|------------------|------------------|----------------|----------------|----------------|
+| `8cbb2b609b693ff` | `86bb2b60fffffff` | {60, 117, 87} | {84, 140, 111} | {70, 112, 88} |
+| `8cbb2b609b699ff` | `86bb2b60fffffff` | {70, 130, 91} | {91, 152, 116} | {73, 120, 92} |
+| `8cbb2b609b69bff` | `86bb2b60fffffff` | {56, 127, 85} | {75, 146, 109} | {63, 127, 88} |
+| `8cbb2b609b6d1ff` | `86bb2b60fffffff` | {61, 89, 76} | {84, 115, 101} | {74, 96, 85} |
+| `8cbb2b609b6d3ff` | `86bb2b60fffffff` | {63, 142, 93} | {80, 158, 116} | {67, 145, 93} |
+
+: The same run with `-a min,max,mean`: each band becomes a struct column holding every requested aggregate, in order.\label{tbl:raster-agg}
+
+| `h3_12` | `h3_06` | `band_1` |
+|------------------|------------------|--------------------------------------------|
+| `8cd46b2f00901ff` | `86d46b2f7ffffff` | {classes: [10, 80], fractions: [0.746, 0.254]} |
+| `8cd46b2f00905ff` | `86d46b2f7ffffff` | {classes: [10, 30], fractions: [0.509, 0.491]} |
+| `8cd46b2f00907ff` | `86d46b2f7ffffff` | {classes: [10, 30, 80], fractions: [0.141, 0.107, 0.752]} |
+| `8cd46b2f00909ff` | `86d46b2f7ffffff` | {classes: [10, 80], fractions: [0.614, 0.386]} |
+| `8cd46b2f0090bff` | `86d46b2f7ffffff` | {classes: [10, 80], fractions: [0.003, 0.997]} |
+
+: ESA WorldCover 10 m land cover over the same island as \autoref{fig:indexing}, indexed by `raster2dggs` with `--overlay fractions` (23,861 rows, of which the first five with more than one class are shown): each cell holds the classes it overlaps and the fraction of its area under each, using WorldCover's class codes.\label{tbl:raster-frac}
+
+| `h3_12` | `h3_06` | `LCDB_UID` | `Name_2018` |
+|--------------------|--------------------|------------------|----------------------|
+| `8cd46b2f00861ff` | `86d46b2f7ffffff` | lcdb3000001600 | Gravel or Rock |
+| `8cd46b2f00865ff` | `86d46b2f7ffffff` | lcdb3000001600 | Gravel or Rock |
+| `8cd46b2f00869ff` | `86d46b2f7ffffff` | lcdb3000001600 | Gravel or Rock |
+| `8cd46b2f0086dff` | `86d46b2f7ffffff` | lcdb3000001600 | Gravel or Rock |
+| `8cd46b2f00901ff` | `86d46b2f7ffffff` | lcdb3000001600 | Gravel or Rock |
+
+: The first rows of `vector2dggs` output for the resolution 12 land-cover polygons in \autoref{fig:indexing} (8,428 rows): the identifier and attributes of the feature containing each cell.\label{tbl:vector}
+
+![Size on disk of three inputs and of their outputs under each encoding, on a logarithmic axis: the aerial imagery of \autoref{fig:indexing} (a 5-band GeoTIFF window), ESA WorldCover 10 m land cover over Rangatira (a single-band categorical GeoTIFF, indexed with `--overlay mode`) and the LCDB polygons of \autoref{fig:indexing} (a single-layer GeoPackage). All are indexed to S2 level 19, whose cells are about the area of H3 resolution 12, with native integer cell identifiers (`--cell-id uint64`) and partitioned at S2 level 10, so that only a few files are written and per-file overhead does not obscure the encodings compared. Each encoding is shown as written by default (solid) and compacted (pale). Parquet's columnar encoding is a fraction of the CSV equivalent and stronger compression shrinks it further. Compaction merges complete sets of sibling cells with identical values, so it cuts the categorical table to a tenth of its rows and the polygon table to a quarter, but leaves the imagery, whose sibling cells differ, unchanged. With sorted, delta-encoded identifiers a plain Parquet table is already a few kilobytes, mostly file overhead, so compaction's saving in bytes shows where geometry is stored; its saving in rows applies everywhere. Optional GeoParquet geometry costs the most, which is why it is off by default.\label{fig:size}](figures/output-size.png){ width=100% }
+
+**A single interface for all grid systems.** Each grid is described by a small specification from which its subcommand is generated, and implemented by an indexer class behind a common interface, loaded lazily from an optional dependency. The value is in the abstraction: users do not need to learn each DGGS API (\autoref{fig:grids}). Support for a new grid system is achieved with a new indexer, by subclassing a common base class.
+
+![One argument selects the grid. The same raster window (top, `raster2dggs`) and polygons (middle, `vector2dggs`) indexed to H3, rHEALPix, A5, S2 and Geohash at resolutions chosen to give cells of similar size; nothing else in either command changes. Bottom: the same vector output compacted, where complete sets of sibling cells belonging to one feature are replaced by their parent, so each grid's own hierarchy becomes visible. Geohash's 32-way hierarchy has no complete sibling set at this scale, so nothing merges.\label{fig:grids}](figures/grids-example.png){ width=100% }
 
 **Two packages.** Raster and vector conversion share the conventions above but little else: the dependency stacks differ, the algorithms differ, and separate packages can be released independently.
 

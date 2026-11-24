@@ -1,7 +1,7 @@
 ## Rebuilding the PDF
 
 ```bash
-cd ~/projects/dggs-joss-paper
+cd paper
 docker run --rm --volume "$PWD":/data --user $(id -u):$(id -g) \
     --env JOURNAL=joss openjournals/inara
 ```
