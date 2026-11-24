@@ -23,7 +23,6 @@ Rangatira (South East Island), the vector2dggs test fixture; ESA WorldCover
 """
 
 import argparse
-import io
 import os
 import shutil
 import subprocess
@@ -35,7 +34,6 @@ matplotlib.use("Agg")
 import geopandas as gpd
 import matplotlib.pyplot as plt
 import numpy as np
-import pyarrow as pa
 import pyarrow.parquet as pq
 import rasterio
 import shapely
@@ -418,39 +416,6 @@ def dir_kb(d):
     )
 
 
-def dir_kb_encoded(d, cell_col):
-    """Size of a Parquet store written sorted by cell ID with a delta-encoded ID column.
-
-    This is what manaakiwhenua/raster2dggs#134 and manaakiwhenua/vector2dggs#240
-    propose as the default write path (and it supersedes raster2dggs#133). Until
-    they land, the files are re-encoded here with pyarrow, keeping each file's
-    own compression codec, so the chart matches the paper's description.
-    """
-    total = 0
-    for part in sorted(p for p in os.listdir(d) if "=" in p):
-        files = sorted(f for f in os.listdir(f"{d}/{part}") if f.endswith(".parquet"))
-        t = pa.concat_tables([pq.read_table(f"{d}/{part}/{f}") for f in files])
-        codec = (
-            pq.ParquetFile(f"{d}/{part}/{files[0]}")
-            .metadata.row_group(0)
-            .column(0)
-            .compression.lower()
-        )
-        integer = pa.types.is_integer(t.schema.field(cell_col).type)
-        buf = io.BytesIO()
-        pq.write_table(
-            t.sort_by(cell_col),
-            buf,
-            compression="none" if codec == "uncompressed" else codec,
-            use_dictionary=[c for c in t.column_names if c != cell_col],
-            column_encoding={
-                cell_col: "DELTA_BINARY_PACKED" if integer else "DELTA_BYTE_ARRAY"
-            },
-        )
-        total += buf.tell()
-    return round(total / 1024)
-
-
 def legend(fig, y):
     fig.legend(
         handles=[Patch(fc=c, label=n) for n, c in LC_COLOURS.items()],
@@ -654,9 +619,7 @@ def fig_size(w):
                 "polygon": ("polygon", "polygon_co"),
             }
             for key, (plain, compacted) in pairs.items():
-                kb[key + co] = dir_kb_encoded(
-                    f"{w}/{runs}/{compacted if co else plain}", cell_col
-                )
+                kb[key + co] = dir_kb(f"{w}/{runs}/{compacted if co else plain}")
         sizes[tool] = kb
 
     def label(kb):
