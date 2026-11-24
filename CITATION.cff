@@ -12,6 +12,6 @@ authors:
 doi: 10.5281/zenodo.24149873
 repository-code: https://github.com/manaakiwhenua/raster2dggs
 url: https://github.com/manaakiwhenua/raster2dggs
-version: "0.19.2"
-date-released: "2026-11-12"
+version: "0.20.0"
+date-released: "2026-11-24"
 license: LGPL-3.0-or-later
