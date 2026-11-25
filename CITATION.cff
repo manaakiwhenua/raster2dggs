@@ -5,8 +5,12 @@ title: raster2dggs
 authors:
   - family-names: Ardo
     given-names: James
+    orcid: https://orcid.org/0009-0008-1201-9733
+    affiliation: Bioeconomy Science Institute
   - family-names: Law
     given-names: Richard
+    orcid: https://orcid.org/0000-0002-7400-2530
+    affiliation: Bioeconomy Science Institute
   - family-names: De Maio
     given-names: Nicoletta
 doi: 10.5281/zenodo.24149873
